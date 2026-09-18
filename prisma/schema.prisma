@@ -1,0 +1,716 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model certificado_calidad {
+  id_Certif_Calidad                                      Int                                  @id @default(autoincrement())
+  folio_Certificado                                      String                               @db.VarChar(50)
+  no_Certificado                                         String                               @db.VarChar(50)
+  lote_id                                                Int
+  cliente_id                                             Int?
+  solicitante_id                                         Int?
+  aprobado_Por_id                                        Int?
+  revisado_Por_id                                        Int?
+  fecha_Emision                                          DateTime                             @db.Date
+  estatus                                                certificado_calidad_estatus?         @default(EMITIDO)
+  especificacion_Min                                     Decimal?                             @db.Decimal(12, 4)
+  especificacion_Max                                     Decimal?                             @db.Decimal(12, 4)
+  fecha_Liberacion                                       DateTime?                            @db.Date
+  hora_Liberacion                                        DateTime?                            @db.Time(0)
+  estatus_Calidad                                        certificado_calidad_estatus_Calidad? @default(APROBADO)
+  observaciones_Calidad                                  String?                              @db.Text
+  personas_certificado_calidad_aprobado_Por_idTopersonas personas?                            @relation("certificado_calidad_aprobado_Por_idTopersonas", fields: [aprobado_Por_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_aprobado")
+  personas_certificado_calidad_cliente_idTopersonas      personas?                            @relation("certificado_calidad_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_cliente")
+  lotes_produccion                                       lotes_produccion                     @relation(fields: [lote_id], references: [id_Lote_Produccion], onUpdate: Restrict, map: "fk_cert_lote")
+  personas_certificado_calidad_revisado_Por_idTopersonas personas?                            @relation("certificado_calidad_revisado_Por_idTopersonas", fields: [revisado_Por_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_revisado")
+  personas_certificado_calidad_solicitante_idTopersonas  personas?                            @relation("certificado_calidad_solicitante_idTopersonas", fields: [solicitante_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_solicitante")
+
+  @@index([aprobado_Por_id], map: "fk_cert_aprobado")
+  @@index([cliente_id], map: "fk_cert_cliente")
+  @@index([lote_id], map: "fk_cert_lote")
+  @@index([revisado_Por_id], map: "fk_cert_revisado")
+  @@index([solicitante_id], map: "fk_cert_solicitante")
+}
+
+model control_residuos {
+  id_Control_Residuos   Int                 @id @default(autoincrement())
+  no_Manifiesto         String              @db.VarChar(50)
+  nombre_Residuo        String              @db.VarChar(100)
+  empresa_Generadora_id Int?
+  area_Generadora       String?             @db.VarChar(50)
+  cantidad              Decimal             @db.Decimal(12, 4)
+  UM                    control_residuos_UM @default(Kg)
+  fecha_Salida          DateTime            @db.Date
+  factor_E32            String?             @db.VarChar(50)
+  costo_Gas_CMB         Decimal?            @db.Decimal(12, 2)
+  personas              personas?           @relation(fields: [empresa_Generadora_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_res_empresa")
+
+  @@index([empresa_Generadora_id], map: "fk_res_empresa")
+}
+
+model documentos_tramite {
+  id               Int              @id @default(autoincrement())
+  tramite_id       Int
+  nombre_original  String           @db.VarChar(255)
+  file_path        String           @db.Text
+  tipo_mime        String?          @db.VarChar(100)
+  tamano_bytes     BigInt?
+  creado_en        DateTime         @default(now()) @db.DateTime(0)
+  tramites_legales tramites_legales @relation(fields: [tramite_id], references: [id], onDelete: Cascade, map: "fk_documentos_tramite_rel")
+
+  @@index([tramite_id], map: "fk_documentos_tramite_rel")
+}
+
+model entregas_logistica {
+  id_Entrega                                             Int                    @id @default(autoincrement())
+  lote_id                                                Int
+  orden_Produccion_id                                    Int?
+  cliente_id                                             Int
+  transportista_id                                       Int?
+  cantidad_Recibida_Almacen                              Decimal?               @default(0.0000) @db.Decimal(12, 4)
+  UM                                                     entregas_logistica_UM? @default(Kg)
+  fecha_Llegada_Almacen                                  DateTime?              @db.Date
+  hora_Llegada_Alamcen                                   DateTime?              @db.Time(0)
+  observaciones_Almacen                                  String?                @db.Text
+  cantidad_Entregada_Cliente                             Decimal?               @default(0.0000) @db.Decimal(12, 4)
+  fecha_Salida_Transporte                                DateTime?              @db.Date
+  hora_Salida_Transporte                                 DateTime?              @db.Time(0)
+  fecha_Entrega_Cliente                                  DateTime?              @db.Date
+  observaciones_Cliente                                  String?                @db.Text
+  personas_entregas_logistica_cliente_idTopersonas       personas               @relation("entregas_logistica_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onUpdate: Restrict, map: "fk_log_cliente")
+  lotes_produccion                                       lotes_produccion       @relation(fields: [lote_id], references: [id_Lote_Produccion], onUpdate: Restrict, map: "fk_log_lote")
+  ordenes_produccion                                     ordenes_produccion?    @relation(fields: [orden_Produccion_id], references: [id_Orden_Produc], onDelete: Restrict, onUpdate: Restrict, map: "fk_log_orden")
+  personas_entregas_logistica_transportista_idTopersonas personas?              @relation("entregas_logistica_transportista_idTopersonas", fields: [transportista_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_log_transportista")
+
+  @@index([cliente_id], map: "fk_log_cliente")
+  @@index([lote_id], map: "fk_log_lote")
+  @@index([orden_Produccion_id], map: "fk_log_orden")
+  @@index([transportista_id], map: "fk_log_transportista")
+}
+
+model equipos_tanques {
+  id_Equipos_Tanques    Int                             @id @default(autoincrement())
+  codigo_Equipo         String                          @db.VarChar(50)
+  nombre_Equipo         String                          @db.VarChar(100)
+  tipo                  String                          @db.VarChar(255)
+  area                  String?                         @db.VarChar(50)
+  capacidad_Kg_Lt       Decimal?                        @db.Decimal(12, 2)
+  status                equipos_tanques_status?         @default(OPERATIVO)
+  estatus_proceso       equipos_tanques_estatus_proceso @default(VACIO)
+  lotes_produccion      lotes_produccion[]
+  mantenimiento_equipos mantenimiento_equipos[]
+  muestras              muestras[]
+}
+
+model especificaciones_producto {
+  id_Especifi_Product    Int                    @id @default(autoincrement())
+  producto_id            Int
+  parametro_id           Int
+  valor_Minimo           String?                @db.VarChar(16)
+  valor_Maximo           Decimal?               @db.Decimal(12, 4)
+  parametros_laboratorio parametros_laboratorio @relation(fields: [parametro_id], references: [id_Parametro], onUpdate: Restrict, map: "fk_esp_parametro")
+  productos_materiales   productos_materiales   @relation(fields: [producto_id], references: [id_Produc_Mater], onUpdate: Restrict, map: "fk_esp_producto")
+
+  @@index([parametro_id], map: "fk_esp_parametro")
+  @@index([producto_id], map: "fk_esp_producto")
+}
+
+model evaluacion_proveedores {
+  id_Eval_Provee      Int      @id @default(autoincrement())
+  proveedor_id        Int
+  linea_Produccion    String?  @db.VarChar(50)
+  puntaje_Puntualidad Decimal? @default(0.00) @db.Decimal(5, 2)
+  puntaje_Servicio    Decimal? @default(0.00) @db.Decimal(5, 2)
+  puntaje_Precio      Decimal? @default(0.00) @db.Decimal(5, 2)
+  total_evaluacion    Decimal? @default(0.00) @db.Decimal(5, 2)
+  observaciones       String?  @db.Text
+  personas            personas @relation(fields: [proveedor_id], references: [id_Persona], onUpdate: Restrict, map: "fk_eval_proveedor")
+
+  @@index([proveedor_id], map: "fk_eval_proveedor")
+}
+
+model incidencias_proveedores {
+  id_Inci_Provee       Int                   @id @default(autoincrement())
+  no_Incidencia        String                @db.VarChar(50)
+  proveedor_id         Int
+  producto_id          Int?
+  lote                 String?               @db.VarChar(50)
+  linea_Produccion     String?               @db.VarChar(50)
+  motivo_Descripcion   String?               @db.Text
+  accion_Tomada        String?               @db.Text
+  productos_materiales productos_materiales? @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict, onUpdate: Restrict, map: "fk_inci_producto")
+  personas             personas              @relation(fields: [proveedor_id], references: [id_Persona], onUpdate: Restrict, map: "fk_inci_proveedor")
+
+  @@index([producto_id], map: "fk_inci_producto")
+  @@index([proveedor_id], map: "fk_inci_proveedor")
+}
+
+model lote_consumo_insumo {
+  id_Lote_Consumo_Insumo Int                  @id @default(autoincrement())
+  lote_Padre_id          Int
+  MP_id                  Int
+  lote_MP_id             String?              @db.VarChar(50)
+  cantidad_Consumida     Decimal              @db.Decimal(12, 4)
+  lotes_produccion       lotes_produccion     @relation(fields: [lote_Padre_id], references: [id_Lote_Produccion], onUpdate: Restrict, map: "fk_con_lote_padre")
+  productos_materiales   productos_materiales @relation(fields: [MP_id], references: [id_Produc_Mater], onUpdate: Restrict, map: "fk_con_mp")
+
+  @@index([lote_Padre_id], map: "fk_con_lote_padre")
+  @@index([MP_id], map: "fk_con_mp")
+}
+
+model lotes_produccion {
+  id_Lote_Produccion       Int                             @id @default(autoincrement())
+  no_Lote                  String                          @db.VarChar(50)
+  orden_Produccion_id      Int
+  tanque_id                Int?
+  producto_id              Int
+  cantidad_Total_Producida Decimal?                        @default(0.0000) @db.Decimal(12, 4)
+  bitacora                 String?                         @db.LongText
+  fecha_Caducidad          DateTime?                       @db.Date
+  estado_Calida            lotes_produccion_estado_Calida?
+  observaciones_Calidad    String?                         @db.Text
+  certificado_calidad      certificado_calidad[]
+  entregas_logistica       entregas_logistica[]
+  lote_consumo_insumo      lote_consumo_insumo[]
+  ordenes_produccion       ordenes_produccion              @relation(fields: [orden_Produccion_id], references: [id_Orden_Produc], onUpdate: Restrict, map: "fk_lote_orden")
+  productos_materiales     productos_materiales            @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Cascade, onUpdate: Restrict, map: "fk_lote_producto")
+  equipos_tanques          equipos_tanques?                @relation(fields: [tanque_id], references: [id_Equipos_Tanques], onDelete: Restrict, onUpdate: Restrict, map: "fk_lote_tanque")
+  muestras                 muestras[]
+  no_conformidades         no_conformidades[]
+
+  @@unique([orden_Produccion_id, producto_id], map: "ky_orden_producto")
+  @@index([producto_id], map: "fk_lote_producto")
+  @@index([tanque_id], map: "fk_lote_tanque")
+}
+
+model mantenimiento_equipos {
+  id_Manten_Equipo   Int                           @id @default(autoincrement())
+  Equipo_id          Int
+  actividad_Trabajo  String                        @db.Text
+  semana_Anio        String?                       @db.VarChar(10)
+  fecha_Programada   DateTime                      @db.Date
+  fecha_Reprogramada DateTime?                     @db.Date
+  fecha_Cierrre      DateTime?                     @db.Date
+  estado             mantenimiento_equipos_estado? @default(PROGRAMADO)
+  equipos_tanques    equipos_tanques               @relation(fields: [Equipo_id], references: [id_Equipos_Tanques], onUpdate: Restrict, map: "fk_mant_equipo")
+
+  @@index([Equipo_id], map: "fk_mant_equipo")
+}
+
+model movimientos_inventario {
+  id_Movi_Invent                                           Int                  @id @default(autoincrement())
+  folio_Movi                                               String               @db.VarChar(50)
+  material_id                                              Int
+  cantidad                                                 Decimal              @db.Decimal(12, 4)
+  area_Solicita                                            String?              @db.VarChar(50)
+  solicitante_id                                           Int?
+  entrega_id                                               Int?
+  recibe_id                                                Int?
+  autoriza_id                                              Int?
+  fecha_Salida                                             DateTime             @db.Date
+  hora_Salida                                              DateTime?            @db.Time(0)
+  es_Prestamo                                              Boolean?             @default(false)
+  fecha_Regreso_Estimada                                   DateTime?            @db.Date
+  observaciones                                            String?              @db.Text
+  personas_movimientos_inventario_autoriza_idTopersonas    personas?            @relation("movimientos_inventario_autoriza_idTopersonas", fields: [autoriza_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_mov_autoriza")
+  personas_movimientos_inventario_entrega_idTopersonas     personas?            @relation("movimientos_inventario_entrega_idTopersonas", fields: [entrega_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_mov_entrega")
+  productos_materiales                                     productos_materiales @relation(fields: [material_id], references: [id_Produc_Mater], onUpdate: Restrict, map: "fk_mov_material")
+  personas_movimientos_inventario_recibe_idTopersonas      personas?            @relation("movimientos_inventario_recibe_idTopersonas", fields: [recibe_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_mov_recibe")
+  personas_movimientos_inventario_solicitante_idTopersonas personas?            @relation("movimientos_inventario_solicitante_idTopersonas", fields: [solicitante_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_mov_solicitante")
+
+  @@index([autoriza_id], map: "fk_mov_autoriza")
+  @@index([entrega_id], map: "fk_mov_entrega")
+  @@index([material_id], map: "fk_mov_material")
+  @@index([recibe_id], map: "fk_mov_recibe")
+  @@index([solicitante_id], map: "fk_mov_solicitante")
+}
+
+model muestras {
+  id_Muestra                              Int                         @id @default(autoincrement())
+  no_Muestra                              String                      @db.VarChar(50)
+  fecha_Toma                              DateTime                    @db.Date
+  lote_id                                 Int
+  producto_id                             Int
+  cliente_id                              Int
+  tanque_id                               Int
+  analista_id                             Int?
+  etapa_Muestra                           muestras_etapa_Muestra?     @default(EN_PROCESO)
+  estado_Muestra                          muestras_estado_Muestra?    @default(PENDIENTE)
+  categoria_Muestra                       muestras_categoria_Muestra?
+  observaciones                           String?                     @db.VarChar(50)
+  personas_muestras_cliente_idTopersonas  personas                    @relation("muestras_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_muestra_cliente_rel")
+  lotes_produccion                        lotes_produccion            @relation(fields: [lote_id], references: [id_Lote_Produccion], onDelete: Cascade, onUpdate: Restrict, map: "fk_muestra_lote_rel")
+  productos_materiales                    productos_materiales        @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Cascade, onUpdate: Restrict, map: "fk_muestra_producto_rel")
+  equipos_tanques                         equipos_tanques             @relation(fields: [tanque_id], references: [id_Equipos_Tanques], onDelete: Cascade, onUpdate: Restrict, map: "fk_muestra_tanque_rel")
+  personas_muestras_analista_idTopersonas personas?                   @relation("muestras_analista_idTopersonas", fields: [analista_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestras_personas_analista")
+  resultado_analisis                      resultado_analisis[]
+
+  @@index([cliente_id], map: "fk_muestra_cliente_rel")
+  @@index([lote_id], map: "fk_muestra_lote_rel")
+  @@index([producto_id], map: "fk_muestra_producto_rel")
+  @@index([tanque_id], map: "fk_muestra_tanque_rel")
+  @@index([analista_id], map: "fk_muestras_personas_analista")
+}
+
+model no_conformidades {
+  id_NC                                                   Int                             @id @default(autoincrement())
+  folio_NC                                                String                          @db.VarChar(50)
+  tipo                                                    no_conformidades_tipo
+  fecha                                                   DateTime                        @db.Date
+  fuente_Incidencia                                       String?                         @db.VarChar(100)
+  proceso_Linea                                           String?                         @db.VarChar(50)
+  puesto_Notifica_id                                      Int?
+  lote_id                                                 Int?
+  producto_id                                             Int?
+  no_Orden_Produccion                                     String?                         @db.VarChar(50)
+  tipo_Envase                                             String?                         @db.VarChar(50)
+  transporte_Limpio                                       Boolean?                        @default(true)
+  mangueras_Limpias                                       Boolean?                        @default(true)
+  sin_Fisuras_Perforaciones                               Boolean?                        @default(true)
+  inspector_id                                            Int?
+  aprobado_Por_id                                         Int?
+  especificaciones_NC                                     String?                         @db.Text
+  descripcion_NC                                          String?                         @db.Text
+  causa_Raiz                                              String?                         @db.Text
+  accion_Contencion                                       String?                         @db.Text
+  efectividad_Accion                                      String?                         @db.Text
+  responsable_id                                          Int?
+  autoridad_Libera_id                                     Int?
+  fecha_Inicio_Plan                                       DateTime?                       @db.Date
+  fecha_Termino_Plan                                      DateTime?                       @db.Date
+  fecha_Termino_Real                                      DateTime?                       @db.Date
+  estado_Actual                                           no_conformidades_estado_Actual? @default(ABIERTA)
+  observaciones                                           String?                         @db.Text
+  personas_no_conformidades_aprobado_Por_idTopersonas     personas?                       @relation("no_conformidades_aprobado_Por_idTopersonas", fields: [aprobado_Por_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_aprobado")
+  personas_no_conformidades_autoridad_Libera_idTopersonas personas?                       @relation("no_conformidades_autoridad_Libera_idTopersonas", fields: [autoridad_Libera_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_autoridad")
+  personas_no_conformidades_inspector_idTopersonas        personas?                       @relation("no_conformidades_inspector_idTopersonas", fields: [inspector_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_inspector")
+  lotes_produccion                                        lotes_produccion?               @relation(fields: [lote_id], references: [id_Lote_Produccion], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_lote")
+  productos_materiales                                    productos_materiales?           @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_producto")
+  personas_no_conformidades_puesto_Notifica_idTopersonas  personas?                       @relation("no_conformidades_puesto_Notifica_idTopersonas", fields: [puesto_Notifica_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_puesto")
+  personas_no_conformidades_responsable_idTopersonas      personas?                       @relation("no_conformidades_responsable_idTopersonas", fields: [responsable_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_nc_responsable")
+
+  @@index([aprobado_Por_id], map: "fk_nc_aprobado")
+  @@index([autoridad_Libera_id], map: "fk_nc_autoridad")
+  @@index([inspector_id], map: "fk_nc_inspector")
+  @@index([lote_id], map: "fk_nc_lote")
+  @@index([producto_id], map: "fk_nc_producto")
+  @@index([puesto_Notifica_id], map: "fk_nc_puesto")
+  @@index([responsable_id], map: "fk_nc_responsable")
+}
+
+model ordenes_produccion {
+  id_Orden_Produc                                   Int                             @id @default(autoincrement())
+  id_Venta_Origen                                   Int?
+  vendedor_id                                       Int?
+  cliente_id                                        Int?
+  linea_Produccion                                  String?                         @db.VarChar(50)
+  producto_id                                       Int
+  servicio                                          String?                         @db.VarChar(200)
+  cantidad_Venta                                    Int?
+  fecha_Confirmacion                                DateTime?                       @db.DateTime(0)
+  fecha_Compromiso                                  DateTime?                       @db.Date
+  urgencia                                          String?                         @db.VarChar(50)
+  observaciones                                     String?                         @db.Text
+  no_Orden_Produc                                   String?                         @db.VarChar(50)
+  cantidad_Planificada                              Decimal?                        @db.Decimal(12, 4)
+  fecha_Termino_Plan                                DateTime?                       @db.Date
+  inconformidad_Planeacion                          String?                         @db.VarChar(100)
+  Observaciones_Planeacion                          String?                         @db.Text
+  fecha_Inicio_Produccion                           DateTime?                       @db.DateTime(0)
+  fecha_Termino_Real                                DateTime?                       @db.DateTime(0)
+  observaciones_Produccion                          String?                         @db.Text
+  estatus_flujo                                     String?                         @default("ventas") @db.VarChar(50)
+  fecha_Inicio_Plan                                 DateTime?                       @db.Date
+  estado_Plan                                       ordenes_produccion_estado_Plan?
+  entregas_logistica                                entregas_logistica[]
+  lotes_produccion                                  lotes_produccion[]
+  personas_ordenes_produccion_cliente_idTopersonas  personas?                       @relation("ordenes_produccion_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_ord_cliente")
+  productos_materiales                              productos_materiales            @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Cascade, onUpdate: Restrict, map: "fk_ord_producto")
+  personas_ordenes_produccion_vendedor_idTopersonas personas?                       @relation("ordenes_produccion_vendedor_idTopersonas", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_ord_vendedor")
+
+  @@index([cliente_id], map: "fk_ord_cliente")
+  @@index([producto_id], map: "fk_ord_producto")
+  @@index([vendedor_id], map: "fk_ord_vendedor")
+}
+
+model parametros_laboratorio {
+  id_Parametro              Int                              @id @default(autoincrement())
+  nombre_Parametro          String                           @db.VarChar(100)
+  UM                        String?                          @db.VarChar(20)
+  tipo_Dato                 parametros_laboratorio_tipo_Dato @default(NUMERICO)
+  especificaciones_producto especificaciones_producto[]
+  resultado_analisis        resultado_analisis[]
+}
+
+model personas {
+  id_Persona                                                                                        Int                               @id @default(autoincrement())
+  codigo                                                                                            String?                           @db.VarChar(50)
+  nombre                                                                                            String                            @db.VarChar(150)
+  tipo_persona                                                                                      String                            @db.VarChar(50)
+  fecha_Ingreso                                                                                     DateTime?                         @db.Date
+  sueldo_Diario                                                                                     Decimal?                          @db.Decimal(10, 2)
+  no_SEMARNAT                                                                                       String?                           @db.VarChar(60)
+  estatus                                                                                           personas_estatus                  @default(ACTIVO)
+  certificado_calidad_certificado_calidad_aprobado_Por_idTopersonas                                 certificado_calidad[]             @relation("certificado_calidad_aprobado_Por_idTopersonas")
+  certificado_calidad_certificado_calidad_cliente_idTopersonas                                      certificado_calidad[]             @relation("certificado_calidad_cliente_idTopersonas")
+  certificado_calidad_certificado_calidad_revisado_Por_idTopersonas                                 certificado_calidad[]             @relation("certificado_calidad_revisado_Por_idTopersonas")
+  certificado_calidad_certificado_calidad_solicitante_idTopersonas                                  certificado_calidad[]             @relation("certificado_calidad_solicitante_idTopersonas")
+  control_residuos                                                                                  control_residuos[]
+  entregas_logistica_entregas_logistica_cliente_idTopersonas                                        entregas_logistica[]              @relation("entregas_logistica_cliente_idTopersonas")
+  entregas_logistica_entregas_logistica_transportista_idTopersonas                                  entregas_logistica[]              @relation("entregas_logistica_transportista_idTopersonas")
+  evaluacion_proveedores                                                                            evaluacion_proveedores[]
+  incidencias_proveedores                                                                           incidencias_proveedores[]
+  movimientos_inventario_movimientos_inventario_autoriza_idTopersonas                               movimientos_inventario[]          @relation("movimientos_inventario_autoriza_idTopersonas")
+  movimientos_inventario_movimientos_inventario_entrega_idTopersonas                                movimientos_inventario[]          @relation("movimientos_inventario_entrega_idTopersonas")
+  movimientos_inventario_movimientos_inventario_recibe_idTopersonas                                 movimientos_inventario[]          @relation("movimientos_inventario_recibe_idTopersonas")
+  movimientos_inventario_movimientos_inventario_solicitante_idTopersonas                            movimientos_inventario[]          @relation("movimientos_inventario_solicitante_idTopersonas")
+  muestras_muestras_cliente_idTopersonas                                                            muestras[]                        @relation("muestras_cliente_idTopersonas")
+  muestras_muestras_analista_idTopersonas                                                           muestras[]                        @relation("muestras_analista_idTopersonas")
+  no_conformidades_no_conformidades_aprobado_Por_idTopersonas                                       no_conformidades[]                @relation("no_conformidades_aprobado_Por_idTopersonas")
+  no_conformidades_no_conformidades_autoridad_Libera_idTopersonas                                   no_conformidades[]                @relation("no_conformidades_autoridad_Libera_idTopersonas")
+  no_conformidades_no_conformidades_inspector_idTopersonas                                          no_conformidades[]                @relation("no_conformidades_inspector_idTopersonas")
+  no_conformidades_no_conformidades_puesto_Notifica_idTopersonas                                    no_conformidades[]                @relation("no_conformidades_puesto_Notifica_idTopersonas")
+  no_conformidades_no_conformidades_responsable_idTopersonas                                        no_conformidades[]                @relation("no_conformidades_responsable_idTopersonas")
+  ordenes_produccion_ordenes_produccion_cliente_idTopersonas                                        ordenes_produccion[]              @relation("ordenes_produccion_cliente_idTopersonas")
+  ordenes_produccion_ordenes_produccion_vendedor_idTopersonas                                       ordenes_produccion[]              @relation("ordenes_produccion_vendedor_idTopersonas")
+  proyecto_investigacion_proyecto_investigacion_responsable_idTopersonas                            proyecto_investigacion[]          @relation("proyecto_investigacion_responsable_idTopersonas")
+  proyecto_investigacion_proyecto_investigacion_solicitante_idTopersonas                            proyecto_investigacion[]          @relation("proyecto_investigacion_solicitante_idTopersonas")
+  registro_tiempos                                                                                  registro_tiempos[]
+  requisiciones_compra_requisiciones_compra_proveedor_idTopersonas                                  requisiciones_compra[]            @relation("requisiciones_compra_proveedor_idTopersonas")
+  requisiciones_compra_requisiciones_compra_recibido_Por_idTopersonas                               requisiciones_compra[]            @relation("requisiciones_compra_recibido_Por_idTopersonas")
+  requisiciones_compra_requisiciones_compra_solicitante_idTopersonas                                requisiciones_compra[]            @relation("requisiciones_compra_solicitante_idTopersonas")
+  solicitudes_analisis_desarrollo_solicitudes_analisis_desarrollo_cliente_idTopersonas              solicitudes_analisis_desarrollo[] @relation("solicitudes_analisis_desarrollo_cliente_idTopersonas")
+  solicitudes_analisis_desarrollo_solicitudes_analisis_desarrollo_responsable_Analisis_idTopersonas solicitudes_analisis_desarrollo[] @relation("solicitudes_analisis_desarrollo_responsable_Analisis_idTopersonas")
+  solicitudes_analisis_desarrollo_solicitudes_analisis_desarrollo_vendedor_idTopersonas             solicitudes_analisis_desarrollo[] @relation("solicitudes_analisis_desarrollo_vendedor_idTopersonas")
+}
+
+model productos_materiales {
+  id_Produc_Mater           Int                             @id @default(autoincrement())
+  codigo_Producto           String?                         @db.VarChar(50)
+  nombre_Producto           String                          @db.VarChar(150)
+  categoria                 productos_materiales_categoria?
+  UM                        String                          @db.VarChar(50)
+  presentacion              String?                         @db.VarChar(50)
+  descripcion               String?                         @db.Text
+  especificaciones_producto especificaciones_producto[]
+  incidencias_proveedores   incidencias_proveedores[]
+  lote_consumo_insumo       lote_consumo_insumo[]
+  lotes_produccion          lotes_produccion[]
+  movimientos_inventario    movimientos_inventario[]
+  muestras                  muestras[]
+  no_conformidades          no_conformidades[]
+  ordenes_produccion        ordenes_produccion[]
+  requisiciones_compra      requisiciones_compra[]
+}
+
+model proyecto_investigacion {
+  id_Proyect_Inves                                         Int                              @id @default(autoincrement())
+  folio                                                    String                           @db.VarChar(50)
+  nombre_Proyecto                                          String                           @db.VarChar(150)
+  solicitante_id                                           Int
+  responsable_id                                           Int
+  linea_Produccion                                         String?                          @db.VarChar(50)
+  prioridad                                                proyecto_investigacion_prioridad @default(MEDIA)
+  fecha_Solicitud                                          DateTime                         @db.Date
+  fecha_Resultado                                          DateTime?                        @db.Date
+  observaciones                                            String?                          @db.Text
+  personas_proyecto_investigacion_responsable_idTopersonas personas                         @relation("proyecto_investigacion_responsable_idTopersonas", fields: [responsable_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_proy_responsable")
+  personas_proyecto_investigacion_solicitante_idTopersonas personas                         @relation("proyecto_investigacion_solicitante_idTopersonas", fields: [solicitante_id], references: [id_Persona], onUpdate: Restrict, map: "fk_proy_solicitante")
+
+  @@index([responsable_id], map: "fk_proy_responsable")
+  @@index([solicitante_id], map: "fk_proy_solicitante")
+}
+
+model registro_tiempos {
+  id_Regist_Tiempo  Int                                 @id @default(autoincrement())
+  empleado_id       Int
+  fecha             DateTime                            @db.Date
+  clave_Tiempo_id   String                              @db.VarChar(30)
+  tiempo_Extra_Tipo registro_tiempos_tiempo_Extra_Tipo? @default(SIMPLE)
+  centro_Costos     String?                             @db.VarChar(50)
+  personas          personas                            @relation(fields: [empleado_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_reg_empleado")
+
+  @@index([empleado_id], map: "fk_reg_empleado")
+}
+
+model requisiciones_compra {
+  id_Requi_Compra                                         Int                               @id @default(autoincrement())
+  no_Requisicion                                          String                            @db.VarChar(50)
+  no_Orden_Compra                                         String?                           @db.VarChar(50)
+  solicitante_id                                          Int
+  proveedor_id                                            Int?
+  producto_id                                             Int
+  area_Solicitante                                        String?                           @db.VarChar(50)
+  tipo_Compra                                             requisiciones_compra_tipo_Compra? @default(Materia_Prima)
+  uso_Actividad                                           String?                           @db.Text
+  fecha_Solicitud                                         DateTime                          @db.Date
+  fecha_Requerimiento                                     DateTime?                         @db.Date
+  fecha_Orden_Compra                                      DateTime?                         @db.Date
+  fecha_Entrega_Compromiso                                DateTime?                         @db.Date
+  fecha_Recepcion                                         DateTime?                         @db.Date
+  cantidad_Solicitada                                     Decimal                           @db.Decimal(12, 4)
+  cantidad_Recibida                                       Decimal?                          @default(0.0000) @db.Decimal(12, 4)
+  costo_Unitario                                          Decimal?                          @default(0.00) @db.Decimal(12, 2)
+  costo_Total                                             Decimal?                          @default(0.00) @db.Decimal(12, 2)
+  moneda                                                  requisiciones_compra_moneda       @default(MXN)
+  dias_Credito                                            Int?                              @default(0)
+  estado                                                  requisiciones_compra_estado       @default(SOLICITADA)
+  observaciones                                           String?                           @db.Text
+  recibido_Por_id                                         Int?
+  productos_materiales                                    productos_materiales              @relation(fields: [producto_id], references: [id_Produc_Mater], onUpdate: Restrict, map: "fk_req_producto")
+  personas_requisiciones_compra_proveedor_idTopersonas    personas?                         @relation("requisiciones_compra_proveedor_idTopersonas", fields: [proveedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_req_proveedor")
+  personas_requisiciones_compra_recibido_Por_idTopersonas personas?                         @relation("requisiciones_compra_recibido_Por_idTopersonas", fields: [recibido_Por_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_req_recibido")
+  personas_requisiciones_compra_solicitante_idTopersonas  personas                          @relation("requisiciones_compra_solicitante_idTopersonas", fields: [solicitante_id], references: [id_Persona], onUpdate: Restrict, map: "fk_req_solicitante")
+
+  @@index([producto_id], map: "fk_req_producto")
+  @@index([proveedor_id], map: "fk_req_proveedor")
+  @@index([recibido_Por_id], map: "fk_req_recibido")
+  @@index([solicitante_id], map: "fk_req_solicitante")
+}
+
+model resultado_analisis {
+  id_Resultado_Analisis  Int                    @id @default(autoincrement())
+  muestra_id             Int
+  parametro_id           Int
+  valor_Obtenido_Num     String?                @db.VarChar(25)
+  cumple_Especificacion  Boolean?               @default(true)
+  fecha_Resultado        DateTime               @default(now()) @db.Date
+  hora_Resultado         DateTime?              @db.Time(0)
+  muestras               muestras               @relation(fields: [muestra_id], references: [id_Muestra], onUpdate: Restrict, map: "fk_res_muestra")
+  parametros_laboratorio parametros_laboratorio @relation(fields: [parametro_id], references: [id_Parametro], onDelete: Cascade, onUpdate: Restrict, map: "fk_res_parametro")
+
+  @@index([muestra_id], map: "fk_res_muestra")
+  @@index([parametro_id], map: "fk_res_parametro")
+}
+
+model solicitudes_analisis_desarrollo {
+  id_Soli_Anali_Desa                                                         Int                                        @id @default(autoincrement())
+  folio_Soli_Anali_Desa                                                      String                                     @db.VarChar(50)
+  tipo                                                                       String                                     @db.VarChar(50)
+  fecha_Solicitud                                                            DateTime                                   @db.Date
+  fecha_Tentativa_Entrega                                                    DateTime?                                  @db.Date
+  nombre_Producto_Proyecto                                                   String?                                    @db.VarChar(150)
+  linea_Produccion                                                           String?                                    @db.VarChar(50)
+  caracteristicas_usos                                                       String?                                    @db.Text
+  especificaciones_Esperadas                                                 String?                                    @db.Text
+  vendedor_id                                                                Int?
+  cliente_id                                                                 Int?
+  prioridad                                                                  solicitudes_analisis_desarrollo_prioridad? @default(MEDIA)
+  responsable_Analisis_id                                                    Int?
+  fecha_Resultado                                                            DateTime?                                  @db.Date
+  estado                                                                     solicitudes_analisis_desarrollo_estado?    @default(SOLICITADO)
+  observaciones_Finales                                                      String?                                    @db.Text
+  personas_solicitudes_analisis_desarrollo_cliente_idTopersonas              personas?                                  @relation("solicitudes_analisis_desarrollo_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_sol_cliente")
+  personas_solicitudes_analisis_desarrollo_responsable_Analisis_idTopersonas personas?                                  @relation("solicitudes_analisis_desarrollo_responsable_Analisis_idTopersonas", fields: [responsable_Analisis_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_sol_responsable")
+  personas_solicitudes_analisis_desarrollo_vendedor_idTopersonas             personas?                                  @relation("solicitudes_analisis_desarrollo_vendedor_idTopersonas", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_sol_vendedor")
+
+  @@index([cliente_id], map: "fk_sol_cliente")
+  @@index([responsable_Analisis_id], map: "fk_sol_responsable")
+  @@index([vendedor_id], map: "fk_sol_vendedor")
+}
+
+model tramites_legales {
+  id                 Int                              @id @default(autoincrement())
+  area_relacionada   String                           @db.VarChar(100)
+  nombre_tramite     String                           @db.VarChar(255)
+  duracion_anios     Decimal?                         @db.Decimal(4, 2)
+  costo_vigencia     Decimal                          @default(0.00) @db.Decimal(12, 2)
+  costo_por_anio     Decimal                          @default(0.00) @db.Decimal(12, 2)
+  responsable        String                           @db.VarChar(150)
+  proveedor          String                           @db.VarChar(150)
+  estatus_tramite    tramites_legales_estatus_tramite @default(EN_TRAMITE)
+  fecha_expedicion   DateTime                         @default(dbgenerated("(curdate())")) @db.Date
+  fecha_vencimiento  DateTime                         @db.Date
+  observaciones      String?                          @db.Text
+  documentos_tramite documentos_tramite[]
+}
+
+enum no_conformidades_tipo {
+  INTERNA
+  CLIENTE
+  PROVEEDOR
+  AUDITORIA
+}
+
+enum parametros_laboratorio_tipo_Dato {
+  NUMERICO
+  TEXTO
+  BOOLEANO
+}
+
+enum productos_materiales_categoria {
+  Materia_Prima      @map("Materia Prima")
+  Producto_Terminado @map("Producto Terminado")
+  Insumo
+  Herramienta
+  EPP
+}
+
+enum registro_tiempos_tiempo_Extra_Tipo {
+  SIMPLE
+  DOBLE
+  TRIPLE
+}
+
+enum control_residuos_UM {
+  Kg
+  Lt
+  Ton
+}
+
+enum entregas_logistica_UM {
+  Kg
+  Lt
+  Pza
+  Tambor
+}
+
+enum equipos_tanques_status {
+  OPERATIVO
+  MANTENIMIENTO
+  FUERA_DE_SERVICIO
+}
+
+enum proyecto_investigacion_prioridad {
+  BAJA
+  MEDIA
+  ALTA
+  URGENTE
+}
+
+enum equipos_tanques_estatus_proceso {
+  EVAPORANDO
+  MTO
+  POR_AJUSTAR
+  VACIO
+  EVAPORANDO_Y_DESMETALIZANDO
+  MUESTREO
+  DESMETALIZANDO
+  POR_DESCARGAR
+  DESCARGANDO
+  PROCESO
+  AJUSTADO
+  CARGANDO_TANQUE
+  ESPERA_CALIDAD
+  LIBERADO_CALIDAD
+}
+
+enum mantenimiento_equipos_estado {
+  PROGRAMADO
+  EN_PROCESO
+  COMPLETADO
+  CANCELADO
+}
+
+enum personas_estatus {
+  ACTIVO
+  INACTIVO
+}
+
+enum requisiciones_compra_tipo_Compra {
+  Materia_Prima @map("Materia Prima")
+  Mantenimiento
+  Servicios
+  Consumibles
+}
+
+enum lotes_produccion_estado_Calida {
+  PROCESANDO
+  ESPERANDO_MUESTRA
+  EN_ANALISIS
+  APROBADO
+  LIBERADO
+  RECHAZADO
+  FUERA_DE_ESPECIFICACION
+}
+
+enum muestras_etapa_Muestra {
+  MATERIA_PRIMA
+  EN_PROCESO
+  PRODUCTO_TERMINADO
+  RETENIDO
+}
+
+enum tramites_legales_estatus_tramite {
+  VIGENTE
+  EN_TRAMITE
+  EN_RENOVACION
+  VENCIDO
+}
+
+enum certificado_calidad_estatus {
+  BORRADOR
+  EMITIDO
+  CANCELADO
+}
+
+enum muestras_estado_Muestra {
+  PENDIENTE
+  EN_ANALISIS
+  APROBADO
+  RECHAZADO
+}
+
+enum muestras_categoria_Muestra {
+  MUESTRA_INICIAL
+  MUESTRA_EVAPOR_DESMETAL
+  MUESTRA_POR_AJUSTE
+  MUESTRA_AJUSTADO
+}
+
+enum solicitudes_analisis_desarrollo_prioridad {
+  BAJA
+  MEDIA
+  ALTA
+  URGENTE
+}
+
+enum certificado_calidad_estatus_Calidad {
+  APROBADO
+  RECHAZADO
+  CON_CONCESION
+}
+
+enum solicitudes_analisis_desarrollo_estado {
+  SOLICITADO
+  EN_PROCESO
+  FINALIZADO
+  LIBERADO
+  RECHAZADO
+}
+
+enum requisiciones_compra_moneda {
+  MXN
+  USD
+  EUR
+}
+
+enum requisiciones_compra_estado {
+  SOLICITADA
+  APROBADA
+  RECHAZADA
+  ORDENADA
+  RECIBIDA
+  CANCELADA
+}
+
+enum ordenes_produccion_estado_Plan {
+  PLANIFICADA
+  EN_PROCESO
+  ESPERANDO_MUESTRA
+  EN_ANALISIS
+  FINALIZADA
+  CANCELADA
+}
+
+enum no_conformidades_estado_Actual {
+  ABIERTA
+  EN_AN_LISIS       @map("EN_ANÁLISIS")
+  ACCION_CORRECTIVA
+  CERRADA
+}
