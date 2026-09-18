@@ -127,6 +127,25 @@ tipoMuestra: obtenerTipoMuestra(muestra),
   };
 };
 
+const cargarLotesLlegada = async () => {
+  try {
+    const response = await fetch(
+      'http://localhost:4002/api/calidad/obtenerOrdenesPendientesDeLlegada'
+    );
+
+    const res = await response.json();
+
+    if (!response.ok || !res.success) {
+      throw new Error(res.error || 'Error al obtener órdenes pendientes');
+    }
+
+    console.log('Órdenes pendientes:', res.result);
+
+  } catch (error) {
+    console.error('Error cargando órdenes pendientes de llegada:', error);
+  }
+};
+
   // 1. Cargar Muestras desde la API
   const fetchMuestras = useCallback(async () => {
     setLoadingMuestras(true);
@@ -135,7 +154,6 @@ tipoMuestra: obtenerTipoMuestra(muestra),
       if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
       
       const data = await res.json();
-      console.log("Respuesta servidor Muestras:", data);
 
       
 
@@ -404,6 +422,8 @@ const guardarResultados = async (e: React.FormEvent) => {
     }
     cerrarModal();
     await fetchMuestras();
+    const lotesLlegada = await cargarLotesLlegada()
+    console.log("lotes llegada", lotesLlegada)
     
   } catch (err) {
     console.error('Error al registrar resultados de laboratorio:', err);

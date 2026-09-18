@@ -258,6 +258,16 @@ const persistirEnDB = async (
     }
   };
 
+const cargarLotesLlegada = async () => {
+  try {
+    const response = await fetch('http://localhost:4002/api/calidad/obtenerOrdenesPendientesDeLlegada')
+    const res = await response.json();
+
+    } catch (error) {
+    console.error("Error cargando muestras dictaminadas:", error);
+  }
+}
+
   const cargarMuestrasDictaminadas = async () => {
   try {
     const response = await fetch('http://localhost:4002/api/calidad/obtenerMuestrasDictaminadas');
