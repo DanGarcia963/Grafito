@@ -1,0 +1,11 @@
+{
+  "tanques": [
+    { "id": 1, "nombre": "TQ 1", "prensa": "POLYMASTER 6TA", "cantidad": 0, "status": "VACIO", "loteActual": null },
+    { "id": 2, "nombre": "TQ 2", "prensa": "MTO", "cantidad": 0, "status": "MTO", "loteActual": null },
+    { "id": 3, "nombre": "TQ 3", "prensa": "POLYMASTER 6TA", "cantidad": 0, "status": "VACIO", "loteActual": null },
+    { "id": 4, "nombre": "TQ 4", "prensa": "-", "cantidad": 0, "status": "VACIO", "loteActual": null },
+    { "id": 5, "nombre": "TQ 5", "prensa": "FORGE 2DA", "cantidad": 0, "status": "VACIO", "loteActual": null },
+    { "id": 6, "nombre": "TQ 6", "prensa": "POLYMASTER 6TA", "cantidad": 0, "status": "VACIO", "loteActual": null }
+  ],
+  "inventario": []
+}
