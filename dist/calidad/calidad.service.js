@@ -369,32 +369,39 @@ let CalidadService = class CalidadService {
     }
     async obtenerOrdenesPendientesDeLlegada(fechaFiltro) {
         try {
-            const fechaBase = fechaFiltro ? new Date(fechaFiltro) : new Date();
+            const fechaBase = fechaFiltro
+                ? new Date(fechaFiltro)
+                : new Date();
             fechaBase.setHours(0, 0, 0, 0);
+            console.log('Fecha base:', fechaBase);
+            console.log('Fecha base ISO:', fechaBase.toISOString());
             const ordenes = await this.prisma.ordenes_produccion.findMany({
                 where: {
                     fecha_Llegada: {
                         not: null,
                         gte: fechaBase,
                     },
-                    lotes_llegada: {
-                        none: {},
-                    },
                 },
                 select: {
-                    id_Orden_Product: true,
+                    id_Orden_Produc: true,
                     fecha_Llegada: true,
-                    createdAt: true,
                 },
                 orderBy: {
                     fecha_Llegada: 'asc',
                 },
             });
-            return { success: true, result: ordenes };
+            console.log('Órdenes encontradas:', ordenes);
+            return {
+                success: true,
+                result: ordenes,
+            };
         }
         catch (error) {
             console.error('Error al obtener ordenes pendientes de llegada:', error);
-            return { success: false, error: error.message };
+            return {
+                success: false,
+                error: error.message,
+            };
         }
     }
     async crearLoteConChecklist(payload) {
