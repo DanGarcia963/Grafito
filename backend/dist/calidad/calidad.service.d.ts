@@ -229,9 +229,8 @@ export declare class CalidadService {
     obtenerOrdenesPendientesDeLlegada(fechaFiltro?: Date | string): Promise<{
         success: boolean;
         result: {
+            id_Orden_Produc: number;
             fecha_Llegada: Date | null;
-            id_Orden_Product: never;
-            createdAt: never;
         }[];
         error?: undefined;
     } | {
@@ -243,12 +242,12 @@ export declare class CalidadService {
         success: boolean;
         result: {
             observaciones: string | null;
-            createdAt: Date;
             no_lote: string;
             fecha_llegada: Date;
             fecha_Revision: Date;
             reviso_nombre: string;
             estado_checklist: import("@prisma/client").$Enums.lotes_llegada_estado_checklist;
+            createdAt: Date;
             updatedAt: Date;
             id: number;
             orden_produccion_id: number | null;

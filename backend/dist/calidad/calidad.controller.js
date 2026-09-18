@@ -50,6 +50,12 @@ let CalidadController = class CalidadController {
         }
         return await this.calidadService.buscarAnalistas(query.trim());
     }
+    async obtenerOrdenesPendientesDeLlegada(fechaFiltro) {
+        return await this.calidadService.obtenerOrdenesPendientesDeLlegada(fechaFiltro);
+    }
+    async crearLoteConChecklist(body) {
+        return await this.calidadService.crearLoteConChecklist(body);
+    }
 };
 exports.CalidadController = CalidadController;
 __decorate([
@@ -105,6 +111,20 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "buscarAnalistas", null);
+__decorate([
+    (0, common_1.Get)('obtenerOrdenesPendientesDeLlegada'),
+    __param(0, (0, common_1.Query)('fechaFiltro')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], CalidadController.prototype, "obtenerOrdenesPendientesDeLlegada", null);
+__decorate([
+    (0, common_1.Post)('crearLoteConChecklist'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], CalidadController.prototype, "crearLoteConChecklist", null);
 exports.CalidadController = CalidadController = __decorate([
     (0, common_1.Controller)('api/calidad'),
     __metadata("design:paramtypes", [calidad_service_1.CalidadService])

@@ -458,36 +458,52 @@ async buscarAnalistas(query: string) {
 }
 
 async obtenerOrdenesPendientesDeLlegada(fechaFiltro?: Date | string) {
-    try {
-      const fechaBase = fechaFiltro ? new Date(fechaFiltro) : new Date();
-      fechaBase.setHours(0, 0, 0, 0);
+  try {
+    const fechaBase = fechaFiltro
+      ? new Date(fechaFiltro)
+      : new Date();
 
-      const ordenes = await this.prisma.ordenes_produccion.findMany({
-        where: {
-          fecha_Llegada: {
-            not: null,
-            gte: fechaBase,
-          },
-          lotes_llegada: {
-            none: {}, // Asegura que la orden no tenga ningún lote de llegada asignado aún
-          },
-        },
-        select: {
-          id_Orden_Product: true,
-          fecha_Llegada: true,
-          createdAt: true,
-        },
-        orderBy: {
-          fecha_Llegada: 'asc',
-        },
-      });
+    // Inicio del día en horario local del servidor
+    fechaBase.setHours(0, 0, 0, 0);
 
-      return { success: true, result: ordenes };
-    } catch (error: any) {
-      console.error('Error al obtener ordenes pendientes de llegada:', error);
-      return { success: false, error: error.message };
-    }
+    console.log('Fecha base:', fechaBase);
+    console.log('Fecha base ISO:', fechaBase.toISOString());
+
+    const ordenes = await this.prisma.ordenes_produccion.findMany({
+      where: {
+        fecha_Llegada: {
+          not: null,
+          gte: fechaBase,
+        },
+        
+      },
+      select: {
+        id_Orden_Produc: true,
+        fecha_Llegada: true,
+      },
+      orderBy: {
+        fecha_Llegada: 'asc',
+      },
+    });
+
+    console.log('Órdenes encontradas:', ordenes);
+
+    return {
+      success: true,
+      result: ordenes,
+    };
+  } catch (error: any) {
+    console.error(
+      'Error al obtener ordenes pendientes de llegada:',
+      error,
+    );
+
+    return {
+      success: false,
+      error: error.message,
+    };
   }
+}
 
   // 2. Método para registrar el lote de llegada y su checklist directamente desde los datos enviados por el frontend
   async crearLoteConChecklist(payload: CrearLoteInput) {

@@ -208,4 +208,36 @@ export declare class CalidadController {
         error: any;
         analistas?: undefined;
     }>;
+    obtenerOrdenesPendientesDeLlegada(fechaFiltro?: string): Promise<{
+        success: boolean;
+        result: {
+            id_Orden_Produc: number;
+            fecha_Llegada: Date | null;
+        }[];
+        error?: undefined;
+    } | {
+        success: boolean;
+        error: any;
+        result?: undefined;
+    }>;
+    crearLoteConChecklist(body: any): Promise<{
+        success: boolean;
+        result: {
+            observaciones: string | null;
+            no_lote: string;
+            fecha_llegada: Date;
+            fecha_Revision: Date;
+            reviso_nombre: string;
+            estado_checklist: import("@prisma/client").$Enums.lotes_llegada_estado_checklist;
+            createdAt: Date;
+            updatedAt: Date;
+            id: number;
+            orden_produccion_id: number | null;
+        };
+        error?: undefined;
+    } | {
+        success: boolean;
+        error: any;
+        result?: undefined;
+    }>;
 }
