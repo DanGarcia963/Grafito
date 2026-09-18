@@ -14,7 +14,7 @@ export declare class ProductionService {
             productos_materiales: {
                 id_Produc_Mater: number;
                 nombre_Producto: string;
-                UM: string;
+                UM: import("@prisma/client").$Enums.productos_materiales_UM;
                 presentacion: string | null;
             };
             personas_ordenes_produccion_cliente_idTopersonas: {
@@ -32,25 +32,27 @@ export declare class ProductionService {
             id_Venta_Origen: number | null;
             vendedor_id: number | null;
             cliente_id: number | null;
-            linea_Produccion: string | null;
             producto_id: number;
-            servicio: string | null;
-            cantidad_Venta: number | null;
-            fecha_Confirmacion: Date | null;
-            fecha_Compromiso: Date | null;
-            urgencia: string | null;
+            linea_Produccion: string | null;
+            servicio: string;
+            cantidad_Venta: number;
             observaciones: string | null;
-            no_Orden_Produc: string | null;
-            cantidad_Planificada: import("@prisma/client/runtime/library").Decimal | null;
+            no_Orden_Produc: string;
+            cantidad_Planificada: import("@prisma/client/runtime/library").Decimal;
+            fecha_Confirmacion: Date | null;
+            fecha_Llegada: Date | null;
+            fecha_Termino_Real: Date | null;
+            fecha_Inicio_Produccion: Date | null;
+            fecha_Compromiso: Date | null;
+            fecha_Inicio_Plan: Date | null;
             fecha_Termino_Plan: Date | null;
+            estado_Plan: import("@prisma/client").$Enums.ordenes_produccion_estado_Plan;
+            tipo_Operacion: string | null;
+            urgencia: import("@prisma/client").$Enums.ordenes_produccion_urgencia;
+            estatus_flujo: import("@prisma/client").$Enums.ordenes_produccion_estatus_flujo;
             inconformidad_Planeacion: string | null;
             Observaciones_Planeacion: string | null;
-            fecha_Inicio_Produccion: Date | null;
-            fecha_Termino_Real: Date | null;
             observaciones_Produccion: string | null;
-            estatus_flujo: string | null;
-            fecha_Inicio_Plan: Date | null;
-            estado_Plan: import("@prisma/client").$Enums.ordenes_produccion_estado_Plan | null;
         })[];
         error?: undefined;
     } | {

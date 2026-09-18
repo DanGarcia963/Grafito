@@ -131,7 +131,14 @@ let CalidadService = class CalidadService {
         try {
             const muestras = await this.prisma.muestras.findMany({
                 include: {
-                    personas: {
+                    personas_muestras_cliente_idTopersonas: {
+                        select: {
+                            id_Persona: true,
+                            nombre: true,
+                            tipo_persona: true,
+                        },
+                    },
+                    personas_muestras_analista_idTopersonas: {
                         select: {
                             id_Persona: true,
                             nombre: true,
@@ -357,6 +364,75 @@ let CalidadService = class CalidadService {
             };
         }
         catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+    async obtenerOrdenesPendientesDeLlegada(fechaFiltro) {
+        try {
+            const fechaBase = fechaFiltro ? new Date(fechaFiltro) : new Date();
+            fechaBase.setHours(0, 0, 0, 0);
+            const ordenes = await this.prisma.ordenes_produccion.findMany({
+                where: {
+                    fecha_Llegada: {
+                        not: null,
+                        gte: fechaBase,
+                    },
+                    lotes_llegada: {
+                        none: {},
+                    },
+                },
+                select: {
+                    id_Orden_Product: true,
+                    fecha_Llegada: true,
+                    createdAt: true,
+                },
+                orderBy: {
+                    fecha_Llegada: 'asc',
+                },
+            });
+            return { success: true, result: ordenes };
+        }
+        catch (error) {
+            console.error('Error al obtener ordenes pendientes de llegada:', error);
+            return { success: false, error: error.message };
+        }
+    }
+    async crearLoteConChecklist(payload) {
+        try {
+            const { no_lote, orden_produccion_id, reviso_nombre, estado_checklist, fecha_llegada, fecha_Revision, observaciones, contenedores, } = payload;
+            if (!no_lote || !orden_produccion_id || !reviso_nombre || !contenedores || contenedores.length === 0) {
+                return {
+                    success: false,
+                    error: 'Faltan campos requeridos (no_lote, orden_produccion_id, reviso_nombre o contenedores).'
+                };
+            }
+            const nuevoLote = await this.prisma.lotes_llegada.create({
+                data: {
+                    no_lote,
+                    orden_produccion_id: Number(orden_produccion_id),
+                    reviso_nombre,
+                    estado_checklist,
+                    fecha_Revision,
+                    fecha_llegada,
+                    observaciones: observaciones == null ? observaciones : JSON.stringify(observaciones),
+                },
+            });
+            await this.prisma.checklist_contenedor.createMany({
+                data: contenedores.map((c) => ({
+                    lote_Llegada_id: nuevoLote.id,
+                    no_consecutivo: Number(c.no_consecutivo),
+                    numero_contenedor: c.numero_contenedor,
+                    tapa_valvula: Boolean(c.tapa_valvula),
+                    rejilla_danada: Boolean(c.rejilla_danada),
+                    base_danada: Boolean(c.base_danada),
+                    derrame: Boolean(c.derrame),
+                    observaciones: c.observaciones || null,
+                })),
+            });
+            return { success: true, result: nuevoLote };
+        }
+        catch (error) {
+            console.error('Error al registrar lote de llegada con checklist:', error);
             return { success: false, error: error.message };
         }
     }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'; 
 import { PrismaService } from '../prisma.service'; 
-import { equipos_tanques_estatus_proceso, lotes_produccion_estado_Calida, muestras_estado_Muestra, muestras_etapa_Muestra } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
+import { equipos_tanques_estatus_proceso, lotes_produccion_estado_Calida, muestras_estado_Muestra, muestras_etapa_Muestra, ordenes_produccion_estatus_flujo } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
 
 @Injectable() 
 export class ProductionService { 
@@ -176,7 +176,7 @@ if (statusFormatted === 'ESPERA_CALIDAD' && idVentaOrigen) {
       id_Venta_Origen: Number(idVentaOrigen),
     },
     data: {
-      estatus_flujo: 'calidad' as equipos_tanques_estatus_proceso,
+      estatus_flujo: 'calidad' as ordenes_produccion_estatus_flujo,
     },
   });
 
