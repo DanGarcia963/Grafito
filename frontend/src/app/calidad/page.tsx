@@ -5,7 +5,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/context/SocketContext';
 import { EstadoMuestra } from '@/types/muestras';
+import { 
 
+  ClipboardCheck, Truck, PackageCheck, AlertTriangle
+} from 'lucide-react';
 type IconProps = React.SVGProps<SVGSVGElement>;
 
 const Icon = ({ children, ...props }: IconProps & { children?: React.ReactNode }) => (
@@ -36,7 +39,7 @@ interface ParametroLaboratorio {
   unidad_Medida?: string;
   unidad?: string;
   tipo_Dato?: string;
-}
+  }
 
 export const CalidadMuestrasScreen: React.FC = () => {
   const socket = useSocket();
@@ -58,6 +61,13 @@ const [loadingEspecificaciones, setLoadingEspecificaciones] = useState<boolean>(
   const [analistaNombre, setAnalistaNombre] = useState<string>('');
 const [sugerenciasAnalistas, setSugerenciasAnalistas] = useState<any[]>([]);
 const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
+
+// Estados nuevos para Lotes de Grafito
+  const [lotesLlegada, setLotesLlegada] = useState<any[]>([]);
+  const [loteSeleccionado, setLoteSeleccionado] = useState<any>(null);
+
+// Pestaña activa: 'MUESTRAS' o 'CHECKLIST'
+  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CHECKLIST'>('MUESTRAS');
 
   // Estado del Modal de Captura
   const [muestraSeleccionada, setMuestraSeleccionada] = useState<any | null>(null);
@@ -492,6 +502,30 @@ return (
         </div>
       </div>
 
+      {/* Selector de Pestañas Integrado */}
+          <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex items-center">
+            <button
+              onClick={() => setVistaActiva('MUESTRAS')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                vistaActiva === 'MUESTRAS'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <FlaskConical className="w-4 h-4" /> Muestras Calidad
+            </button>
+            <button
+              onClick={() => setVistaActiva('CHECKLIST')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                vistaActiva === 'CHECKLIST'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Truck className="w-4 h-4" /> Checklist Recepción
+            </button>
+          </div>
+
       <button 
         onClick={fetchMuestras}
         disabled={loadingMuestras}
@@ -500,528 +534,707 @@ return (
         <RefreshCw className={`w-4 h-4 ${loadingMuestras ? 'animate-spin' : ''}`} /> Actualizar Lista
       </button>
     </div>
-
-    {/* Tarjetas resumen (KPIs) */}
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">En Análisis</p>
-        <p className="text-2xl font-bold text-amber-400 mt-1">
-          {muestras.filter(m => getMuestraData(m).estado.toUpperCase() === 'EN_ANALISIS').length}
-        </p>
-      </div>
-      <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Aprobadas</p>
-        <p className="text-2xl font-bold text-emerald-400 mt-1">
-          {muestras.filter(m => getMuestraData(m).estado.toUpperCase() === 'APROBADO').length}
-        </p>
-      </div>
-      <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Rechazadas</p>
-        <p className="text-2xl font-bold text-rose-400 mt-1">
-          {muestras.filter(m => getMuestraData(m).estado.toUpperCase() === 'RECHAZADO').length}
-        </p>
-      </div>
-      <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Recibidas</p>
-        <p className="text-2xl font-bold text-cyan-400 mt-1">{muestras.length}</p>
-      </div>
-    </div>
-
-    {/* Barra de Filtros y Búsqueda */}
-    <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-slate-900/40 p-3 rounded-xl border border-slate-800">
-      <div className="relative w-full sm:w-80">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-        <input
-          type="text"
-          placeholder="Buscar muestra, lote o tanque..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-700/80 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-        />
-      </div>
-
-      <div className="flex items-center gap-2 w-full sm:w-auto">
-        <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-        <select
-          value={filtroEstado}
-          onChange={(e) => setFiltroEstado(e.target.value)}
-          className="w-full sm:w-auto bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-        >
-          <option value="TODOS">Todas las muestras</option>
-          <option value="EN_ANALISIS">En Análisis</option>
-          <option value="APROBADO">Aprobadas</option>
-          <option value="RECHAZADO">Rechazadas</option>
-        </select>
-      </div>
-    </div>
-
-    {/* Grid de Tarjetas de Muestras */}
-    {loadingMuestras ? (
-      <div className="p-12 text-center text-slate-400">
-        <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2 text-cyan-500" />
-        <p className="text-sm">Cargando muestras de laboratorio...</p>
-      </div>
-    ) : muestrasFiltradas.length === 0 ? (
-      <div className="flex flex-col items-center justify-center p-12 bg-slate-900/20 border border-dashed border-slate-800 rounded-2xl text-center">
-        <FlaskConical className="w-12 h-12 text-slate-600 mb-3" />
-        <h3 className="text-lg font-medium text-slate-300">No hay muestras para mostrar</h3>
-        <p className="text-sm text-slate-500 max-w-sm mt-1">
-          {muestras.length > 0 
-            ? 'No se encontraron muestras que coincidan con la búsqueda o el filtro actual.'
-            : 'Las muestras aparecerán aquí automáticamente una vez que un tanque pase al estado "En Espera de Calidad".'}
-        </p>
-      </div>
-    ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {muestrasFiltradas.map((muestra) => {
-          const data = getMuestraData(muestra);
-          const estadoUpper = String(data.estado || '').toUpperCase();
-          const esPendiente = estadoUpper === 'PENDIENTE'
-          const esFinalizada = estadoUpper === 'APROBADO' || estadoUpper === 'RECHAZADO' || estadoUpper === 'ACEPTADO';
-
-          return (
-            <div
-              key={data.id}
-              className="group bg-slate-900/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:shadow-lg hover:shadow-cyan-950/20"
-            >
-              <div>
-                <div className="flex items-start justify-between gap-2 mb-4">
-                  <div>
-                    <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wide">
-                      Muestra #{data.id}
-                    </span>
-                    <h3 className="text-lg font-bold text-white tracking-tight">
-                      {data.codigo}
-                    </h3>
-                  </div>
-                  {renderBadgeEstado(data.estado)}
-                </div>
-
-                <div className="space-y-2.5 text-sm border-t border-slate-800/80 pt-4 mb-4">
-                  <div className="flex items-center justify-between text-slate-300">
-                    <span className="text-slate-500 flex items-center gap-1.5">
-                      <Database className="w-4 h-4 text-cyan-400" /> Tanque Origen:
-                    </span>
-                    <span className="font-medium bg-slate-800 px-2.5 py-0.5 rounded text-slate-200">
-                      {data.nombreTanque}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-300">
-                    <span className="text-slate-500">Lote de Prod.:</span>
-                    <span className="font-semibold text-slate-200">{data.noLote}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-300">
-                    <span className="text-slate-500">Producto:</span>
-                    <span className="font-medium text-slate-300 truncate max-w-[180px]" title={data.nombreProducto}>
-                      {data.nombreProducto}
-                    </span>
-                  </div>
-
-                  {data.nombreCliente && (
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span className="text-slate-500 flex items-center gap-1.5">
-                        <User className="w-4 h-4 text-slate-500" /> Registrado por:
-                      </span>
-                      <span className="font-medium text-slate-400 truncate max-w-[180px]" title={data.nombreCliente}>
-                        {data.nombreCliente}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-800/40">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5" /> 
-                      {data.fecha ? new Date(data.fecha).toLocaleString('es-MX') : 'Fecha no disp.'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800">
-                <button
-                  onClick={() => abrirModalCaptura(muestra)}
-                  disabled={esPendiente}
-                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-colors ${
-                    esPendiente
-                      ? 'bg-slate-900/40 text-slate-500 border border-slate-800/80 cursor-not-allowed'
-                      : esFinalizada
-                      ? 'bg-slate-800/60 text-slate-400 border border-slate-700/50 hover:bg-slate-800'
-                      : 'bg-cyan-600/10 hover:bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 group-hover:border-cyan-500/50'
-                  }`}
-                >
-                  {esPendiente ? (
-                    <>
-                      <Clock className="w-4 h-4 text-slate-500" /> Muestra en Tránsito
-                    </>
-                  ) : esFinalizada ? (
-                    <>
-                      <Lock className="w-4 h-4 text-slate-400" /> Ver Dictamen (Finalizado)
-                    </>
-                  ) : (
-                    <>
-                      Capturar Resultados
-                      <ChevronRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    )}
-
-    {/* Modal Formulario Captura */}
-{/* Modal Formulario Captura / Vista Detalle */}
-{muestraSeleccionada && (() => {
-  const datosMuestra = getMuestraData(muestraSeleccionada);
-  const estadoActual = String(datosMuestra.estado || '').toUpperCase();
-  const esReadOnly = esModoLectura || estadoActual === 'APROBADO' || estadoActual === 'RECHAZADO' || estadoActual === 'ACEPTADO';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl my-8 text-slate-100">
-        
-        {/* Header Modal */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-400">
-              <FlaskConical className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                {esReadOnly ? 'Detalle de Análisis' : 'Captura de Análisis'} - <span className="text-cyan-400">{datosMuestra.codigo}</span>
-                {esReadOnly && (
-                  <span className="text-xs bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-0.5 rounded-full flex items-center gap-1 font-normal">
-                    <Lock className="w-3 h-3" /> Solo Lectura
-                  </span>
-                )}
-              </h2>
-              <p className="text-xs text-slate-400">
-                {datosMuestra.nombreProducto} • Lote: {datosMuestra.noLote} • Tanque: {datosMuestra.nombreTanque || 'N/A'}
-              </p>
-            </div>
+    {vistaActiva === 'MUESTRAS' && (
+      <>
+        {/* Tarjetas resumen (KPIs) */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">En Análisis</p>
+            <p className="text-2xl font-bold text-amber-400 mt-1">
+              {muestras.filter(m => getMuestraData(m).estado.toUpperCase() === 'EN_ANALISIS').length}
+            </p>
           </div>
-          <button
-            onClick={cerrarModal}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-          >
-            ✕
-          </button>
+          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Aprobadas</p>
+            <p className="text-2xl font-bold text-emerald-400 mt-1">
+              {muestras.filter(m => getMuestraData(m).estado.toUpperCase() === 'APROBADO').length}
+            </p>
+          </div>
+          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Rechazadas</p>
+            <p className="text-2xl font-bold text-rose-400 mt-1">
+              {muestras.filter(m => getMuestraData(m).estado.toUpperCase() === 'RECHAZADO').length}
+            </p>
+          </div>
+          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Recibidas</p>
+            <p className="text-2xl font-bold text-cyan-400 mt-1">{muestras.length}</p>
+          </div>
         </div>
 
-        <div className="p-6">
-          {esReadOnly ? (
-            /* ================= VISTA DE DETALLE (SÓLO LECTURA) ================= */
-            <div className="space-y-6">
-              
-              {/* Ficha Resumen de Dictamen */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-950/50 border border-slate-800">
-                <div>
-                  <span className="text-xs text-slate-400 block font-medium uppercase tracking-wider mb-1">Dictamen Emitido</span>
-                  <div>{renderBadgeEstado(muestraSeleccionada.dictamen || muestraSeleccionada.estado_Muestra)}</div>
-                </div>
-                <div>
-                  <span className="text-xs text-slate-400 block font-medium uppercase tracking-wider mb-1">Tipo de Muestra</span>
-                  <span className="text-sm font-semibold text-slate-200">
-                    {datosMuestra.tipoMuestra}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-xs text-slate-400 block font-medium uppercase tracking-wider mb-1">Analista Responsable</span>
-                  <span className="text-sm font-semibold text-slate-200">
-                    {muestraSeleccionada.analista_Nombre || muestraSeleccionada.personas?.nombre || datosMuestra.nombreAnalista || 'No registrado'}
-                  </span>
-                </div>
-              </div>
+        {/* Barra de Filtros y Búsqueda */}
+        <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-slate-900/40 p-3 rounded-xl border border-slate-800">
+          <div className="relative w-full sm:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar muestra, lote o tanque..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-700/80 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+            />
+          </div>
 
-              {/* Tabla de Parámetros Medidos */}
-              <div>
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                  Parámetros de Laboratorio Registrados
-                </h3>
-                {loadingEspecificaciones ? (
-                  <p className="text-slate-400 text-sm italic">Cargando parámetros...</p>
-                ) : especificacionesGuardadas.length === 0 ? (
-                  <div className="p-4 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                    No hay parámetros registrados para esta muestra.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="bg-slate-950 text-slate-400 uppercase text-xs">
-                        <tr>
-                          <th className="p-3">Parámetro</th>
-                          <th className="p-3">Valor Obtenido</th>
-                          <th className="p-3">Estatus</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800 bg-slate-900/50">
-                        {especificacionesGuardadas.map((spec: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-slate-800/30">
-                            <td className="p-3 font-medium">
-                              {spec.parametros_laboratorio?.nombre_Parametro || 'N/A'}
-                            </td>
-                            <td className="p-3 font-mono text-cyan-400">
-                              {spec.valor_Obtenido_Num ?? 'N/A'}
-                            </td>
-                            <td className="p-3">
-                              {spec.cumple_Especificacion ? (
-                                <span className="text-emerald-400 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                                  Cumple
-                                </span>
-                              ) : (
-                                <span className="text-rose-400 text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20">
-                                  No Cumple
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="w-full sm:w-auto bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+            >
+              <option value="TODOS">Todas las muestras</option>
+              <option value="EN_ANALISIS">En Análisis</option>
+              <option value="APROBADO">Aprobadas</option>
+              <option value="RECHAZADO">Rechazadas</option>
+            </select>
+          </div>
+        </div>
 
-              {/* Sección de Observaciones */}
-              <div>
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Observaciones de Calidad
-                </h3>
-                <div className="p-3.5 rounded-xl bg-slate-950/50 border border-slate-800 text-slate-300 text-sm min-h-[60px]">
-                  {muestraSeleccionada.observaciones || 'Sin observaciones registradas.'}
-                </div>
-              </div>
+        {/* Grid de Tarjetas de Muestras */}
+        {loadingMuestras ? (
+          <div className="p-12 text-center text-slate-400">
+            <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2 text-cyan-500" />
+            <p className="text-sm">Cargando muestras de laboratorio...</p>
+          </div>
+        ) : muestrasFiltradas.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-12 bg-slate-900/20 border border-dashed border-slate-800 rounded-2xl text-center">
+            <FlaskConical className="w-12 h-12 text-slate-600 mb-3" />
+            <h3 className="text-lg font-medium text-slate-300">No hay muestras para mostrar</h3>
+            <p className="text-sm text-slate-500 max-w-sm mt-1">
+              {muestras.length > 0 
+                ? 'No se encontraron muestras que coincidan con la búsqueda o el filtro actual.'
+                : 'Las muestras aparecerán aquí automáticamente una vez que un tanque pase al estado "En Espera de Calidad".'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {muestrasFiltradas.map((muestra) => {
+              const data = getMuestraData(muestra);
+              const estadoUpper = String(data.estado || '').toUpperCase();
+              const esPendiente = estadoUpper === 'PENDIENTE'
+              const esFinalizada = estadoUpper === 'APROBADO' || estadoUpper === 'RECHAZADO' || estadoUpper === 'ACEPTADO';
 
-              <div className="flex justify-end pt-4 border-t border-slate-800">
-                <button
-                  onClick={cerrarModal}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors"
+              return (
+                <div
+                  key={data.id}
+                  className="group bg-slate-900/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:shadow-lg hover:shadow-cyan-950/20"
                 >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* ================= VISTA DE FORMULARIO (EDICIÓN / CAPTURA) ================= */
-            <form onSubmit={guardarResultados} className="space-y-5">
-              
-              {/* Sección de Parámetros Dinámicos */}
-              <div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                    Parámetros de Laboratorio ({parametrosSeleccionados.length})
-                  </h3>
-
-                  {/* Controles para Agregar Parámetro faltante */}
-                  {parametros.length > parametrosSeleccionados.length && (
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={parametroAAgregar}
-                        onChange={(e) => setParametroAAgregar(e.target.value)}
-                        className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                      >
-                        <option value="">+ Agregar otro parámetro...</option>
-                        {parametros
-                          .filter((p) => {
-                            const idParam = p.id_Parametro ?? p.id ?? 0;
-                            return !parametrosSeleccionados.includes(idParam);
-                          })
-                          .map((p) => {
-                            const idParam = p.id_Parametro ?? p.id ?? 0;
-                            const nombre = p.nombre_Parametro ?? p.nombre;
-                            return (
-                              <option key={idParam} value={idParam}>
-                                {nombre}
-                              </option>
-                            );
-                          })}
-                      </select>
-
-                      <button
-                        type="button"
-                        onClick={handleAgregarParametro}
-                        disabled={!parametroAAgregar}
-                        className="px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/40 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
-                      >
-                        Agregar
-                      </button>
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-4">
+                      <div>
+                        <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wide">
+                          Muestra #{data.id}
+                        </span>
+                        <h3 className="text-lg font-bold text-white tracking-tight">
+                          {data.codigo}
+                        </h3>
+                      </div>
+                      {renderBadgeEstado(data.estado)}
                     </div>
-                  )}
+
+                    <div className="space-y-2.5 text-sm border-t border-slate-800/80 pt-4 mb-4">
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="text-slate-500 flex items-center gap-1.5">
+                          <Database className="w-4 h-4 text-cyan-400" /> Tanque Origen:
+                        </span>
+                        <span className="font-medium bg-slate-800 px-2.5 py-0.5 rounded text-slate-200">
+                          {data.nombreTanque}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="text-slate-500">Lote de Prod.:</span>
+                        <span className="font-semibold text-slate-200">{data.noLote}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="text-slate-500">Producto:</span>
+                        <span className="font-medium text-slate-300 truncate max-w-[180px]" title={data.nombreProducto}>
+                          {data.nombreProducto}
+                        </span>
+                      </div>
+
+                      {data.nombreCliente && (
+                        <div className="flex items-center justify-between text-slate-300">
+                          <span className="text-slate-500 flex items-center gap-1.5">
+                            <User className="w-4 h-4 text-slate-500" /> Registrado por:
+                          </span>
+                          <span className="font-medium text-slate-400 truncate max-w-[180px]" title={data.nombreCliente}>
+                            {data.nombreCliente}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-800/40">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5" /> 
+                          {data.fecha ? new Date(data.fecha).toLocaleString('es-MX') : 'Fecha no disp.'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800">
+                    <button
+                      onClick={() => abrirModalCaptura(muestra)}
+                      disabled={esPendiente}
+                      className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-colors ${
+                        esPendiente
+                          ? 'bg-slate-900/40 text-slate-500 border border-slate-800/80 cursor-not-allowed'
+                          : esFinalizada
+                          ? 'bg-slate-800/60 text-slate-400 border border-slate-700/50 hover:bg-slate-800'
+                          : 'bg-cyan-600/10 hover:bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 group-hover:border-cyan-500/50'
+                      }`}
+                    >
+                      {esPendiente ? (
+                        <>
+                          <Clock className="w-4 h-4 text-slate-500" /> Muestra en Tránsito
+                        </>
+                      ) : esFinalizada ? (
+                        <>
+                          <Lock className="w-4 h-4 text-slate-400" /> Ver Dictamen (Finalizado)
+                        </>
+                      ) : (
+                        <>
+                          Capturar Resultados
+                          <ChevronRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-
-                {loadingParametros ? (
-                  <p className="text-sm text-slate-400">Cargando parámetros...</p>
-                ) : parametrosSeleccionados.length === 0 ? (
-                  <div className="p-4 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                    No hay parámetros seleccionados para esta prueba.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {parametros
-                      .filter((p) => {
-                        const idParam = p.id_Parametro ?? p.id ?? 0;
-                        return parametrosSeleccionados.includes(idParam);
-                      })
-                      .map((p) => {
-                        const idParam = p.id_Parametro ?? p.id ?? 0;
-                        const nombre = p.nombre_Parametro ?? p.nombre ?? `Parámetro #${idParam}`;
-                        const unidad = p.unidad_Medida ?? p.unidad;
-                        const tipoDato = String(p.tipo_Dato ?? '').toUpperCase();
-                        const esTexto = tipoDato === 'TEXTO';
-
-                        return (
-                          <div key={idParam} className="space-y-1 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
-                            <div className="flex justify-between items-center">
-                              <label className="text-xs font-medium text-slate-300 flex items-center gap-1">
-                                <span>{nombre}</span>
-                                {unidad && <span className="text-slate-500">({unidad})</span>}
-                              </label>
-
-                              <button
-                                type="button"
-                                onClick={() => handleEliminarParametro(idParam)}
-                                title="Quitar este parámetro de la captura"
-                                className="text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 p-1 rounded transition-colors text-xs"
-                              >
-                                ✕
-                              </button>
-                            </div>
-
-                            <input
-                              type={esTexto ? "text" : "number"}
-                              step={esTexto ? undefined : "any"}
-                              required
-                              placeholder={esTexto ? "Ej. Cumple / Incoloro" : "0.00"}
-                              value={mediciones[idParam] || ''}
-                              onChange={(e) => handleMedicionChange(idParam, e.target.value)}
-                              className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                            />
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
-              </div>
-
-              {/* Tipo de muestra */}
+              );
+            })}
+          </div>
+        )}
+    </>
+    )}
+    {/* ==================================================================== */}
+      {/* VISTA 2: CHECKLIST MANTENIMIENTO (LOTES DE GRAFITO SUCIO) */}
+      {/* ==================================================================== */}
+      {vistaActiva === 'CHECKLIST' && (
+        <div className="space-y-6">
+          
+          {/* KPIs Checklist */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Tipo de Muestra
-                </label>
-                <select
-                  value={tipoMuestra}
-                  onChange={(e) => setTipoMuestra(e.target.value)}
-                  className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
-                >
-                  <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
-                  <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
-                  <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
-                  <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
-                </select>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Pendientes de Checklist</p>
+                <p className="text-2xl font-bold text-amber-400 mt-1">2</p>
               </div>
+              <Clock className="w-8 h-8 text-amber-500/30" />
+            </div>
+            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Con Incidencias</p>
+                <p className="text-2xl font-bold text-rose-400 mt-1">1</p>
+              </div>
+              <AlertTriangle className="w-8 h-8 text-rose-500/30" />
+            </div>
+            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Completados Hoy</p>
+                <p className="text-2xl font-bold text-emerald-400 mt-1">5</p>
+              </div>
+              <PackageCheck className="w-8 h-8 text-emerald-500/30" />
+            </div>
+          </div>
 
-              {/* Buscador / Creador de Analista */}
-              <div className="relative">
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Analista / Laboratorista
-                </label>
-                <input
-                  type="text"
-                  value={analistaNombre}
-                  onChange={(e) => buscarAnalistas(e.target.value)}
-                  onFocus={() => analistaNombre.length >= 2 && setMostrarSugerencias(true)}
-                  placeholder="Escribe el nombre del analista..."
-                  className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
-                />
+          {/* Tabla de Lotes Llegados para Inspección */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                <Truck className="w-4 h-4 text-cyan-400" />
+                Lotes de Grafito Sucio Arribados a Planta
+              </h3>
+            </div>
 
-                {mostrarSugerencias && sugerenciasAnalistas.length > 0 && (
-                  <ul className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl max-h-40 overflow-y-auto shadow-lg">
-                    {sugerenciasAnalistas.map((item) => (
-                      <li
-                        key={item.id}
-                        onClick={() => seleccionarAnalista(item.nombre)}
-                        className="px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 cursor-pointer transition-colors"
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 text-xs uppercase border-b border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Lote</th>
+                    <th className="p-3.5">Producto</th>
+                    <th className="p-3.5">Fecha Llegada</th>
+                    <th className="p-3.5">Revisó</th>
+                    <th className="p-3.5">Estatus Checklist</th>
+                    <th className="p-3.5 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  <tr className="hover:bg-slate-800/30 transition-colors">
+                    <td className="p-3.5 font-bold text-cyan-400">AR511-5-7961</td>
+                    <td className="p-3.5">ORSA VFG-SUCIO</td>
+                    <td className="p-3.5">11/09/2026</td>
+                    <td className="p-3.5">JUAN</td>
+                    <td className="p-3.5">
+                      <span className="px-2.5 py-1 text-xs rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
+                        PENDIENTE
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-right">
+                      <button 
+                        onClick={() => setLoteSeleccionado({
+                          lote: "AR511-5-7961",
+                          producto: "ORSA VFG-SUCIO",
+                          fecha: "11/09/2026",
+                          reviso: "JUAN"
+                        })}
+                        className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 rounded-lg text-xs font-semibold transition-colors"
                       >
-                        {item.nombre}
-                      </li>
+                        Realizar Checklist
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ==================================================================== */}
+      {/* MODAL CHECKLIST CONTENEDORES (Mantenimiento) */}
+      {/* ==================================================================== */}
+      {loteSeleccionado && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl my-8 text-slate-100">
+            
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  Checklist de Recepción - Lote <span className="text-cyan-400">{loteSeleccionado.lote}</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Producto: {loteSeleccionado.producto} • Fecha: {loteSeleccionado.fecha} • Inspector: {loteSeleccionado.reviso}
+                </p>
+              </div>
+              <button 
+                onClick={() => setLoteSeleccionado(null)} 
+                className="text-slate-400 hover:text-white text-lg p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Captura de Tabla de Inspección según Hoja de Campo */}
+            <div className="p-6 space-y-4">
+              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
+                    <tr>
+                      <th className="p-2.5 text-center">No. Cons.</th>
+                      <th className="p-2.5">No. Contenedor</th>
+                      <th className="p-2.5 text-center">Tapa Válvula Dañada</th>
+                      <th className="p-2.5 text-center">Rejilla Dañada</th>
+                      <th className="p-2.5 text-center">Base Dañada</th>
+                      <th className="p-2.5 text-center">Derrame</th>
+                      <th className="p-2.5">Observaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 bg-slate-900/40">
+                    {[1, 2, 3].map((num) => (
+                      <tr key={num} className="hover:bg-slate-800/20">
+                        <td className="p-2.5 text-center font-bold">{num}</td>
+                        <td className="p-2.5">
+                          <input 
+                            type="text" 
+                            defaultValue="S/R" 
+                            className="bg-slate-950 border border-slate-700/80 rounded px-2 py-1 w-24 text-slate-200"
+                          />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <input type="checkbox" className="w-4 h-4 accent-cyan-500 rounded" />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <input type="checkbox" className="w-4 h-4 accent-cyan-500 rounded" />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <input type="checkbox" className="w-4 h-4 accent-cyan-500 rounded" />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <input type="checkbox" className="w-4 h-4 accent-rose-500 rounded" />
+                        </td>
+                        <td className="p-2.5">
+                          <input 
+                            type="text" 
+                            placeholder="Ej. FAGOR 3RA VUELTA" 
+                            className="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-slate-200"
+                          />
+                        </td>
+                      </tr>
                     ))}
-                  </ul>
-                )}
+                  </tbody>
+                </table>
               </div>
 
-              {/* Dictamen Final */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Dictamen Final
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setDictamen('APROBADO')}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
-                      dictamen === 'APROBADO'
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
-                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-4 h-4" /> Aprobado
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDictamen('RECHAZADO')}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
-                      dictamen === 'RECHAZADO'
-                        ? 'bg-rose-500/20 text-rose-400 border-rose-500/50'
-                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <XCircle className="w-4 h-4" /> Rechazado
-                  </button>
-                </div>
-              </div>
-
-              {/* Observaciones */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Observaciones
-                </label>
-                <textarea
-                  rows={3}
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                  placeholder="Escribe comentarios o desviaciones sobre la prueba..."
-                  className="w-full p-3 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                />
-              </div>
-
-              {/* Botones de Acción */}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={cerrarModal}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                  onClick={() => setLoteSeleccionado(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                  type="button"
+                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition-colors"
                 >
-                  {submitting ? 'Guardando...' : 'Guardar Resultados'}
+                  Guardar Checklist Mantenimiento
                 </button>
               </div>
-            </form>
-          )}
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  );
-})()}
+      )}
+      {/* Modal Formulario Captura */}
+      {/* Modal Formulario Captura / Vista Detalle */}
+      {muestraSeleccionada && (() => {
+        const datosMuestra = getMuestraData(muestraSeleccionada);
+        const estadoActual = String(datosMuestra.estado || '').toUpperCase();
+        const esReadOnly = esModoLectura || estadoActual === 'APROBADO' || estadoActual === 'RECHAZADO' || estadoActual === 'ACEPTADO';
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl my-8 text-slate-100">
+              
+              {/* Header Modal */}
+              <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-400">
+                    <FlaskConical className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                      {esReadOnly ? 'Detalle de Análisis' : 'Captura de Análisis'} - <span className="text-cyan-400">{datosMuestra.codigo}</span>
+                      {esReadOnly && (
+                        <span className="text-xs bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-0.5 rounded-full flex items-center gap-1 font-normal">
+                          <Lock className="w-3 h-3" /> Solo Lectura
+                        </span>
+                      )}
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      {datosMuestra.nombreProducto} • Lote: {datosMuestra.noLote} • Tanque: {datosMuestra.nombreTanque || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={cerrarModal}
+                  className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-6">
+                {esReadOnly ? (
+                  /* ================= VISTA DE DETALLE (SÓLO LECTURA) ================= */
+                  <div className="space-y-6">
+                    
+                    {/* Ficha Resumen de Dictamen */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-950/50 border border-slate-800">
+                      <div>
+                        <span className="text-xs text-slate-400 block font-medium uppercase tracking-wider mb-1">Dictamen Emitido</span>
+                        <div>{renderBadgeEstado(muestraSeleccionada.dictamen || muestraSeleccionada.estado_Muestra)}</div>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block font-medium uppercase tracking-wider mb-1">Tipo de Muestra</span>
+                        <span className="text-sm font-semibold text-slate-200">
+                          {datosMuestra.tipoMuestra}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block font-medium uppercase tracking-wider mb-1">Analista Responsable</span>
+                        <span className="text-sm font-semibold text-slate-200">
+                          {muestraSeleccionada.analista_Nombre || muestraSeleccionada.personas?.nombre || datosMuestra.nombreAnalista || 'No registrado'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tabla de Parámetros Medidos */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                        Parámetros de Laboratorio Registrados
+                      </h3>
+                      {loadingEspecificaciones ? (
+                        <p className="text-slate-400 text-sm italic">Cargando parámetros...</p>
+                      ) : especificacionesGuardadas.length === 0 ? (
+                        <div className="p-4 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-center text-xs text-slate-500">
+                          No hay parámetros registrados para esta muestra.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-xl border border-slate-800">
+                          <table className="w-full text-left text-sm text-slate-300">
+                            <thead className="bg-slate-950 text-slate-400 uppercase text-xs">
+                              <tr>
+                                <th className="p-3">Parámetro</th>
+                                <th className="p-3">Valor Obtenido</th>
+                                <th className="p-3">Estatus</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800 bg-slate-900/50">
+                              {especificacionesGuardadas.map((spec: any, idx: number) => (
+                                <tr key={idx} className="hover:bg-slate-800/30">
+                                  <td className="p-3 font-medium">
+                                    {spec.parametros_laboratorio?.nombre_Parametro || 'N/A'}
+                                  </td>
+                                  <td className="p-3 font-mono text-cyan-400">
+                                    {spec.valor_Obtenido_Num ?? 'N/A'}
+                                  </td>
+                                  <td className="p-3">
+                                    {spec.cumple_Especificacion ? (
+                                      <span className="text-emerald-400 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                                        Cumple
+                                      </span>
+                                    ) : (
+                                      <span className="text-rose-400 text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20">
+                                        No Cumple
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sección de Observaciones */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Observaciones de Calidad
+                      </h3>
+                      <div className="p-3.5 rounded-xl bg-slate-950/50 border border-slate-800 text-slate-300 text-sm min-h-[60px]">
+                        {muestraSeleccionada.observaciones || 'Sin observaciones registradas.'}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-4 border-t border-slate-800">
+                      <button
+                        onClick={cerrarModal}
+                        className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors"
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ================= VISTA DE FORMULARIO (EDICIÓN / CAPTURA) ================= */
+                  <form onSubmit={guardarResultados} className="space-y-5">
+                    
+                    {/* Sección de Parámetros Dinámicos */}
+                    <div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                          Parámetros de Laboratorio ({parametrosSeleccionados.length})
+                        </h3>
+
+                        {/* Controles para Agregar Parámetro faltante */}
+                        {parametros.length > parametrosSeleccionados.length && (
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={parametroAAgregar}
+                              onChange={(e) => setParametroAAgregar(e.target.value)}
+                              className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                            >
+                              <option value="">+ Agregar otro parámetro...</option>
+                              {parametros
+                                .filter((p) => {
+                                  const idParam = p.id_Parametro ?? p.id ?? 0;
+                                  return !parametrosSeleccionados.includes(idParam);
+                                })
+                                .map((p) => {
+                                  const idParam = p.id_Parametro ?? p.id ?? 0;
+                                  const nombre = p.nombre_Parametro ?? p.nombre;
+                                  return (
+                                    <option key={idParam} value={idParam}>
+                                      {nombre}
+                                    </option>
+                                  );
+                                })}
+                            </select>
+
+                            <button
+                              type="button"
+                              onClick={handleAgregarParametro}
+                              disabled={!parametroAAgregar}
+                              className="px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/40 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
+                            >
+                              Agregar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {loadingParametros ? (
+                        <p className="text-sm text-slate-400">Cargando parámetros...</p>
+                      ) : parametrosSeleccionados.length === 0 ? (
+                        <div className="p-4 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-center text-xs text-slate-500">
+                          No hay parámetros seleccionados para esta prueba.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {parametros
+                            .filter((p) => {
+                              const idParam = p.id_Parametro ?? p.id ?? 0;
+                              return parametrosSeleccionados.includes(idParam);
+                            })
+                            .map((p) => {
+                              const idParam = p.id_Parametro ?? p.id ?? 0;
+                              const nombre = p.nombre_Parametro ?? p.nombre ?? `Parámetro #${idParam}`;
+                              const unidad = p.unidad_Medida ?? p.unidad;
+                              const tipoDato = String(p.tipo_Dato ?? '').toUpperCase();
+                              const esTexto = tipoDato === 'TEXTO';
+
+                              return (
+                                <div key={idParam} className="space-y-1 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
+                                  <div className="flex justify-between items-center">
+                                    <label className="text-xs font-medium text-slate-300 flex items-center gap-1">
+                                      <span>{nombre}</span>
+                                      {unidad && <span className="text-slate-500">({unidad})</span>}
+                                    </label>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEliminarParametro(idParam)}
+                                      title="Quitar este parámetro de la captura"
+                                      className="text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 p-1 rounded transition-colors text-xs"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+
+                                  <input
+                                    type={esTexto ? "text" : "number"}
+                                    step={esTexto ? undefined : "any"}
+                                    required
+                                    placeholder={esTexto ? "Ej. Cumple / Incoloro" : "0.00"}
+                                    value={mediciones[idParam] || ''}
+                                    onChange={(e) => handleMedicionChange(idParam, e.target.value)}
+                                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                                  />
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Tipo de muestra */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Tipo de Muestra
+                      </label>
+                      <select
+                        value={tipoMuestra}
+                        onChange={(e) => setTipoMuestra(e.target.value)}
+                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
+                      >
+                        <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
+                        <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
+                        <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
+                        <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
+                      </select>
+                    </div>
+
+                    {/* Buscador / Creador de Analista */}
+                    <div className="relative">
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Analista / Laboratorista
+                      </label>
+                      <input
+                        type="text"
+                        value={analistaNombre}
+                        onChange={(e) => buscarAnalistas(e.target.value)}
+                        onFocus={() => analistaNombre.length >= 2 && setMostrarSugerencias(true)}
+                        placeholder="Escribe el nombre del analista..."
+                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
+                      />
+
+                      {mostrarSugerencias && sugerenciasAnalistas.length > 0 && (
+                        <ul className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl max-h-40 overflow-y-auto shadow-lg">
+                          {sugerenciasAnalistas.map((item) => (
+                            <li
+                              key={item.id}
+                              onClick={() => seleccionarAnalista(item.nombre)}
+                              className="px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 cursor-pointer transition-colors"
+                            >
+                              {item.nombre}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    {/* Dictamen Final */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Dictamen Final
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setDictamen('APROBADO')}
+                          className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
+                            dictamen === 'APROBADO'
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-4 h-4" /> Aprobado
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDictamen('RECHAZADO')}
+                          className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
+                            dictamen === 'RECHAZADO'
+                              ? 'bg-rose-500/20 text-rose-400 border-rose-500/50'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <XCircle className="w-4 h-4" /> Rechazado
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Observaciones */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                        Observaciones
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={observaciones}
+                        onChange={(e) => setObservaciones(e.target.value)}
+                        placeholder="Escribe comentarios o desviaciones sobre la prueba..."
+                        className="w-full p-3 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                      />
+                    </div>
+
+                    {/* Botones de Acción */}
+                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={cerrarModal}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                      >
+                        {submitting ? 'Guardando...' : 'Guardar Resultados'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
   </div>
 );
 };

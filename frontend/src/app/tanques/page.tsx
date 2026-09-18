@@ -582,7 +582,7 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
                         {item.equipos_tanques?.nombre_Equipo || item.lotes_produccion?.equipos_tanques?.nombre_Equipo || '-'}
                       </td>
                       <td className="p-2 text-slate-500">
-                        {item.personas?.nombre || 'Sin registrar'}
+                        {item.personas_muestras_cliente_idTopersonas?.nombre || 'Sin registrar'}
                       </td>
                       <td className="p-2 text-center">
                         <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold text-[10px]">

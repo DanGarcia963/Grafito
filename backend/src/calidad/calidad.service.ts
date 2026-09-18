@@ -2,6 +2,28 @@ import { Injectable, InternalServerErrorException, NotFoundException } from '@ne
 import { PrismaService } from '../prisma.service'; 
 import {lotes_produccion_estado_Calida, muestras_estado_Muestra } from '@prisma/client';
 
+// Interfaces para tipar la recepción de datos desde el Frontend
+export interface ContenedorInput {
+  no_consecutivo: number;
+  numero_contenedor: string;
+  tapa_valvula: boolean;
+  rejilla_danada: boolean;
+  base_danada: boolean;
+  derrame: boolean;
+  observaciones?: string;
+}
+
+export interface CrearLoteInput {
+  no_lote: string;
+  orden_produccion_id: number;
+  reviso_nombre: string;
+  estado_checklist: 'PENDIENTE' | 'EN_REVISION' | 'COMPLETADO' | 'CON_INCIDENCIAS';
+  fecha_llegada:Date;
+  fecha_Revision: Date;
+  observaciones?: Record<string, any>;
+  contenedores: ContenedorInput[];
+}
+
 @Injectable() 
 export class CalidadService { 
   constructor(private readonly prisma: PrismaService) {} 
@@ -135,7 +157,15 @@ async obtenerTodasMuestrasConDictamen() {
   try {
     const muestras = await this.prisma.muestras.findMany({
       include: {
-        personas: {
+        personas_muestras_cliente_idTopersonas: {
+          select: {
+            id_Persona: true,
+            nombre: true,
+            tipo_persona: true,
+          },
+        },
+
+        personas_muestras_analista_idTopersonas: {
           select: {
             id_Persona: true,
             nombre: true,
@@ -427,7 +457,89 @@ async buscarAnalistas(query: string) {
   }
 }
 
+async obtenerOrdenesPendientesDeLlegada(fechaFiltro?: Date | string) {
+    try {
+      const fechaBase = fechaFiltro ? new Date(fechaFiltro) : new Date();
+      fechaBase.setHours(0, 0, 0, 0);
 
+      const ordenes = await this.prisma.ordenes_produccion.findMany({
+        where: {
+          fecha_Llegada: {
+            not: null,
+            gte: fechaBase,
+          },
+          lotes_llegada: {
+            none: {}, // Asegura que la orden no tenga ningún lote de llegada asignado aún
+          },
+        },
+        select: {
+          id_Orden_Product: true,
+          fecha_Llegada: true,
+          createdAt: true,
+        },
+        orderBy: {
+          fecha_Llegada: 'asc',
+        },
+      });
 
+      return { success: true, result: ordenes };
+    } catch (error: any) {
+      console.error('Error al obtener ordenes pendientes de llegada:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 2. Método para registrar el lote de llegada y su checklist directamente desde los datos enviados por el frontend
+  async crearLoteConChecklist(payload: CrearLoteInput) {
+    try {
+      const {
+        no_lote,
+        orden_produccion_id,
+        reviso_nombre,
+        estado_checklist,
+        fecha_llegada,
+        fecha_Revision,
+        observaciones,
+        contenedores,
+      } = payload;
+
+      if (!no_lote || !orden_produccion_id || !reviso_nombre || !contenedores || contenedores.length === 0) {
+        return { 
+          success: false, 
+          error: 'Faltan campos requeridos (no_lote, orden_produccion_id, reviso_nombre o contenedores).' 
+        };
+      }
+
+const nuevoLote = await this.prisma.lotes_llegada.create({
+  data: {
+    no_lote,
+    orden_produccion_id: Number(orden_produccion_id),
+    reviso_nombre,
+    estado_checklist,
+    fecha_Revision,
+    fecha_llegada,
+    observaciones: observaciones == null ? observaciones : JSON.stringify(observaciones),
+  },
+});
+
+await this.prisma.checklist_contenedor.createMany({
+  data: contenedores.map((c) => ({
+    lote_Llegada_id: nuevoLote.id,
+    no_consecutivo: Number(c.no_consecutivo),
+    numero_contenedor: c.numero_contenedor,
+    tapa_valvula: Boolean(c.tapa_valvula),
+    rejilla_danada: Boolean(c.rejilla_danada),
+    base_danada: Boolean(c.base_danada),
+    derrame: Boolean(c.derrame),
+    observaciones: c.observaciones || null,
+  })),
+});
+
+      return { success: true, result: nuevoLote };
+    } catch (error: any) {
+      console.error('Error al registrar lote de llegada con checklist:', error);
+      return { success: false, error: error.message };
+    }
+  }
 
 }
