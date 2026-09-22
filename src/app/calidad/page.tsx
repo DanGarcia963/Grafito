@@ -30,6 +30,7 @@ const Calendar = (props: IconProps) => <Icon {...props}><rect x="3" y="4" width=
 const ChevronRight = (props: IconProps) => <Icon {...props}><path d="m9 18 6-6-6-6" /></Icon>;
 const RefreshCw = (props: IconProps) => <Icon {...props}><path d="M20 11a8 8 0 0 0-14.8-4L3 10m0-4v4h4M4 13a8 8 0 0 0 14.8 4L21 14m0 4v-4h-4" /></Icon>;
 const Lock = (props: IconProps) => <Icon {...props}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 1 1 8 0v3" /></Icon>;
+import { Plus, Trash2 } from 'lucide-react';
 
 interface ParametroLaboratorio {
   id_Parametro?: number;
@@ -40,6 +41,17 @@ interface ParametroLaboratorio {
   unidad?: string;
   tipo_Dato?: string;
   }
+
+  // Interface opcional para TypeScript
+interface ContenedorState {
+  no_consecutivo: number;
+  numero_contenedor: string;
+  tapa_valvula: boolean;
+  rejilla_danada: boolean;
+  base_danada: boolean;
+  derrame: boolean;
+  observaciones: string;
+}
 
 export const CalidadMuestrasScreen: React.FC = () => {
   const socket = useSocket();
@@ -63,8 +75,16 @@ const [sugerenciasAnalistas, setSugerenciasAnalistas] = useState<any[]>([]);
 const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
 
 // Estados nuevos para Lotes de Grafito
+  // Estados para datos recibidos del backend
   const [lotesLlegada, setLotesLlegada] = useState<any[]>([]);
-  const [loteSeleccionado, setLoteSeleccionado] = useState<any>(null);
+  const [cargandoLotes, setCargandoLotes] = useState<boolean>(false);
+  
+  // Estados para el Modal de Checklist
+  const [loteSeleccionado, setLoteSeleccionado] = useState<any | null>(null);
+  const [revisoNombre, setRevisoNombre] = useState<string>('');
+  const [guardandoChecklist, setGuardandoChecklist] = useState<boolean>(false);
+
+  const [contenedores, setContenedores] = useState<ContenedorState[]>([])
 
 // Pestaña activa: 'MUESTRAS' o 'CHECKLIST'
   const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CHECKLIST'>('MUESTRAS');
@@ -128,23 +148,155 @@ tipoMuestra: obtenerTipoMuestra(muestra),
 };
 
 const cargarLotesLlegada = async () => {
-  try {
-    const response = await fetch(
-      'http://localhost:4002/api/calidad/obtenerOrdenesPendientesDeLlegada'
-    );
+    setCargandoLotes(true);
+    try {
+      const response = await fetch(
+        'http://localhost:4002/api/calidad/obtenerOrdenesPendientesDeLlegada'
+      );
+      const res = await response.json();
 
-    const res = await response.json();
+      if (!response.ok || !res.success) {
+        throw new Error(res.error || 'Error al obtener órdenes pendientes');
+      }
 
-    if (!response.ok || !res.success) {
-      throw new Error(res.error || 'Error al obtener órdenes pendientes');
+      setLotesLlegada(res.result || []);
+    } catch (error) {
+      console.error('Error cargando órdenes pendientes de llegada:', error);
+    } finally {
+      setCargandoLotes(false);
+    }
+  };
+
+  useEffect(() => {
+    if (vistaActiva === 'CHECKLIST') {
+      cargarLotesLlegada();
+    }
+  }, [vistaActiva]);
+
+// ============================================================
+  // MANEJO DEL MODAL Y EXTRACCIÓN DINÁMICA DE CONTENEDORES
+  // ============================================================
+  const abrirModalChecklist = (orden: any) => {
+    setLoteSeleccionado(orden);
+    setRevisoNombre('');
+
+    // Expresión regular para extraer tipo de prensa y número de contenedores
+    const regexObservaciones = /PRENSA\s+([A-Z0-9_-]+)\s*-\s*(\d+)\s+CONTENEDORES/i;
+    
+    let cantidadContenedores = 3; // Valor por defecto si no se especifica
+    let tipoPrensa = '';
+
+    if (orden.observaciones) {
+      const match = orden.observaciones.match(regexObservaciones);
+      if (match) {
+        tipoPrensa = match[1]; // Ej: "FAGOR"
+        const numExtraido = parseInt(match[2], 10);
+        if (!isNaN(numExtraido) && numExtraido > 0) {
+          cantidadContenedores = numExtraido;
+        }
+      }
     }
 
-    console.log('Órdenes pendientes:', res.result);
+    // Rellenar dinámicamente los contenedores según la información extraída
+    const contenedoresGenerados: ContenedorState[] = Array.from(
+      { length: cantidadContenedores },
+      (_, index) => ({
+        no_consecutivo: index + 1,
+        numero_contenedor: 'S/R',
+        tapa_valvula: false,
+        rejilla_danada: false,
+        base_danada: false,
+        derrame: false,
+        observaciones: tipoPrensa ? `PRENSA ${tipoPrensa}` : '',
+      })
+    );
 
-  } catch (error) {
-    console.error('Error cargando órdenes pendientes de llegada:', error);
-  }
-};
+    setContenedores(contenedoresGenerados);
+  };
+
+  const handleContenedorChange = (index: number, field: keyof ContenedorState, value: any) => {
+    const nuevos = [...contenedores];
+    nuevos[index] = { ...nuevos[index], [field]: value };
+    setContenedores(nuevos);
+  };
+
+  const agregarFilaContenedor = () => {
+    setContenedores([
+      ...contenedores,
+      {
+        no_consecutivo: contenedores.length + 1,
+        numero_contenedor: 'S/R',
+        tapa_valvula: false,
+        rejilla_danada: false,
+        base_danada: false,
+        derrame: false,
+        observaciones: '',
+      },
+    ]);
+  };
+
+  const eliminarFilaContenedor = (index: number) => {
+    if (contenedores.length === 1) return;
+    const filtrados = contenedores.filter((_, i) => i !== index);
+    const reindexados = filtrados.map((item, idx) => ({ ...item, no_consecutivo: idx + 1 }));
+    setContenedores(reindexados);
+  };
+
+// ============================================================
+  // GUARDAR CHECKLIST (POST)
+  // ============================================================
+  const handleGuardarChecklist = async () => {
+    if (!revisoNombre.trim()) {
+      alert('Por favor ingresa el nombre de quien revisó.');
+      return;
+    }
+
+    if (!loteSeleccionado) return;
+
+    const tieneIncidencias = contenedores.some(
+      (c) => c.tapa_valvula || c.rejilla_danada || c.base_danada || c.derrame
+    );
+
+    const payload = {
+      no_lote: loteSeleccionado.no_Orden_Produc ? String(loteSeleccionado.no_Orden_Produc) : `ORD-${loteSeleccionado.id_Orden_Produc}`,
+      orden_produccion_id: loteSeleccionado.id_Orden_Produc,
+      reviso_nombre: revisoNombre.trim(),
+      estado_checklist: tieneIncidencias ? 'CON_INCIDENCIAS' : 'COMPLETADO',
+      fecha_llegada: loteSeleccionado.fecha_Llegada,
+      fecha_Revision: new Date().toISOString(),
+      observaciones: {
+        observaciones_orden: loteSeleccionado.observaciones || null,
+        cantidad_venta: loteSeleccionado.cantidad_Venta,
+      },
+      contenedores: contenedores,
+    };
+
+    setGuardandoChecklist(true);
+
+    try {
+      const response = await fetch('http://localhost:4002/api/calidad/crearLoteConChecklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const res = await response.json();
+
+      if (!response.ok || !res.success) {
+        throw new Error(res.error || 'Error al guardar el checklist');
+      }
+
+      alert('¡Checklist guardado correctamente!');
+      setLoteSeleccionado(null);
+      setContenedores([]); // Limpiar la lista al cerrar
+      cargarLotesLlegada();
+    } catch (error: any) {
+      console.error('Error al guardar checklist:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setGuardandoChecklist(false);
+    }
+  };
 
   // 1. Cargar Muestras desde la API
   const fetchMuestras = useCallback(async () => {
@@ -734,27 +886,28 @@ return (
       {/* ==================================================================== */}
       {vistaActiva === 'CHECKLIST' && (
         <div className="space-y-6">
-          
           {/* KPIs Checklist */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Pendientes de Checklist</p>
-                <p className="text-2xl font-bold text-amber-400 mt-1">2</p>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  Pendientes de Checklist
+                </p>
+                <p className="text-2xl font-bold text-amber-400 mt-1">{lotesLlegada.length}</p>
               </div>
               <Clock className="w-8 h-8 text-amber-500/30" />
             </div>
             <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Con Incidencias</p>
-                <p className="text-2xl font-bold text-rose-400 mt-1">1</p>
+                <p className="text-2xl font-bold text-rose-400 mt-1">0</p>
               </div>
               <AlertTriangle className="w-8 h-8 text-rose-500/30" />
             </div>
             <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Completados Hoy</p>
-                <p className="text-2xl font-bold text-emerald-400 mt-1">5</p>
+                <p className="text-2xl font-bold text-emerald-400 mt-1">0</p>
               </div>
               <PackageCheck className="w-8 h-8 text-emerald-500/30" />
             </div>
@@ -765,7 +918,7 @@ return (
             <div className="p-4 border-b border-slate-800 flex items-center justify-between">
               <h3 className="font-semibold text-white text-sm flex items-center gap-2">
                 <Truck className="w-4 h-4 text-cyan-400" />
-                Lotes de Grafito Sucio Arribados a Planta
+                Lotes de Grafito Arribados a Planta Pendientes de Checklist
               </h3>
             </div>
 
@@ -773,71 +926,127 @@ return (
               <table className="w-full text-left text-sm text-slate-300">
                 <thead className="bg-slate-950 text-slate-400 text-xs uppercase border-b border-slate-800">
                   <tr>
-                    <th className="p-3.5">Lote</th>
-                    <th className="p-3.5">Producto</th>
+                    <th className="p-3.5">No. Orden / Lote</th>
+                    <th className="p-3.5">Línea / Observación</th>
                     <th className="p-3.5">Fecha Llegada</th>
-                    <th className="p-3.5">Revisó</th>
+                    <th className="p-3.5">Cantidad Venta</th>
                     <th className="p-3.5">Estatus Checklist</th>
                     <th className="p-3.5 text-right">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  <tr className="hover:bg-slate-800/30 transition-colors">
-                    <td className="p-3.5 font-bold text-cyan-400">AR511-5-7961</td>
-                    <td className="p-3.5">ORSA VFG-SUCIO</td>
-                    <td className="p-3.5">11/09/2026</td>
-                    <td className="p-3.5">JUAN</td>
-                    <td className="p-3.5">
-                      <span className="px-2.5 py-1 text-xs rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                        PENDIENTE
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right">
-                      <button 
-                        onClick={() => setLoteSeleccionado({
-                          lote: "AR511-5-7961",
-                          producto: "ORSA VFG-SUCIO",
-                          fecha: "11/09/2026",
-                          reviso: "JUAN"
-                        })}
-                        className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 rounded-lg text-xs font-semibold transition-colors"
-                      >
-                        Realizar Checklist
-                      </button>
-                    </td>
-                  </tr>
+                  {cargandoLotes ? (
+                    <tr>
+                      <td colSpan={6} className="text-center p-6 text-slate-400">
+                        Cargando órdenes pendientes...
+                      </td>
+                    </tr>
+                  ) : lotesLlegada.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center p-6 text-slate-500">
+                        No hay órdenes pendientes de llegada para revisión.
+                      </td>
+                    </tr>
+                  ) : (
+                    lotesLlegada.map((orden) => (
+                      <tr key={orden.id_Orden_Produc} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="p-3.5 font-bold text-cyan-400">
+                          {orden.no_Orden_Produc || `ORD-${orden.id_Orden_Produc}`}
+                        </td>
+                        <td className="p-3.5 text-xs text-slate-300">
+                          <span className="block font-semibold text-slate-200">{orden.linea_Produccion}</span>
+                          <span className="text-slate-400">{orden.observaciones || 'N/A'}</span>
+                        </td>
+                        <td className="p-3.5">
+                          {orden.fecha_Llegada
+                            ? new Date(orden.fecha_Llegada).toLocaleDateString('es-MX', { timeZone: 'UTC' })
+                            : 'S/N'}
+                        </td>
+                        <td className="p-3.5 font-medium">{orden.cantidad_Venta ?? 'N/A'}</td>
+                        <td className="p-3.5">
+                          <span className="px-2.5 py-1 text-xs rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
+                            PENDIENTE
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => abrirModalChecklist(orden)}
+                            className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 rounded-lg text-xs font-semibold transition-colors"
+                          >
+                            Realizar Checklist
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
       )}
-      {/* ==================================================================== */}
-      {/* MODAL CHECKLIST CONTENEDORES (Mantenimiento) */}
+{/* ==================================================================== */}
+      {/* MODAL CHECKLIST CONTENEDORES */}
       {/* ==================================================================== */}
       {loteSeleccionado && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl my-8 text-slate-100">
-            
             <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  Checklist de Recepción - Lote <span className="text-cyan-400">{loteSeleccionado.lote}</span>
+                  Checklist de Recepción - Orden{' '}
+                  <span className="text-cyan-400">
+                    {loteSeleccionado.no_Orden_Produc || `ORD-${loteSeleccionado.id_Orden_Produc}`}
+                  </span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Producto: {loteSeleccionado.producto} • Fecha: {loteSeleccionado.fecha} • Inspector: {loteSeleccionado.reviso}
+                  Línea: {loteSeleccionado.linea_Produccion} • Fecha Llegada:{' '}
+                  {loteSeleccionado.fecha_Llegada
+                    ? new Date(loteSeleccionado.fecha_Llegada).toLocaleDateString('es-MX', { timeZone: 'UTC' })
+                    : 'N/A'}
                 </p>
               </div>
-              <button 
-                onClick={() => setLoteSeleccionado(null)} 
+              <button
+                onClick={() => setLoteSeleccionado(null)}
                 className="text-slate-400 hover:text-white text-lg p-1"
               >
                 ✕
               </button>
             </div>
 
-            {/* Captura de Tabla de Inspección según Hoja de Campo */}
             <div className="p-6 space-y-4">
+              {/* Campo Inspector */}
+              <div className="bg-slate-950/60 p-4 border border-slate-800 rounded-xl grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Nombre de quien revisa <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={revisoNombre}
+                    onChange={(e) => setRevisoNombre(e.target.value)}
+                    placeholder="Ej. JUAN PÉREZ"
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Observaciones de la Orden</label>
+                  <p className="text-xs text-slate-300 pt-2">{loteSeleccionado.observaciones || 'Sin observaciones'}</p>
+                </div>
+              </div>
+
+              {/* Tabla de Contenedores */}
+              <div className="flex justify-between items-center">
+                <h4 className="text-xs font-semibold uppercase text-slate-400">Inspección por Contenedor</h4>
+                <button
+                  type="button"
+                  onClick={agregarFilaContenedor}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 rounded text-xs flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Agregar Fila
+                </button>
+              </div>
+
               <div className="overflow-x-auto border border-slate-800 rounded-xl">
                 <table className="w-full text-left text-xs text-slate-300">
                   <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
@@ -849,37 +1058,72 @@ return (
                       <th className="p-2.5 text-center">Base Dañada</th>
                       <th className="p-2.5 text-center">Derrame</th>
                       <th className="p-2.5">Observaciones</th>
+                      <th className="p-2.5 text-center">Acción</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800 bg-slate-900/40">
-                    {[1, 2, 3].map((num) => (
-                      <tr key={num} className="hover:bg-slate-800/20">
-                        <td className="p-2.5 text-center font-bold">{num}</td>
+                    {contenedores.map((item, index) => (
+                      <tr key={index} className="hover:bg-slate-800/20">
+                        <td className="p-2.5 text-center font-bold">{item.no_consecutivo}</td>
                         <td className="p-2.5">
-                          <input 
-                            type="text" 
-                            defaultValue="S/R" 
-                            className="bg-slate-950 border border-slate-700/80 rounded px-2 py-1 w-24 text-slate-200"
+                          <input
+                            type="text"
+                            value={item.numero_contenedor}
+                            onChange={(e) => handleContenedorChange(index, 'numero_contenedor', e.target.value)}
+                            className="bg-slate-950 border border-slate-700/80 rounded px-2 py-1 w-28 text-slate-200 text-xs"
                           />
                         </td>
                         <td className="p-2.5 text-center">
-                          <input type="checkbox" className="w-4 h-4 accent-cyan-500 rounded" />
+                          <input
+                            type="checkbox"
+                            checked={item.tapa_valvula}
+                            onChange={(e) => handleContenedorChange(index, 'tapa_valvula', e.target.checked)}
+                            className="w-4 h-4 accent-cyan-500 rounded"
+                          />
                         </td>
                         <td className="p-2.5 text-center">
-                          <input type="checkbox" className="w-4 h-4 accent-cyan-500 rounded" />
+                          <input
+                            type="checkbox"
+                            checked={item.rejilla_danada}
+                            onChange={(e) => handleContenedorChange(index, 'rejilla_danada', e.target.checked)}
+                            className="w-4 h-4 accent-cyan-500 rounded"
+                          />
                         </td>
                         <td className="p-2.5 text-center">
-                          <input type="checkbox" className="w-4 h-4 accent-cyan-500 rounded" />
+                          <input
+                            type="checkbox"
+                            checked={item.base_danada}
+                            onChange={(e) => handleContenedorChange(index, 'base_danada', e.target.checked)}
+                            className="w-4 h-4 accent-cyan-500 rounded"
+                          />
                         </td>
                         <td className="p-2.5 text-center">
-                          <input type="checkbox" className="w-4 h-4 accent-rose-500 rounded" />
+                          <input
+                            type="checkbox"
+                            checked={item.derrame}
+                            onChange={(e) => handleContenedorChange(index, 'derrame', e.target.checked)}
+                            className="w-4 h-4 accent-rose-500 rounded"
+                          />
                         </td>
                         <td className="p-2.5">
-                          <input 
-                            type="text" 
-                            placeholder="Ej. FAGOR 3RA VUELTA" 
-                            className="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-slate-200"
+                          <input
+                            type="text"
+                            value={item.observaciones}
+                            onChange={(e) => handleContenedorChange(index, 'observaciones', e.target.value)}
+                            placeholder="Ej. FAGOR 3RA VUELTA"
+                            className="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-slate-200 text-xs"
                           />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {contenedores.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => eliminarFilaContenedor(index)}
+                              className="text-slate-500 hover:text-rose-400 p-1"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -887,6 +1131,7 @@ return (
                 </table>
               </div>
 
+              {/* Acciones */}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
@@ -897,9 +1142,11 @@ return (
                 </button>
                 <button
                   type="button"
-                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                  disabled={guardandoChecklist}
+                  onClick={handleGuardarChecklist}
+                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
                 >
-                  Guardar Checklist Mantenimiento
+                  {guardandoChecklist ? 'Guardando...' : 'Guardar Checklist Mantenimiento'}
                 </button>
               </div>
             </div>
