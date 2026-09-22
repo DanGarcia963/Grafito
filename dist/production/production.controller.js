@@ -28,15 +28,31 @@ let ProductionController = class ProductionController {
     }
     async actualizar(body) {
         const result = await this.productionService.actualizarTanque(body);
-        return { success: true, data: result };
+        return {
+            success: true,
+            data: result
+        };
     }
     async actualizarEstatusTanque(body) {
         const result = await this.productionService.actualizarEstatusTanque(body);
-        return { success: true, data: result };
+        return {
+            success: true,
+            data: result
+        };
     }
     async actualizarEstatusCalidad(body) {
         const result = await this.productionService.actualizarEstatusCalidad(body);
-        return { success: true, data: result };
+        return {
+            success: true,
+            data: result
+        };
+    }
+    async guardarBitacora(body) {
+        const result = await this.productionService.agregarRegistroBitacora(body);
+        return {
+            success: true,
+            data: result
+        };
     }
 };
 exports.ProductionController = ProductionController;
@@ -74,6 +90,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "actualizarEstatusCalidad", null);
+__decorate([
+    (0, common_1.Post)('guardarBitacora'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], ProductionController.prototype, "guardarBitacora", null);
 exports.ProductionController = ProductionController = __decorate([
     (0, common_1.Controller)('api/produccion'),
     __metadata("design:paramtypes", [production_service_1.ProductionService])

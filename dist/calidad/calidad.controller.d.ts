@@ -211,8 +211,12 @@ export declare class CalidadController {
     obtenerOrdenesPendientesDeLlegada(fechaFiltro?: string): Promise<{
         success: boolean;
         result: {
+            observaciones: string | null;
             id_Orden_Produc: number;
+            linea_Produccion: string | null;
+            cantidad_Venta: number;
             fecha_Llegada: Date | null;
+            no_Orden_Produc: string | null;
         }[];
         error?: undefined;
     } | {
