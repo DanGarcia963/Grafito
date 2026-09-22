@@ -52,7 +52,12 @@ let ProductionService = class ProductionService {
                         },
                     },
                 },
-                where: { linea_Produccion: 'GRAFITO' },
+                where: {
+                    linea_Produccion: 'GRAFITO',
+                    lotes_produccion: {
+                        some: {},
+                    }
+                },
                 orderBy: { fecha_Confirmacion: 'desc' }
             });
             return { success: true, result: grafitos };
@@ -82,10 +87,11 @@ let ProductionService = class ProductionService {
     async actualizarTanque({ idLoteProduccion, tanqueId }) {
         const targetTanqueId = tanqueId !== null && tanqueId !== undefined ? Number(tanqueId) : null;
         await this.prisma.lotes_produccion.updateMany({
-            where: { id_Lote_Produccion: Number(idLoteProduccion) },
+            where: {
+                id_Lote_Produccion: Number(idLoteProduccion),
+            },
             data: {
                 tanque_id: targetTanqueId,
-                bitacora: JSON.stringify([{ fecha: new Date(), accion: 'ASIGNACION_TANQUE', tanqueId: targetTanqueId }]),
             },
         });
     }
@@ -96,6 +102,49 @@ let ProductionService = class ProductionService {
                 estado_Calida: 'LIBERADO',
             },
         });
+    }
+    async agregarRegistroBitacora({ idLoteProduccion, registro, }) {
+        const lote = await this.prisma.lotes_produccion.findUnique({
+            where: {
+                id_Lote_Produccion: Number(idLoteProduccion),
+            },
+            select: {
+                id_Lote_Produccion: true,
+                bitacora: true,
+            },
+        });
+        if (!lote) {
+            throw new Error(`No se encontró el lote de producción ${idLoteProduccion}`);
+        }
+        let bitacoraActual = [];
+        if (Array.isArray(lote.bitacora)) {
+            bitacoraActual = lote.bitacora;
+        }
+        else if (typeof lote.bitacora === 'string') {
+            try {
+                const parsed = JSON.parse(lote.bitacora);
+                bitacoraActual = Array.isArray(parsed) ? parsed : [];
+            }
+            catch {
+                bitacoraActual = [];
+            }
+        }
+        const nuevaBitacora = [
+            ...bitacoraActual,
+            registro,
+        ];
+        await this.prisma.lotes_produccion.update({
+            where: {
+                id_Lote_Produccion: Number(idLoteProduccion),
+            },
+            data: {
+                bitacora: JSON.stringify(nuevaBitacora),
+            },
+        });
+        return {
+            id_Lote_Produccion: lote.id_Lote_Produccion,
+            bitacora: nuevaBitacora,
+        };
     }
     async actualizarEstatusTanque({ tanqueId, estatus_proceso, idVentaOrigen, }) {
         const statusFormatted = estatus_proceso
@@ -125,7 +174,7 @@ let ProductionService = class ProductionService {
                 await this.prisma.muestras.create({
                     data: {
                         no_Muestra: noMuestra,
-                        fecha_Toma: new Date(),
+                        fecha_Toma: new Date().toLocaleString('es-MX'),
                         tanque_id: Number(tanqueId),
                         lote_id: Number(lote.id_Lote_Produccion),
                         producto_id: Number(ordenVenta?.producto_id),

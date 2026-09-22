@@ -11,12 +11,24 @@ let data: any;
 export interface RegistroBitacora {
   id: string;
   fechaHora: string;
-  tipoAccion: 'LLENADO' | 'RELLENADO' | 'CAMBIO_TANQUE' | 'VACIADO';
+
+  tipoAccion:
+    | 'LLENADO'
+    | 'RELLENADO'
+    | 'CAMBIO_TANQUE'
+    | 'VACIADO'
+    | 'CAMBIO_PROCESO';
+
   tanqueOrigen?: string;
-  tanqueDestino: string;
+  tanqueDestino?: string;
+
   lote: string;
   producto: string;
   cantidad: number;
+
+  estadoAnterior?: string;
+  estadoNuevo?: string;
+
   observaciones?: string;
 }
 
@@ -234,39 +246,72 @@ const ejecutarActualizarEstatusCalidadBD = async (idLoteProduccion: number) => {
   }
 };
 
-const persistirEnDB = async (
-    nuevosTanques: Tanque[],
-    nuevoInventario: ContenedorGrafito[],
-    nuevaBitacora: RegistroBitacora[] = bitacora
-  ) => {
-    setTanques(nuevosTanques);
-    setInventario(nuevoInventario);
-    setBitacora(nuevaBitacora);
-
-    try {
-      await fetch('/api/grafito', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tanques: nuevosTanques,
-          inventario: nuevoInventario,
-          bitacora: nuevaBitacora,
-        }),
-      });
-    } catch (e) {
-      console.error('Error al guardar estado en el JSON:', e);
-    }
-  };
-
-const cargarLotesLlegada = async () => {
+const guardarRegistroBitacora = async (
+  idLoteProduccion: number,
+  registro: RegistroBitacora
+) => {
   try {
-    const response = await fetch('http://localhost:4002/api/calidad/obtenerOrdenesPendientesDeLlegada')
-    const res = await response.json();
+    const response = await fetch(
+      'http://localhost:4002/api/produccion/guardarBitacora',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          idLoteProduccion,
+          registro,
+        }),
+      }
+    );
 
-    } catch (error) {
-    console.error("Error cargando muestras dictaminadas:", error);
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.error || 'No se pudo guardar la bitácora'
+      );
+    }
+
+    // Actualizamos la UI con el registro que acabamos de guardar
+    setBitacora(data.data.bitacora);
+
+    return data.data.bitacora;
+  } catch (error) {
+    console.error(
+      'Error al guardar registro de bitácora:',
+      error
+    );
+
+    return null;
   }
-}
+};
+
+const persistirEnDB = async (
+  nuevosTanques: Tanque[],
+  nuevoInventario: ContenedorGrafito[]
+) => {
+  setTanques(nuevosTanques);
+  setInventario(nuevoInventario);
+
+  try {
+    await fetch('/api/grafito', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tanques: nuevosTanques,
+        inventario: nuevoInventario,
+      }),
+    });
+  } catch (e) {
+    console.error(
+      'Error al guardar estado en el JSON:',
+      e
+    );
+  }
+};
 
   const cargarMuestrasDictaminadas = async () => {
   try {
@@ -306,18 +351,68 @@ const muestrasRechazadas = muestrasDictaminadas.filter(m => m.estado_Muestra ===
 
   // Acciones
 const handleCambiarStatus = async (idTanque: number, nuevoStatus: EstadoTanqueStatus) => {
-    if (idTanque === 2) return;
+  if (idTanque === 2) return;
 
-    const tanque = tanques.find(t => t.id === idTanque);
-    if (!tanque || tanque.estatus_proceso === 'VACIO' || !tanque.loteActual) return;
+  const tanque = tanques.find(
+    t => t.id === idTanque
+  );
 
-    const idVentaOrigen = (tanque.loteActual as any)?.idVentaOrigen || null;
+  if (
+    !tanque ||
+    tanque.estatus_proceso === 'VACIO' ||
+    !tanque.loteActual
+  ) {
+    return;
+  }
 
-    await ejecutarActualizarEstatusTanqueBD(idTanque, nuevoStatus, idVentaOrigen);
+  const estadoAnterior = tanque.estatus_proceso;
 
-    const nuevosTanques = tanques.map(t => (t.id === idTanque ? { ...t, estatus_proceso: nuevoStatus } : t));
-    setTanques(nuevosTanques);
+  const idVentaOrigen =
+    (tanque.loteActual as any)?.idVentaOrigen || null;
+
+  // 1. Actualizar estado del tanque en BD
+  await ejecutarActualizarEstatusTanqueBD(
+    idTanque,
+    nuevoStatus,
+    idVentaOrigen
+  );
+
+  // 2. Actualizar estado local
+  const nuevosTanques = tanques.map(t =>
+    t.id === idTanque
+      ? {
+          ...t,
+          estatus_proceso: nuevoStatus
+        }
+      : t
+  );
+
+  setTanques(nuevosTanques);
+
+  // 3. Crear registro de bitácora
+  const nuevoRegistro: RegistroBitacora = {
+    id: crypto.randomUUID(),
+    fechaHora: new Date().toLocaleString('es-MX'),
+    tipoAccion: 'CAMBIO_PROCESO',
+    tanqueDestino: tanque.nombre,
+    lote: tanque.loteActual.lote,
+    producto: tanque.loteActual.producto,
+    cantidad: tanque.loteActual.cantidadContenedores,
+    estadoAnterior,
+    estadoNuevo: nuevoStatus,
+    observaciones:
+      `Cambio de proceso: ${estadoAnterior} → ${nuevoStatus}`,
   };
+
+  // 4. Guardarlo en BD
+  const idLoteProduccion = tanque.loteActual.idLoteProduccion;
+  if (idLoteProduccion === undefined) return;
+
+  await guardarRegistroBitacora(
+    idLoteProduccion,
+    nuevoRegistro
+  );
+};
 
 // Vaciar Tanque
 const handleVaciarTanque = async (idTanque: number) => {
@@ -327,6 +422,10 @@ const handleVaciarTanque = async (idTanque: number) => {
   if (!confirm(`¿Vaciar el ${tanque.nombre} y mover ${tanque.loteActual.cantidadContenedores} contenedores del lote ${tanque.loteActual.lote} a Grafito Liberado?`)) return;
 
   const idLote = (tanque.loteActual as any).idLoteProduccion;
+  if (idLote === undefined) {
+  console.error('El lote no tiene idLoteProduccion');
+  return;
+}
   const idVentaOrigen = (tanque.loteActual as any)?.idVentaOrigen || null;
 
   // 1. Actualizar estado de Calidad a LIBERADO en la BD (Usando el helper)
@@ -348,18 +447,26 @@ const handleVaciarTanque = async (idTanque: number) => {
   const nuevoInventario = [...inventario, loteLiberado];
   const nuevosTanques = tanques.map(t => (t.id === idTanque ? { ...t, loteActual: null, estatus_proceso: 'VACIO' as EstadoTanqueStatus } : t));
 
-  const nuevoRegistroBitacora: RegistroBitacora = {
-    id: Date.now().toString(),
-    fechaHora: new Date().toLocaleString('es-MX'),
-    tipoAccion: 'VACIADO',
-    tanqueDestino: tanque.nombre,
-    lote: tanque.loteActual.lote,
-    producto: tanque.loteActual.producto,
-    cantidad: tanque.loteActual.cantidadContenedores,
-    observaciones: `Tanque vaciado y liberado.`,
-  };
+const nuevoRegistroBitacora: RegistroBitacora = {
+  id: crypto.randomUUID(),
+  fechaHora: new Date().toLocaleString('es-MX'),
+  tipoAccion: 'VACIADO',
+  tanqueOrigen: tanque.nombre,
+  lote: tanque.loteActual.lote,
+  producto: tanque.loteActual.producto,
+  cantidad: tanque.loteActual.cantidadContenedores,
+  observaciones: `Lote ${tanque.loteActual.lote} vaciado del tanque ${tanque.nombre} y enviado a Grafito Liberado`,
+};
 
-  persistirEnDB(nuevosTanques, nuevoInventario, [nuevoRegistroBitacora, ...bitacora]);
+persistirEnDB(
+  nuevosTanques,
+  nuevoInventario
+);
+
+await guardarRegistroBitacora(
+  idLote,
+  nuevoRegistroBitacora
+);
 };
 
   // Asignar / Rellenar Tanque
@@ -425,7 +532,22 @@ const handleAsignarORellenarTanque = async (e: React.FormEvent) => {
       observaciones: `Prensa: ${tanqueTarget.prensa} | Contenedores: ${cantidadACargar}`,
     };
 
-    persistirEnDB(nuevosTanques, nuevoInventario, [nuevoRegistroBitacora, ...bitacora]);
+    const idLote = (itemACargar as any).idLoteProduccion;
+
+    if (idLote === undefined) {
+      console.error('El lote no tiene idLoteProduccion');
+      return;
+    }
+
+    persistirEnDB(
+  nuevosTanques,
+  inventario
+);
+
+await guardarRegistroBitacora(
+  idLote,
+  nuevoRegistroBitacora
+);
     setItemACargar(null);
     setTanqueSeleccionado(null);
   };
@@ -474,7 +596,15 @@ const handleMoverDeTanque = async (e: React.FormEvent) => {
       observaciones: `Origen: ${tanqueAMover.nombre} -> Destino: ${tanqueDestino.nombre}`,
     };
 
-    persistirEnDB(nuevosTanques, inventario, [nuevoRegistroBitacora, ...bitacora]);
+    persistirEnDB(
+  nuevosTanques,
+  inventario
+);
+
+await guardarRegistroBitacora(
+  idLote,
+  nuevoRegistroBitacora
+);
     setTanqueAMover(null);
     setTanqueDestinoId(null);
   };
@@ -493,7 +623,7 @@ const handleAgregarGrafitoSucio = (e: React.FormEvent) => {
     };
 
     const nuevoInventario = [...inventario, nuevoRegistro];
-    persistirEnDB(tanques, nuevoInventario, bitacora);
+    persistirEnDB(tanques, nuevoInventario);
 
     setNuevoLote('');
     setNuevaCantidad(1);

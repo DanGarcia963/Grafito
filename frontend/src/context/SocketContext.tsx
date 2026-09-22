@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client';
 const SocketContext = createContext<Socket | null>(null);
 
 // Asegúrate de que esta IP sea la correcta de tu máquina servidor
-const BACKEND_IP = '192.168.100.23'; 
+const BACKEND_IP = '192.168.100.185'; 
 
 export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const [socket, setSocket] = useState<Socket | null>(null);

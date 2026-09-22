@@ -178,6 +178,9 @@ let CalidadService = class CalidadService {
                     estado_Muestra: {
                         in: ['APROBADO', 'RECHAZADO'],
                     },
+                    categoria_Muestra: {
+                        in: ['MUESTRA_AJUSTADO']
+                    }
                 },
             });
             return {
@@ -369,28 +372,31 @@ let CalidadService = class CalidadService {
     }
     async obtenerOrdenesPendientesDeLlegada(fechaFiltro) {
         try {
-            const fechaBase = fechaFiltro
-                ? new Date(fechaFiltro)
-                : new Date();
-            fechaBase.setHours(0, 0, 0, 0);
-            console.log('Fecha base:', fechaBase);
-            console.log('Fecha base ISO:', fechaBase.toISOString());
+            const fechaLimite = fechaFiltro ? new Date(fechaFiltro) : new Date();
+            fechaLimite.setHours(23, 59, 59, 999);
             const ordenes = await this.prisma.ordenes_produccion.findMany({
                 where: {
+                    linea_Produccion: 'GRAFITO',
                     fecha_Llegada: {
                         not: null,
-                        gte: fechaBase,
+                        lte: fechaLimite,
+                    },
+                    lotes_llegada: {
+                        none: {},
                     },
                 },
                 select: {
                     id_Orden_Produc: true,
+                    no_Orden_Produc: true,
+                    linea_Produccion: true,
                     fecha_Llegada: true,
+                    cantidad_Venta: true,
+                    observaciones: true,
                 },
                 orderBy: {
                     fecha_Llegada: 'asc',
                 },
             });
-            console.log('Órdenes encontradas:', ordenes);
             return {
                 success: true,
                 result: ordenes,
@@ -426,7 +432,7 @@ let CalidadService = class CalidadService {
             });
             await this.prisma.checklist_contenedor.createMany({
                 data: contenedores.map((c) => ({
-                    lote_Llegada_id: nuevoLote.id,
+                    lote_llegada_id: nuevoLote.id,
                     no_consecutivo: Number(c.no_consecutivo),
                     numero_contenedor: c.numero_contenedor,
                     tapa_valvula: Boolean(c.tapa_valvula),
