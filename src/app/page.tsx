@@ -2,21 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
+import { pedir } from '@/utils/api';
 
-type Area = 'produccion' | 'calidad';
-
-const USUARIOS = [
-{
-area: 'produccion' as Area,
-usuario: 'produccion',
-password: '123',
-},
-{
-area: 'calidad' as Area,
-usuario: 'calidad',
-password: '123',
-},
-];
+type Area = 'produccion' | 'calidad' | 'id' | 'ventas';
 
 export default function LoginPage() {
 const [area, setArea] = useState<Area>('produccion');
@@ -26,39 +14,19 @@ const [error, setError] = useState('');
 
 const router = useRouter();
 
-const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 e.preventDefault();
 setError('');
 
 
-const usuarioEncontrado = USUARIOS.find(
-  (item) =>
-    item.area === area &&
-    item.usuario === usuario.trim() &&
-    item.password === password
-);
-
-if (!usuarioEncontrado) {
-  setError(
-    'Los datos de acceso no coinciden con el área y rol seleccionados.'
-  );
-  return;
-}
-
-localStorage.setItem(
-  'sesion',
-  JSON.stringify({
-    area: usuarioEncontrado.area,
-    usuario: usuarioEncontrado.usuario,
-  })
-);
-
-if (usuarioEncontrado.area === 'produccion') {
-  router.push('/tanques');
-} else if (usuarioEncontrado.area === 'calidad') {
-  router.push('/calidad');
-}
-
+try {
+ const sesion=await pedir('/api/auth/login',{usuario:usuario.trim(),password,area});
+ if (typeof sesion?.token !== 'string' || !sesion.token.trim()) {
+  throw new Error('El servidor no devolvió un token de sesión. Revisa la respuesta de /api/auth/login.');
+ }
+ localStorage.setItem('sesion',JSON.stringify(sesion));window.dispatchEvent(new Event('sesion-cambiada'));
+ router.push(area==='calidad'?'/calidad':area==='produccion'?'/tanques':area==='ventas'?'/ventas-muestras':'/investigacion');
+} catch(e){setError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
 
 };
 
@@ -66,7 +34,7 @@ return ( <main className="min-h-screen bg-slate-100 flex items-center justify-ce
      onSubmit={handleSubmit}
      className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8"
    > <h1 className="text-2xl font-bold text-slate-800 text-center">
-Sistema de Flujo de Ventas </h1>
+US Technologies · Muestras y procesos </h1>
     <p className="text-center text-slate-500 mt-1 mb-6">
       Iniciar sesión por Área
     </p>
@@ -81,7 +49,9 @@ Sistema de Flujo de Ventas </h1>
       className="w-full border rounded-lg p-2.5 mb-4"
     >
       <option value="produccion">Producción</option>
-      <option value="calidad">Control de Calidad</option>
+      <option value="calidad">Muestras · Calidad</option>
+      <option value="id">Muestras · Investigación y Desarrollo</option>
+      <option value="ventas">Ventas · Registro de muestras I+D</option>
     </select>
 
     <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -106,7 +76,7 @@ Sistema de Flujo de Ventas </h1>
       value={password}
       onChange={(e) => setPassword(e.target.value)}
       className="w-full border rounded-lg p-2.5 mb-4"
-      placeholder="123"
+      placeholder="Tu contraseña"
       required
     />
 
