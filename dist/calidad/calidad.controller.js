@@ -14,6 +14,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CalidadController = void 0;
 const common_1 = require("@nestjs/common");
+const auth_guard_1 = require("../auth/auth.guard");
+const common_2 = require("@nestjs/common");
 const calidad_service_1 = require("./calidad.service");
 let CalidadController = class CalidadController {
     calidadService;
@@ -36,13 +38,16 @@ let CalidadController = class CalidadController {
         return { success: true, data: result };
     }
     async crearResultado(body) {
-        return this.calidadService.crearResultadosMuestraCalidad(body);
+        throw new common_2.BadRequestException('Usa POST finalizarAnalisis para guardar resultados y dictamen en una transacción.');
     }
     async crearVenta(body) {
         return this.calidadService.agregarEspecifProduct(body);
     }
     async actualizarEstadoMuestra(body) {
-        return this.calidadService.actualizarEstadoMuestra(body);
+        throw new common_2.BadRequestException('Usa POST finalizarAnalisis para guardar resultados y dictamen en una transacción.');
+    }
+    async actualizarEstatusMuestra(body) {
+        return this.calidadService.actualizarEstatusMuestra(body);
     }
     async buscarAnalistas(query) {
         if (!query || query.trim() === '') {
@@ -56,77 +61,124 @@ let CalidadController = class CalidadController {
     async crearLoteConChecklist(body) {
         return await this.calidadService.crearLoteConChecklist(body);
     }
+    finalizar(body) { return this.calidadService.finalizarAnalisis(body); }
+    recibir(id) { return this.calidadService.cambiarEtapaMuestra(id, 'RECIBIR'); }
+    iniciar(id) { return this.calidadService.cambiarEtapaMuestra(id, 'INICIAR'); }
+    reabrir(id) { return this.calidadService.cambiarEtapaMuestra(id, 'REABRIR'); }
 };
 exports.CalidadController = CalidadController;
 __decorate([
-    (0, common_1.Get)('obtenerParametros'),
+    (0, common_2.Get)('obtenerParametros'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "obtenerParametros", null);
 __decorate([
-    (0, common_1.Get)('obtenerMuestras'),
+    (0, common_2.Get)('obtenerMuestras'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "obtenerMuestras", null);
 __decorate([
-    (0, common_1.Get)(':muestraID/especificaciones'),
-    __param(0, (0, common_1.Param)('muestraID', common_1.ParseIntPipe)),
+    (0, common_2.Get)(':muestraID/especificaciones'),
+    __param(0, (0, common_2.Param)('muestraID', common_2.ParseIntPipe)),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Number]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "buscarEspecificacionesMuestra", null);
 __decorate([
-    (0, common_1.Get)('obtenerMuestrasDictaminadas'),
+    (0, common_2.Get)('obtenerMuestrasDictaminadas'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "obtenerMuestrasDictaminadas", null);
 __decorate([
-    (0, common_1.Post)('crearResultado'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_2.Post)('crearResultado'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "crearResultado", null);
 __decorate([
-    (0, common_1.Post)('agregarEspecifi'),
-    __param(0, (0, common_1.Body)()),
+    (0, auth_guard_1.Areas)('calidad'),
+    (0, common_2.Post)('agregarEspecifi'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "crearVenta", null);
 __decorate([
-    (0, common_1.Put)('actualizarEstadoMuestra'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_2.Put)('actualizarEstadoMuestra'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "actualizarEstadoMuestra", null);
 __decorate([
-    (0, common_1.Get)('buscarAnalistas'),
-    __param(0, (0, common_1.Query)('q')),
+    (0, common_2.Put)('actualizarEstatusMuestra'),
+    __param(0, (0, common_2.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], CalidadController.prototype, "actualizarEstatusMuestra", null);
+__decorate([
+    (0, common_2.Get)('buscarAnalistas'),
+    __param(0, (0, common_2.Query)('q')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "buscarAnalistas", null);
 __decorate([
-    (0, common_1.Get)('obtenerOrdenesPendientesDeLlegada'),
-    __param(0, (0, common_1.Query)('fechaFiltro')),
+    (0, common_2.Get)('obtenerOrdenesPendientesDeLlegada'),
+    __param(0, (0, common_2.Query)('fechaFiltro')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "obtenerOrdenesPendientesDeLlegada", null);
 __decorate([
-    (0, common_1.Post)('crearLoteConChecklist'),
-    __param(0, (0, common_1.Body)()),
+    (0, auth_guard_1.Areas)('calidad'),
+    (0, common_2.Post)('crearLoteConChecklist'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], CalidadController.prototype, "crearLoteConChecklist", null);
+__decorate([
+    (0, auth_guard_1.Areas)('calidad'),
+    (0, common_2.Post)('finalizarAnalisis'),
+    __param(0, (0, common_2.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], CalidadController.prototype, "finalizar", null);
+__decorate([
+    (0, auth_guard_1.Areas)('calidad'),
+    (0, common_2.Post)(':id/recibir'),
+    __param(0, (0, common_2.Param)('id', common_2.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], CalidadController.prototype, "recibir", null);
+__decorate([
+    (0, auth_guard_1.Areas)('calidad'),
+    (0, common_2.Post)(':id/iniciar'),
+    __param(0, (0, common_2.Param)('id', common_2.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], CalidadController.prototype, "iniciar", null);
+__decorate([
+    (0, auth_guard_1.Areas)('calidad'),
+    (0, common_2.Post)(':id/reabrir'),
+    __param(0, (0, common_2.Param)('id', common_2.ParseIntPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number]),
+    __metadata("design:returntype", void 0)
+], CalidadController.prototype, "reabrir", null);
 exports.CalidadController = CalidadController = __decorate([
-    (0, common_1.Controller)('api/calidad'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, auth_guard_1.Areas)('produccion', 'calidad'),
+    (0, common_2.Controller)('api/calidad'),
     __metadata("design:paramtypes", [calidad_service_1.CalidadService])
 ], CalidadController);
 //# sourceMappingURL=calidad.controller.js.map

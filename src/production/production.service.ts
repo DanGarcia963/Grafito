@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common'; 
+import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
+import { EventsGateway } from '../events.gateway';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common'; 
 import { PrismaService } from '../prisma.service'; 
 import { equipos_tanques_estatus_proceso, lotes_produccion_estado_Calida, muestras_estado_Muestra, muestras_etapa_Muestra, ordenes_produccion_estatus_flujo } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
 
 @Injectable() 
 export class ProductionService { 
-  constructor(private readonly prisma: PrismaService) {} 
+  constructor(private readonly prisma: PrismaService, private readonly tiempos: TrazabilidadService, private readonly eventos: EventsGateway) {} 
 
   async obtenerTodasLasOrdenesGrafito() { 
     try { 
@@ -23,7 +25,8 @@ export class ProductionService {
               id_Lote_Produccion: true, 
               no_Lote: true, 
               cantidad_Total_Producida: true, 
-              tanque_id: true, 
+              tanque_id: true,
+              bitacora: true, 
             }, 
           }, 
    
@@ -51,7 +54,9 @@ export class ProductionService {
          },
         orderBy: { fecha_Confirmacion: 'desc' } 
       }); 
-      return { success: true, result: grafitos }; 
+      return { success: true, result: grafitos, bitacora: grafitos.flatMap(o => o.lotes_produccion.flatMap(l => {
+        try { const lista = l.bitacora ? JSON.parse(l.bitacora) : []; return Array.isArray(lista) ? lista : []; } catch { return []; }
+      })) }; 
     } catch (error: any) { 
       return { success: false, error: error.message }; 
     } 
@@ -77,198 +82,109 @@ async tanquesAreaProduccion(tipo: string) {
   }  
 }
 
-  async actualizarTanque({ idLoteProduccion, tanqueId }: { idLoteProduccion: number; tanqueId: number | null }) { 
-    const targetTanqueId = tanqueId !== null && tanqueId !== undefined ? Number(tanqueId) : null;
-
-    // Actualizamos el tanque_id y enviamos un valor válido de bitacora para satisfacer el CONSTRAINT
-  await this.prisma.lotes_produccion.updateMany({
-  where: {
-    id_Lote_Produccion: Number(idLoteProduccion),
-  },
-  data: {
-    tanque_id: targetTanqueId,
-  },
-});
-  } 
-
-  async actualizarEstatusCalidad({
-    idLoteProduccion,
-    estadoCalidad,
-  }: {
-    idLoteProduccion: number;
-    estadoCalidad: 'LIBERADO';
-  }) {
-    return await this.prisma.lotes_produccion.updateMany({
-      where: { id_Lote_Produccion: Number(idLoteProduccion) },
-      data: {
-        estado_Calida: 'LIBERADO' as lotes_produccion_estado_Calida,
-      },
+  async actualizarTanque({ idLoteProduccion, tanqueId }: { idLoteProduccion: number; tanqueId: number | null }) {
+    const id = this.tiempos.id(idLoteProduccion);
+    const destino = tanqueId == null ? null : this.tiempos.id(tanqueId);
+    await this.prisma.$transaction(async tx => {
+      // Orden de bloqueo consistente con las transiciones de tanque.
+      await tx.$queryRaw`SELECT id_Equipos_Tanques FROM equipos_tanques ORDER BY id_Equipos_Tanques FOR UPDATE`;
+      const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
+      if (!lote) throw new NotFoundException('Lote no encontrado');
+      if (lote.tanque_id === destino) return;
+      if (destino) {
+        const tanque = await tx.equipos_tanques.findUnique({ where: { id_Equipos_Tanques: destino } });
+        if (!tanque || tanque.status !== 'OPERATIVO') throw new BadRequestException('Tanque no disponible');
+        if (await tx.lotes_produccion.findFirst({ where: { tanque_id: destino, id_Lote_Produccion: { not: id } } })) throw new BadRequestException('El tanque ya tiene otro lote');
+      }
+      if (lote.tanque_id) {
+        await this.tiempos.transicion(tx, { entidad: 'TANQUE', entidad_id: lote.tanque_id, lote_id: id, tanque_id: lote.tanque_id }, null);
+        await tx.equipos_tanques.update({ where: { id_Equipos_Tanques: lote.tanque_id }, data: { estatus_proceso: 'VACIO' } });
+      }
+      await tx.lotes_produccion.update({ where: { id_Lote_Produccion: id }, data: { tanque_id: destino } });
+      if (destino) {
+        await tx.equipos_tanques.update({ where: { id_Equipos_Tanques: destino }, data: { estatus_proceso: 'CARGANDO_TANQUE' } });
+        await this.tiempos.transicion(tx, { entidad: 'TANQUE', entidad_id: destino, lote_id: id, tanque_id: destino }, 'CARGANDO_TANQUE', true);
+      }
+      const ctx = { entidad: 'TANQUE' as const, entidad_id: destino ?? lote.tanque_id!, lote_id: id, tanque_id: destino ?? lote.tanque_id };
+      const ultimo = await this.tiempos.ultimo(tx, ctx);
+      await this.tiempos.evento(tx, ctx, ultimo?.ciclo ?? 1, 'ASIGNACION_LOTE', { origen: lote.tanque_id, destino });
     });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', { idLoteProduccion: id });
+    return { idLoteProduccion: id, tanqueId: destino };
   }
 
-async agregarRegistroBitacora({
-  idLoteProduccion,
-  registro,
-}: {
-  idLoteProduccion: number;
-  registro: any;
-}) {
-  const lote = await this.prisma.lotes_produccion.findUnique({
-    where: {
-      id_Lote_Produccion: Number(idLoteProduccion),
-    },
-    select: {
-      id_Lote_Produccion: true,
-      bitacora: true,
-    },
-  });
-
-  if (!lote) {
-    throw new Error(
-      `No se encontró el lote de producción ${idLoteProduccion}`
-    );
-  }
-
-  // Obtener la bitácora existente
-  let bitacoraActual: any[] = [];
-
-  if (Array.isArray(lote.bitacora)) {
-    bitacoraActual = lote.bitacora;
-  } else if (typeof lote.bitacora === 'string') {
-    try {
-      const parsed = JSON.parse(lote.bitacora);
-      bitacoraActual = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      bitacoraActual = [];
-    }
-  }
-
-  // Agregar el nuevo registro al historial existente
-  const nuevaBitacora = [
-    ...bitacoraActual,
-    registro,
-  ];
-
-  // Guardar nuevamente el JSON completo
-  await this.prisma.lotes_produccion.update({
-    where: {
-      id_Lote_Produccion: Number(idLoteProduccion),
-    },
-    data: {
-      bitacora: JSON.stringify(nuevaBitacora),
-    },
-  });
-
-  return {
-    id_Lote_Produccion: lote.id_Lote_Produccion,
-    bitacora: nuevaBitacora,
-  };
-}
-
-async actualizarEstatusTanque({
-  tanqueId,
-  estatus_proceso,
-  idVentaOrigen,
-}: {
-  tanqueId: number;
-  estatus_proceso: string;
-  idVentaOrigen?: number;
-}) {
-  // Convertir espacios a guiones bajos para coincidir con tu Enum en Prisma
-  const statusFormatted = estatus_proceso
-    ? estatus_proceso.trim().replace(/ /g, '_')
-    : 'VACIO';
-
-  // 1. Declaramos las variables permitiendo sus tipos de Prisma o null
-  let ordenVenta: {
-    id_Orden_Produc: number;
-    producto_id: number | null;
-    cliente_id: number | null;
-  } | null = null;
-
-  let lote: {
-    id_Lote_Produccion: number;
-    no_Lote: string | null;
-  } | null = null;
-
-  // Solo buscamos orden y lote si idVentaOrigen viene presente
-  if (idVentaOrigen) {
-    ordenVenta = await this.prisma.ordenes_produccion.findFirst({
-      where: { id_Venta_Origen: Number(idVentaOrigen) },
-      select: { id_Orden_Produc: true, producto_id: true, cliente_id: true },
+  async actualizarEstatusCalidad({ idLoteProduccion }: { idLoteProduccion: number; estadoCalidad: 'LIBERADO' }) {
+    const id = this.tiempos.id(idLoteProduccion);
+    const result = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id_Lote_Produccion FROM lotes_produccion WHERE id_Lote_Produccion = ${id} FOR UPDATE`;
+      const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
+      if (!lote) throw new NotFoundException('Lote no encontrado');
+      if (lote.estado_Calida !== 'LIBERADO' && lote.tanque_id) {
+        const ctx = { entidad: 'TANQUE' as const, entidad_id: lote.tanque_id, tanque_id: lote.tanque_id, lote_id: id };
+        const ultimo = await this.tiempos.ultimo(tx, ctx);
+        await this.tiempos.evento(tx, ctx, ultimo?.ciclo ?? 1, 'LIBERACION_LOTE', { anterior: lote.estado_Calida });
+      }
+      return tx.lotes_produccion.update({ where: { id_Lote_Produccion: id }, data: { estado_Calida: 'LIBERADO' } });
     });
-
-    if (ordenVenta?.id_Orden_Produc) {
-      lote = await this.prisma.lotes_produccion.findFirst({
-        where: { orden_Produccion_id: ordenVenta.id_Orden_Produc },
-        select: { id_Lote_Produccion: true, no_Lote: true },
-      });
-    }
+    this.eventos.notificar('TANQUE_ACTUALIZADO', { idLoteProduccion });
+    return result;
   }
 
-  // --- Caso: MUESTREO ---
-  if (statusFormatted === 'MUESTREO' && idVentaOrigen) {
-    if (!lote || !lote.no_Lote) {
-      console.warn(
-        `[MUESTREO] No se encontró un lote válido asociado a la venta ID: ${idVentaOrigen}`
-      );
-    } else {
-      // Al haber validado que lote y lote.no_Lote existen, TypeScript deduce que es string
-      const noMuestra: string = lote.no_Lote.slice(0, 5);
-      console.log('Número de Muestra generado:', noMuestra);
-
-      await this.prisma.muestras.create({
-        data: {
-          no_Muestra: noMuestra,
-          fecha_Toma: new Date().toLocaleString('es-MX'),
-          tanque_id: Number(tanqueId),
-          lote_id: Number(lote.id_Lote_Produccion),
-          producto_id: Number(ordenVenta?.producto_id),
-          cliente_id: Number(ordenVenta?.cliente_id),
-        },
-      });
-    }
-  }
-
-// --- Caso: ESPERA_CALIDAD ---
-if (statusFormatted === 'ESPERA_CALIDAD' && idVentaOrigen) {
-  // 1. Actualizar el flujo de la orden
-  await this.prisma.ordenes_produccion.updateMany({
-    where: {
-      id_Venta_Origen: Number(idVentaOrigen),
-    },
-    data: {
-      estatus_flujo: 'calidad' as ordenes_produccion_estatus_flujo,
-    },
-  });
-
-  // 2. Actualizar ÚNICAMENTE la muestra vinculada a este tanque y este lote
-  if (lote?.id_Lote_Produccion) {
-    await this.prisma.muestras.updateMany({
-      where: {
-        lote_id: Number(lote.id_Lote_Produccion),
-        tanque_id: Number(tanqueId), // <-- FILTRO CLAVE: Solo el tanque actual
-        estado_Muestra: {
-          notIn: ['APROBADO', 'RECHAZADO'], // Evitamos tocar muestras ya finalizadas del mismo tanque/lote
-        },
-      },
-      data: {
-        estado_Muestra: 'EN_ANALISIS' as muestras_estado_Muestra,
-      },
+  async agregarRegistroBitacora({ idLoteProduccion, registro }: { idLoteProduccion: number; registro: any }) {
+    const id = this.tiempos.id(idLoteProduccion);
+    const result = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id_Lote_Produccion FROM lotes_produccion WHERE id_Lote_Produccion = ${id} FOR UPDATE`;
+      const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
+      if (!lote) throw new NotFoundException('Lote no encontrado');
+      // No reemplazar silenciosamente una bitácora ilegible.
+      const anterior = lote.bitacora ? JSON.parse(lote.bitacora) : [];
+      if (!Array.isArray(anterior)) throw new BadRequestException('Formato de bitácora inválido');
+      const bitacora = [...anterior, { ...registro, fechaHora: new Date().toISOString() }];
+      await tx.lotes_produccion.update({ where: { id_Lote_Produccion: id }, data: { bitacora: JSON.stringify(bitacora) } });
+      return { id_Lote_Produccion: id, bitacora };
     });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', { idLoteProduccion: id });
+    return result;
   }
-}
 
-
-
-  // --- Actualización general del estatus del tanque ---
-  await this.prisma.equipos_tanques.updateMany({
-    where: {
-      id_Equipos_Tanques: Number(tanqueId),
-    },
-    data: {
-      estatus_proceso: statusFormatted as equipos_tanques_estatus_proceso,
-    },
-  });
-}
+  async actualizarEstatusTanque({ tanqueId, estatus_proceso }: { tanqueId: number; estatus_proceso: string; idVentaOrigen?: number }) {
+    const id = this.tiempos.id(tanqueId);
+    const estado = String(estatus_proceso ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+    if (!Object.values(equipos_tanques_estatus_proceso).includes(estado as equipos_tanques_estatus_proceso)) throw new BadRequestException('Etapa de tanque inválida');
+    const result = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id_Equipos_Tanques FROM equipos_tanques WHERE id_Equipos_Tanques = ${id} FOR UPDATE`;
+      const tanque = await tx.equipos_tanques.findUnique({ where: { id_Equipos_Tanques: id } });
+      if (!tanque) throw new NotFoundException('Tanque no encontrado');
+      const lote = await tx.lotes_produccion.findFirst({ where: { tanque_id: id }, include: { ordenes_produccion: true } });
+      if (estado !== 'VACIO' && !lote) throw new BadRequestException('Asigna un lote al tanque primero');
+      if (estado === 'VACIO' && lote) throw new BadRequestException('Usa Vaciar para retirar el lote del tanque');
+      if (tanque.estatus_proceso === estado) return { muestraId: null, cambio: false };
+      const ctx = { entidad: 'TANQUE' as const, entidad_id: id, tanque_id: id, lote_id: lote?.id_Lote_Produccion };
+      const tramo = await this.tiempos.transicion(tx, ctx, estado === 'VACIO' ? null : estado);
+      await this.tiempos.evento(tx, ctx, tramo?.ciclo ?? 1, 'CAMBIO_PROCESO', { anterior: tanque.estatus_proceso, nuevo: estado });
+      let muestraId: number | null = null;
+      if (estado === 'MUESTREO' && lote) {
+        // Repetir la petición/etapa no crea otra muestra ni reinicia el reloj.
+        const pendiente = await tx.muestras.findFirst({ where: { tanque_id: id, lote_id: lote.id_Lote_Produccion, estado_Muestra: { notIn: ['APROBADO', 'RECHAZADO'] } } });
+        if (!pendiente) {
+          const muestra = await tx.muestras.create({ data: {
+            no_Muestra: lote.no_Lote, fecha_Toma: new Date(), Hora_Toma: new Date(), tanque_id: id,
+            lote_id: lote.id_Lote_Produccion, producto_id: lote.producto_id,
+            cliente_id: lote.ordenes_produccion.cliente_id,
+          } });
+          muestraId = muestra.id_Muestra;
+          const mctx = { entidad: 'MUESTRA' as const, entidad_id: muestraId, tanque_id: id, lote_id: lote.id_Lote_Produccion };
+          await this.tiempos.transicion(tx, mctx, 'TRASLADO');
+          await this.tiempos.evento(tx, mctx, 1, 'TOMA_MUESTRA');
+        }
+      }
+      if (estado === 'ESPERA_CALIDAD' && lote) await tx.ordenes_produccion.update({ where: { id_Orden_Produc: lote.orden_Produccion_id }, data: { estatus_flujo: 'calidad' } });
+      // La recepción y el inicio de análisis los confirma Laboratorio.
+      await tx.equipos_tanques.update({ where: { id_Equipos_Tanques: id }, data: { estatus_proceso: estado as equipos_tanques_estatus_proceso } });
+      return { muestraId, cambio: true };
+    });
+    if (result.cambio) this.eventos.notificar('ESTATUS_TANQUE_CAMBIADO', { tanqueId: id, estatus: estado, estatus_proceso: estado });
+    if (result.muestraId) this.eventos.notificar('MUESTRA_CREADA', { id_Muestra: result.muestraId });
+    return result;
+  }
 }

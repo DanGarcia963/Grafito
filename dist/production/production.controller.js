@@ -14,6 +14,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProductionController = void 0;
 const common_1 = require("@nestjs/common");
+const auth_guard_1 = require("../auth/auth.guard");
+const common_2 = require("@nestjs/common");
 const production_service_1 = require("./production.service");
 let ProductionController = class ProductionController {
     productionService;
@@ -57,48 +59,50 @@ let ProductionController = class ProductionController {
 };
 exports.ProductionController = ProductionController;
 __decorate([
-    (0, common_1.Get)('test'),
+    (0, common_2.Get)('test'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "test", null);
 __decorate([
-    (0, common_1.Get)('tanques'),
-    __param(0, (0, common_1.Query)('tipo')),
+    (0, common_2.Get)('tanques'),
+    __param(0, (0, common_2.Query)('tipo')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "getTanques", null);
 __decorate([
-    (0, common_1.Put)('actualizar'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_2.Put)('actualizar'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "actualizar", null);
 __decorate([
-    (0, common_1.Put)('actualizarEstatusTanque'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_2.Put)('actualizarEstatusTanque'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "actualizarEstatusTanque", null);
 __decorate([
-    (0, common_1.Put)('actualizarEstatusCalidad'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_2.Put)('actualizarEstatusCalidad'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "actualizarEstatusCalidad", null);
 __decorate([
-    (0, common_1.Post)('guardarBitacora'),
-    __param(0, (0, common_1.Body)()),
+    (0, common_2.Post)('guardarBitacora'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], ProductionController.prototype, "guardarBitacora", null);
 exports.ProductionController = ProductionController = __decorate([
-    (0, common_1.Controller)('api/produccion'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, auth_guard_1.Areas)('produccion', 'calidad'),
+    (0, common_2.Controller)('api/produccion'),
     __metadata("design:paramtypes", [production_service_1.ProductionService])
 ], ProductionController);
 //# sourceMappingURL=production.controller.js.map

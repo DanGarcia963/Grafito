@@ -1,7 +1,11 @@
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard, Areas } from '../auth/auth.guard';
 import { Controller, Post, Body, Get, Put, Query } from '@nestjs/common';
 
 import { ProductionService } from './production.service';
 
+@UseGuards(AuthGuard)
+@Areas('produccion', 'calidad')
 @Controller('api/produccion')
 export class ProductionController {
 

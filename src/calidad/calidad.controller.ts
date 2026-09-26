@@ -1,4 +1,7 @@
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard, Areas } from '../auth/auth.guard';
 import {
+  BadRequestException,
   Controller,
   Post,
   Body,
@@ -10,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { CalidadService } from './calidad.service';
 
+@UseGuards(AuthGuard)
+@Areas('produccion', 'calidad')
 @Controller('api/calidad')
 export class CalidadController {
   constructor(private readonly calidadService: CalidadService) {}
@@ -43,10 +48,10 @@ export class CalidadController {
 
   @Post('crearResultado')
   async crearResultado(@Body() body: any) {
-    return this.calidadService.crearResultadosMuestraCalidad(body);
+    throw new BadRequestException('Usa POST finalizarAnalisis para guardar resultados y dictamen en una transacción.');
   }
 
-  @Post('agregarEspecifi')
+  @Areas('calidad') @Post('agregarEspecifi')
   async crearVenta(@Body() body: any) {
     return this.calidadService.agregarEspecifProduct(body);
   }
@@ -61,7 +66,13 @@ export class CalidadController {
       observaciones: string;
     },
   ) {
-    return this.calidadService.actualizarEstadoMuestra(body);
+    throw new BadRequestException('Usa POST finalizarAnalisis para guardar resultados y dictamen en una transacción.');
+  }
+
+  // Cambio exclusivo del estado de una muestra.
+  @Put('actualizarEstatusMuestra')
+  async actualizarEstatusMuestra(@Body() body: unknown) {
+    return this.calidadService.actualizarEstatusMuestra(body);
   }
 
   @Get('buscarAnalistas')
@@ -88,8 +99,17 @@ export class CalidadController {
   // ============================================================
   // REGISTRAR LOTE DE LLEGADA + CHECKLIST
   // ============================================================
-  @Post('crearLoteConChecklist')
+  @Areas('calidad') @Post('crearLoteConChecklist')
   async crearLoteConChecklist(@Body() body: any) {
     return await this.calidadService.crearLoteConChecklist(body);
   }
+
+  @Areas('calidad') @Post('finalizarAnalisis')
+  finalizar(@Body() body: any) { return this.calidadService.finalizarAnalisis(body); }
+  @Areas('calidad') @Post(':id/recibir')
+  recibir(@Param('id', ParseIntPipe) id: number) { return this.calidadService.cambiarEtapaMuestra(id, 'RECIBIR'); }
+  @Areas('calidad') @Post(':id/iniciar')
+  iniciar(@Param('id', ParseIntPipe) id: number) { return this.calidadService.cambiarEtapaMuestra(id, 'INICIAR'); }
+  @Areas('calidad') @Post(':id/reabrir')
+  reabrir(@Param('id', ParseIntPipe) id: number) { return this.calidadService.cambiarEtapaMuestra(id, 'REABRIR'); }
 }

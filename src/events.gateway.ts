@@ -1,53 +1,23 @@
-import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody } from '@nestjs/websockets';
-import { Server } from 'socket.io';
-import type { VentaFlujo } from './types/flujo';
-
-@WebSocketGateway({
-  cors: { origin: '*',
-    methods: ['GET', 'POST'],
-    credentials: true, },
-})
-export class EventsGateway {
-  @WebSocketServer()
-  server!: Server;
-
-  @SubscribeMessage('crear_venta')
-  handleCrearVenta(@MessageBody() nuevaVenta: VentaFlujo) {
-    console.log(`[Ventas] Nueva orden creada ID: ${nuevaVenta?.idVenta}`);
-    this.server.emit('VENTA_CREADA', nuevaVenta);
-    return { status: 'OK', data: nuevaVenta };
-  }
-
-  @SubscribeMessage('actualizar_flujo_venta')
-  handleActualizarFlujoVenta(@MessageBody() ventaActualizada: VentaFlujo) {
-    console.log(
-      `[Flujo] Venta #${ventaActualizada?.idVenta || ventaActualizada?.id} actualizada`
-    );
-    this.server.emit('VENTA_ACTUALIZADA', ventaActualizada);
-    return { status: 'OK', data: ventaActualizada };
-  }
-
-  // ==========================================
-  // EVENTOS PARA PANTALLA DE TANQUES
-  // ==========================================
-
-  @SubscribeMessage('actualizar_estatus_tanque')
-  handleActualizarEstatusTanque(@MessageBody() data: any) {
-    console.log('[Tanques] Evento actualizar_estatus_tanque recibido:', data);
-
-    // Retransmite el evento tal como viene a todas las pantallas
-    this.server.emit('MUESTRA_ACTUALIZADA', data);
-    this.server.emit('ESTATUS_TANQUE_CAMBIADO', data);
-    this.server.emit('MUESTRA_CREADA', data);
-    this.server.emit('TANQUE_ACTUALIZADO', data);
-
-    return { status: 'OK', data };
-  }
-
-  @SubscribeMessage('notificar_cambio_tanque')
-  handleNotificarCambioTanque(@MessageBody() data: any) {
-    console.log('[Tanques] Cambio general detectado en tanques');
-    this.server.emit('TANQUE_ACTUALIZADO', data);
-    return { status: 'OK', data };
-  }
+import { WebSocketGateway, WebSocketServer, OnGatewayConnection } from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
+import { AuthService } from './auth/auth.service';
+@WebSocketGateway({cors:{origin:true,methods:['GET','POST']}})
+export class EventsGateway implements OnGatewayConnection {
+ @WebSocketServer() server!:Server;
+ constructor(private auth:AuthService){}
+ handleConnection(client:Socket){
+  try {
+   const token=client.handshake.auth?.token,usuario=this.auth.verificar(token);
+   client.join(usuario.area);
+   // Revisar revocación y caducidad durante la conexión; no solo al conectarse.
+   const check=setInterval(()=>{try{this.auth.verificar(token);}catch{client.disconnect(true);}},15000);
+   client.once('disconnect',()=>clearInterval(check));
+  }catch{client.disconnect(true);}
+ }
+ notificar(evento:string,data:unknown){
+  const areas=evento.startsWith('ID_')?['id','ventas']:['calidad','produccion'];
+  // Las pantallas recuperan datos autorizados desde el API al recibir esta señal.
+  this.server?.to(areas).emit(evento,data);
+  this.server?.to(areas).emit(evento.startsWith('ID_')?'ID_TRAZABILIDAD_ACTUALIZADA':'TRAZABILIDAD_ACTUALIZADA',data);
+ }
 }
