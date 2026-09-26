@@ -8,14 +8,21 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var CalidadService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CalidadService = void 0;
+const trazabilidad_service_1 = require("../trazabilidad/trazabilidad.service");
+const events_gateway_1 = require("../events.gateway");
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma.service");
-let CalidadService = class CalidadService {
+let CalidadService = CalidadService_1 = class CalidadService {
     prisma;
-    constructor(prisma) {
+    tiempos;
+    eventos;
+    constructor(prisma, tiempos, eventos) {
         this.prisma = prisma;
+        this.tiempos = tiempos;
+        this.eventos = eventos;
     }
     async obtenerParametrosCalidad() {
         try {
@@ -29,6 +36,7 @@ let CalidadService = class CalidadService {
     async obtenerTodasLasMuestras() {
         try {
             const muestras = await this.prisma.muestras.findMany({
+                where: { area_Muestra: 'CALIDAD' },
                 include: {
                     personas_muestras_cliente_idTopersonas: {
                         select: {
@@ -80,7 +88,7 @@ let CalidadService = class CalidadService {
             });
             return {
                 success: true,
-                result: muestras,
+                result: await Promise.all(muestras.map(async (m) => ({ ...m, tiempoActual: await this.prisma.proceso_tramos.findFirst({ where: { entidad: 'MUESTRA', entidad_id: m.id_Muestra }, orderBy: { id: 'desc' } }) }))),
             };
         }
         catch (error) {
@@ -96,9 +104,12 @@ let CalidadService = class CalidadService {
             const especificaciones = await this.prisma.resultado_analisis.findMany({
                 where: {
                     muestra_id: id,
+                    muestras: { area_Muestra: 'CALIDAD' },
                 },
                 select: {
                     valor_Obtenido_Num: true,
+                    ciclo_analisis: true,
+                    fecha_Resultado: true,
                     cumple_Especificacion: true,
                     muestras: {
                         select: {
@@ -175,6 +186,7 @@ let CalidadService = class CalidadService {
                     }
                 },
                 where: {
+                    area_Muestra: 'CALIDAD',
                     estado_Muestra: {
                         in: ['APROBADO', 'RECHAZADO'],
                     },
@@ -185,7 +197,7 @@ let CalidadService = class CalidadService {
             });
             return {
                 success: true,
-                result: muestras,
+                result: await Promise.all(muestras.map(async (m) => ({ ...m, tiempoActual: await this.prisma.proceso_tramos.findFirst({ where: { entidad: 'MUESTRA', entidad_id: m.id_Muestra }, orderBy: { id: 'desc' } }) }))),
             };
         }
         catch (error) {
@@ -247,6 +259,7 @@ let CalidadService = class CalidadService {
                 }
                 return {
                     muestra_id: id_Muestra,
+                    ciclo_analisis: payload.ciclo_analisis,
                     parametro_id: med.id_Parametro,
                     valor_Obtenido_Num: valorIngresado,
                     cumple_Especificacion: cumpleEspecificacion,
@@ -346,6 +359,108 @@ let CalidadService = class CalidadService {
                 error: error.message,
             };
         }
+    }
+    async cambiarEtapaMuestra(idEntrada, accion) {
+        const id = this.tiempos.id(idEntrada);
+        const resultado = await this.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+            const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
+            if (!muestra || muestra.area_Muestra !== 'CALIDAD')
+                throw new common_1.NotFoundException('Muestra de Calidad no encontrada');
+            const ctx = { entidad: 'MUESTRA', entidad_id: id, lote_id: muestra.lote_id, tanque_id: muestra.tanque_id };
+            const ultimo = await this.tiempos.ultimo(tx, ctx);
+            const etapa = ultimo?.fin == null ? ultimo?.etapa : null;
+            const finalizada = ['APROBADO', 'RECHAZADO'].includes(muestra.estado_Muestra);
+            if (accion === 'REABRIR') {
+                if (!finalizada)
+                    throw new common_1.BadRequestException('Solo se puede reabrir una muestra dictaminada');
+                const tramo = await this.tiempos.transicion(tx, ctx, 'REANALISIS_PENDIENTE', true);
+                await tx.muestras.update({ where: { id_Muestra: id }, data: { estado_Muestra: 'PENDIENTE' } });
+                await this.tiempos.evento(tx, ctx, tramo.ciclo, 'REANALISIS_SOLICITADO', { estadoAnterior: muestra.estado_Muestra });
+            }
+            else {
+                if (finalizada)
+                    throw new common_1.BadRequestException('La muestra ya fue dictaminada');
+                if (accion === 'RECIBIR') {
+                    if (etapa === 'ESPERA_ANALISIS' || etapa === 'ANALISIS')
+                        return { success: true, repetida: true };
+                    const tramo = await this.tiempos.transicion(tx, ctx, 'ESPERA_ANALISIS');
+                    await this.tiempos.evento(tx, ctx, tramo.ciclo, 'RECEPCION_MUESTRA', { sinTomaHorariaPrevia: !ultimo });
+                    await tx.muestras.update({ where: { id_Muestra: id }, data: { estado_Muestra: 'PENDIENTE' } });
+                }
+                else {
+                    if (etapa === 'ANALISIS')
+                        return { success: true, repetida: true };
+                    if (etapa !== 'ESPERA_ANALISIS')
+                        throw new common_1.BadRequestException('Primero registra la recepción de la muestra');
+                    const tramo = await this.tiempos.transicion(tx, ctx, 'ANALISIS');
+                    await tx.muestras.update({ where: { id_Muestra: id }, data: { estado_Muestra: 'EN_ANALISIS' } });
+                    await this.tiempos.evento(tx, ctx, tramo.ciclo, 'INICIO_ANALISIS');
+                }
+            }
+            return { success: true };
+        });
+        this.eventos.notificar('MUESTRA_ACTUALIZADA', { id_Muestra: id });
+        return resultado;
+    }
+    async finalizarAnalisis(payload) {
+        const id = this.tiempos.id(payload?.idMuestra);
+        if (!['APROBADO', 'RECHAZADO'].includes(payload?.dictamen))
+            throw new common_1.BadRequestException('Dictamen inválido');
+        if (!Array.isArray(payload?.mediciones) || !payload.mediciones.length)
+            throw new common_1.BadRequestException('Captura al menos un resultado');
+        if (new Set(payload.mediciones.map((m) => m.id_Parametro)).size !== payload.mediciones.length)
+            throw new common_1.BadRequestException('Parámetros duplicados');
+        for (const m of payload.mediciones) {
+            this.tiempos.id(m?.id_Parametro);
+            if (typeof m.valor !== 'string' || !m.valor.trim())
+                throw new common_1.BadRequestException('Resultado vacío');
+        }
+        const resultado = await this.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+            const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
+            if (!muestra || muestra.area_Muestra !== 'CALIDAD')
+                throw new common_1.NotFoundException('Muestra de Calidad no encontrada');
+            const ctx = { entidad: 'MUESTRA', entidad_id: id, lote_id: muestra.lote_id, tanque_id: muestra.tanque_id };
+            const tramo = await this.tiempos.ultimo(tx, ctx);
+            if (!tramo || tramo.fin || tramo.etapa !== 'ANALISIS')
+                throw new common_1.BadRequestException('Inicia el análisis antes de finalizar; si ya terminó, consulta el historial');
+            const worker = new CalidadService_1(tx, this.tiempos, this.eventos);
+            const resultados = await worker.crearResultadosMuestraCalidad({ id_Muestra: id, mediciones: payload.mediciones, ciclo_analisis: tramo.ciclo });
+            if (!resultados.success)
+                throw new common_1.BadRequestException(resultados.error);
+            const dictamen = await worker.actualizarEstadoMuestra({ ...payload, idMuestra: id });
+            if (!dictamen.success || !dictamen.count)
+                throw new common_1.BadRequestException(dictamen.error || 'No se guardó el dictamen');
+            await this.tiempos.transicion(tx, ctx, null);
+            await this.tiempos.evento(tx, ctx, tramo.ciclo, 'FIN_ANALISIS', { dictamen: payload.dictamen, tipoMuestra: payload.tipoMuestra, analistaDeclarado: payload.analistaNombre ?? null, observaciones: payload.observaciones ?? null });
+            return { success: true, ciclo: tramo.ciclo };
+        }, { timeout: 30000 });
+        this.eventos.notificar('MUESTRA_ACTUALIZADA', { id_Muestra: id });
+        this.eventos.notificar('TANQUE_ACTUALIZADO', { muestraId: id });
+        return resultado;
+    }
+    async actualizarEstatusMuestra(payload) {
+        const id = this.tiempos.id(payload?.id_Muestra);
+        const estado = String(payload?.estatus_Muestra ?? '').trim().toUpperCase();
+        if (estado !== 'APROBADO')
+            throw new common_1.BadRequestException('Usa recibir, iniciar o finalizar para registrar el ciclo. Este endpoint libera una muestra rechazada.');
+        const result = await this.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+            const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
+            if (!muestra || muestra.area_Muestra !== 'CALIDAD')
+                throw new common_1.NotFoundException('Muestra de Calidad no encontrada');
+            if (muestra.estado_Muestra === 'APROBADO')
+                return muestra;
+            if (muestra.estado_Muestra !== 'RECHAZADO')
+                throw new common_1.BadRequestException('Solo puedes liberar una muestra rechazada');
+            const ctx = { entidad: 'MUESTRA', entidad_id: id, lote_id: muestra.lote_id, tanque_id: muestra.tanque_id };
+            const ultimo = await this.tiempos.ultimo(tx, ctx);
+            await this.tiempos.evento(tx, ctx, ultimo?.ciclo ?? 1, 'LIBERACION_MANUAL', { anterior: muestra.estado_Muestra, nuevo: estado });
+            return tx.muestras.update({ where: { id_Muestra: id }, data: { estado_Muestra: 'APROBADO' } });
+        });
+        this.eventos.notificar('MUESTRA_ACTUALIZADA', { id_Muestra: id });
+        return { success: true, data: result };
     }
     async buscarAnalistas(query) {
         try {
@@ -451,8 +566,8 @@ let CalidadService = class CalidadService {
     }
 };
 exports.CalidadService = CalidadService;
-exports.CalidadService = CalidadService = __decorate([
+exports.CalidadService = CalidadService = CalidadService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService, trazabilidad_service_1.TrazabilidadService, events_gateway_1.EventsGateway])
 ], CalidadService);
 //# sourceMappingURL=calidad.service.js.map

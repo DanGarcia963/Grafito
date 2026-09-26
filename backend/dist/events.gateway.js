@@ -8,37 +8,37 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
-var __param = (this && this.__param) || function (paramIndex, decorator) {
-    return function (target, key) { decorator(target, key, paramIndex); }
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EventsGateway = void 0;
 const websockets_1 = require("@nestjs/websockets");
 const socket_io_1 = require("socket.io");
+const auth_service_1 = require("./auth/auth.service");
 let EventsGateway = class EventsGateway {
+    auth;
     server;
-    handleCrearVenta(nuevaVenta) {
-        console.log(`[Ventas] Nueva orden creada ID: ${nuevaVenta?.idVenta}`);
-        this.server.emit('VENTA_CREADA', nuevaVenta);
-        return { status: 'OK', data: nuevaVenta };
+    constructor(auth) {
+        this.auth = auth;
     }
-    handleActualizarFlujoVenta(ventaActualizada) {
-        console.log(`[Flujo] Venta #${ventaActualizada?.idVenta || ventaActualizada?.id} actualizada`);
-        this.server.emit('VENTA_ACTUALIZADA', ventaActualizada);
-        return { status: 'OK', data: ventaActualizada };
+    handleConnection(client) {
+        try {
+            const token = client.handshake.auth?.token, usuario = this.auth.verificar(token);
+            client.join(usuario.area);
+            const check = setInterval(() => { try {
+                this.auth.verificar(token);
+            }
+            catch {
+                client.disconnect(true);
+            } }, 15000);
+            client.once('disconnect', () => clearInterval(check));
+        }
+        catch {
+            client.disconnect(true);
+        }
     }
-    handleActualizarEstatusTanque(data) {
-        console.log('[Tanques] Evento actualizar_estatus_tanque recibido:', data);
-        this.server.emit('MUESTRA_ACTUALIZADA', data);
-        this.server.emit('ESTATUS_TANQUE_CAMBIADO', data);
-        this.server.emit('MUESTRA_CREADA', data);
-        this.server.emit('TANQUE_ACTUALIZADO', data);
-        return { status: 'OK', data };
-    }
-    handleNotificarCambioTanque(data) {
-        console.log('[Tanques] Cambio general detectado en tanques');
-        this.server.emit('TANQUE_ACTUALIZADO', data);
-        return { status: 'OK', data };
+    notificar(evento, data) {
+        const areas = evento.startsWith('ID_') ? ['id', 'ventas'] : ['calidad', 'produccion'];
+        this.server?.to(areas).emit(evento, data);
+        this.server?.to(areas).emit(evento.startsWith('ID_') ? 'ID_TRAZABILIDAD_ACTUALIZADA' : 'TRAZABILIDAD_ACTUALIZADA', data);
     }
 };
 exports.EventsGateway = EventsGateway;
@@ -46,39 +46,8 @@ __decorate([
     (0, websockets_1.WebSocketServer)(),
     __metadata("design:type", socket_io_1.Server)
 ], EventsGateway.prototype, "server", void 0);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('crear_venta'),
-    __param(0, (0, websockets_1.MessageBody)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], EventsGateway.prototype, "handleCrearVenta", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('actualizar_flujo_venta'),
-    __param(0, (0, websockets_1.MessageBody)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], EventsGateway.prototype, "handleActualizarFlujoVenta", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('actualizar_estatus_tanque'),
-    __param(0, (0, websockets_1.MessageBody)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], EventsGateway.prototype, "handleActualizarEstatusTanque", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('notificar_cambio_tanque'),
-    __param(0, (0, websockets_1.MessageBody)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], EventsGateway.prototype, "handleNotificarCambioTanque", null);
 exports.EventsGateway = EventsGateway = __decorate([
-    (0, websockets_1.WebSocketGateway)({
-        cors: { origin: '*',
-            methods: ['GET', 'POST'],
-            credentials: true, },
-    })
+    (0, websockets_1.WebSocketGateway)({ cors: { origin: true, methods: ['GET', 'POST'] } }),
+    __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], EventsGateway);
 //# sourceMappingURL=events.gateway.js.map

@@ -1,6 +1,8 @@
+import { AuthModule } from './auth/auth.module';
+import { InvestigacionModule } from './investigacion/id.module';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import { EventsGateway } from './events.gateway';
+import { TrazabilidadModule } from './trazabilidad/trazabilidad.module';
 import { LotesProducer } from './lotes.producer';
 import { LotesProcessor } from './lotes.processor';
 import { AppController } from './app.controller';
@@ -13,7 +15,7 @@ import { ProductionModule} from './production/production.module';
 
 
 @Module({
-imports: [
+imports: [AuthModule, TrazabilidadModule, InvestigacionModule,
     BullModule.forRoot({
       connection: {
         host: '127.0.0.1', // Usar 127.0.0.1 explicitamente en lugar de 'localhost'
@@ -25,6 +27,6 @@ imports: [
     }),VentasModule, ProductionModule, CalidadModule ,
   ],
   controllers: [AppController],
-  providers: [AppService, PrismaService, EventsGateway, LotesProducer, LotesProcessor],
+  providers: [AppService, PrismaService, LotesProducer, LotesProcessor],
 })
 export class AppModule {}

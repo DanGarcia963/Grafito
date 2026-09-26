@@ -43,17 +43,17 @@ export default function TanqueCard({
   const statusConfig = STATUS_TANQUE[tanque.status] || { style: DEFAULT_BADGE, label: tanque.status };
 
   return (
-    <div className="bg-white border-2 rounded-xl p-4 shadow-sm flex flex-col justify-between h-full border-slate-200 hover:border-slate-300 transition">
+    <div className="bg-white border-2 rounded-xl p-4 shadow-sm flex flex-col justify-between min-w-0 border-slate-200 hover:border-slate-300 transition">
       <div>
         {/* Cabecera del Tanque */}
-        <div className="flex justify-between items-center border-b pb-2 mb-3">
+        <div className="flex flex-wrap gap-2 justify-between items-center border-b pb-2 mb-3">
           <div>
             <h3 className="font-bold text-slate-800 text-base">{tanque.nombre}</h3>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${statusConfig.style}`}>
               {statusConfig.label}
             </span>
           </div>
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${badgeConfig.style}`}>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border break-all ${badgeConfig.style}`}>
             {badgeConfig.label}
           </span>
         </div>
@@ -74,7 +74,7 @@ export default function TanqueCard({
       </div>
 
       {/* Controles de Operación */}
-      <div className="mt-4 pt-3 border-t flex items-center justify-between gap-2">
+      <div className="mt-4 pt-3 border-t flex flex-col items-stretch gap-2">
         <select
           value={currentStatus}
           onChange={(e) => onCambiarStatus(tanque.id, e.target.value as EstadoTanqueStatus)}

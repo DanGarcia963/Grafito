@@ -1,10 +1,25 @@
 'use client';
+import { API_URL, apiFetch as fetch } from '@/utils/api';
+import HistorialTiempos from '@/components/HistorialTiempos';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Tanque, ContenedorGrafito, EstadoTanqueStatus, statusTanque, ProductoGrafito } from '@/types/tanques';
 import { Area, Rol, EstadoFlujo, ESTADOS_FLUJO, VentaFlujo } from '@/types/flujo';
 import TanqueCard from '@/components/TanqueCard';
 import { useSocket } from '@/context/SocketContext';
+
+// Cambia únicamente estado_Muestra en Prisma.
+const ENDPOINT_LIBERAR_MUESTRA = `${API_URL}/api/calidad/actualizarEstatusMuestra`;
+const METODO_LIBERAR_MUESTRA = 'PUT';
+const ESTATUS_MUESTRA_LIBERADA = 'APROBADO';
+// Endpoint genérico pendiente de implementación en el backend.
+const ENDPOINT_SEGUNDO_AJUSTE = `${API_URL}/api/calidad/solicitarSegundoAjuste`;
+
+type AccionMuestra = 'liberar' | 'segundoAjuste';
+const obtenerIdMuestra = (muestra: any): string =>
+  String(muestra.id_Muestra ?? muestra.id ?? '').trim();
+const obtenerEstadoMuestra = (muestra: any): string =>
+  String(muestra.estatus_Muestra ?? muestra.estado_Muestra ?? '').toUpperCase().trim();
 
 let data: any;
 
@@ -38,8 +53,14 @@ export default function InventarioTanquesPage() {
   const [inventario, setInventario] = useState<ContenedorGrafito[]>([]);
   const [bitacora, setBitacora] = useState<RegistroBitacora[]>([]);
   const [cargando, setCargando] = useState(true);
+  const versionCarga = useRef(0);
 
 const [muestrasDictaminadas, setMuestrasDictaminadas] = useState<any[]>([]);
+  const accionesEnCurso = useRef(new Set<string>());
+  const [accionesMuestra, setAccionesMuestra] = useState<Record<string, AccionMuestra>>({});
+  const [mensajeMuestras, setMensajeMuestras] = useState<{
+    tipo: 'exito' | 'error'; texto: string;
+  } | null>(null);
 
   // Modales
   const [itemACargar, setItemACargar] = useState<ContenedorGrafito | null>(null);
@@ -69,31 +90,19 @@ useEffect(() => {
 // 3. Listener de Sockets en tiempo real (Sincronización con Calidad y otras pantallas)
   useEffect(() => {
     if (!socket) return;
-
-    // Escuchar cuando Calidad u otro usuario cambia el estatus o asigna un tanque
-    socket.on('TANQUE_ACTUALIZADO', () => {
-      fetchDataDB(); // O actualizar el estado local dinámicamente
-    });
-
-    socket.on('ESTATUS_TANQUE_CAMBIADO', (data: { tanqueId: number; estatus: EstadoTanqueStatus }) => {
-      setTanques((prevTanques) =>
-        prevTanques.map((t) =>
-          t.id === data.tanqueId ? { ...t, estatus_proceso: data.estatus } : t
-        )
-      );
-    });
-
-    return () => {
-      socket.off('TANQUE_ACTUALIZADO');
-      socket.off('ESTATUS_TANQUE_CAMBIADO');
-    };
+    const refrescar = () => { void fetchDataDB(); void cargarMuestrasDictaminadas(); };
+    const eventos = ['connect', 'TANQUE_ACTUALIZADO', 'ESTATUS_TANQUE_CAMBIADO', 'MUESTRA_CREADA', 'MUESTRA_ACTUALIZADA'];
+    eventos.forEach(evento => socket.on(evento, refrescar));
+    return () => { eventos.forEach(evento => socket.off(evento, refrescar)); };
   }, [socket]);
+  const [tanqueHistorial, setTanqueHistorial] = useState<number | null>(null);
 
 const fetchDataDB = async () => {
+    const version = ++versionCarga.current;
     try {
       setCargando(true);
 
-      const resTanques = await fetch('http://localhost:4002/api/produccion/tanques?tipo=GRAFITO');
+      const resTanques = await fetch(`${API_URL}/api/produccion/tanques?tipo=GRAFITO`);
       const dataTanques = await resTanques.json();
 
       const mapaTanques: { [key: number]: Tanque } = {};
@@ -115,8 +124,8 @@ const fetchDataDB = async () => {
         });
       }
 
-      const res = await fetch('http://localhost:4002/api/produccion/test');
-      data = await res.json();
+      const res = await fetch(`${API_URL}/api/produccion/test`);
+      const data = await res.json();
 
       const regexObservaciones = /PRENSA\s+([A-Z0-9_-]+)\s*-\s*(\d+)\s+CONTENEDORES/i;
       const grafitosExtraidos: ContenedorGrafito[] = [];
@@ -171,6 +180,7 @@ const fetchDataDB = async () => {
 
       const inventarioExistente = Array.isArray(data.inventario) ? data.inventario : [];
       
+      if (version !== versionCarga.current) return;
       setTanques(Object.values(mapaTanques));
       setInventario([...inventarioExistente, ...grafitosExtraidos]);
       if (Array.isArray(data.bitacora)) setBitacora(data.bitacora);
@@ -178,20 +188,22 @@ const fetchDataDB = async () => {
     } catch (e) {
       console.error('Error al cargar datos iniciales:', e);
     } finally {
-      setCargando(false);
+      if (version === versionCarga.current) setCargando(false);
     }
   };
 
   // Helper para actualizar tanque_id en Lotes
 const ejecutarActualizarTanqueBD = async (idLoteProduccion: number, tanqueId: number | null) => {
     try {
-      await fetch('http://localhost:4002/api/produccion/actualizar', {
+      const response = await fetch(`${API_URL}/api/produccion/actualizar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idLoteProduccion, tanqueId }),
       });
+      if (!response.ok) { const data = await response.json(); throw new Error(data.message || 'No se pudo asignar el tanque'); }
     } catch (error) {
       console.error('Error al actualizar tanque_id en la BD:', error);
+      throw error;
     }
   };
 
@@ -203,7 +215,7 @@ const ejecutarActualizarEstatusTanqueBD = async (
   ) => {
     try {
       const estatusBD = estatus_proceso.replace(/\s+/g, '_');
-      const res = await fetch('http://localhost:4002/api/produccion/actualizarEstatusTanque', {
+      const res = await fetch(`${API_URL}/api/produccion/actualizarEstatusTanque`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -213,23 +225,20 @@ const ejecutarActualizarEstatusTanqueBD = async (
         }),
       });
 
-      // 4. Si la base de datos se actualiza correctamente, emitimos el socket
-      if (res.ok && socket) {
-        socket.emit('actualizar_estatus_tanque', {
-          tanqueId: Number(tanqueId),
-          estatus_proceso: estatusBD,
-          idVentaOrigen,
-        });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'No se pudo cambiar la etapa');
       }
     } catch (error) {
       console.error('Error al actualizar estatus de proceso en la BD:', error);
+      throw error;
     }
   };
 
   // Helper para actualizar el estado de calidad en los Lotes de Producción
 const ejecutarActualizarEstatusCalidadBD = async (idLoteProduccion: number) => {
   try {
-    const res = await fetch('http://localhost:4002/api/produccion/actualizarEstatusCalidad', {
+    const res = await fetch(`${API_URL}/api/produccion/actualizarEstatusCalidad`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -252,7 +261,7 @@ const guardarRegistroBitacora = async (
 ) => {
   try {
     const response = await fetch(
-      'http://localhost:4002/api/produccion/guardarBitacora',
+      `${API_URL}/api/produccion/guardarBitacora`,
       {
         method: 'POST',
         headers: {
@@ -313,19 +322,75 @@ const persistirEnDB = async (
   }
 };
 
-  const cargarMuestrasDictaminadas = async () => {
-  try {
-    const response = await fetch('http://localhost:4002/api/calidad/obtenerMuestrasDictaminadas');
-    const res = await response.json();
-    console.log(res)
-    
-    if (res.success && res.data?.result) {
+  const cargarMuestrasDictaminadas = async (): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_URL}/api/calidad/obtenerMuestrasDictaminadas`);
+      const res = await response.json();
+      if (!response.ok || !res.success || !Array.isArray(res.data?.result)) {
+        throw new Error('No se pudieron actualizar las muestras dictaminadas.');
+      }
       setMuestrasDictaminadas(res.data.result);
+      return true;
+    } catch (error) {
+      console.error('Error cargando muestras dictaminadas:', error);
+      return false;
     }
-  } catch (error) {
-    console.error("Error cargando muestras dictaminadas:", error);
-  }
-};
+  };
+
+  const handleAccionMuestra = async (muestra: any, accion: AccionMuestra) => {
+    const idMuestra = obtenerIdMuestra(muestra);
+    if (!idMuestra) {
+      setMensajeMuestras({ tipo: 'error', texto: 'La muestra no tiene un identificador válido.' });
+      return;
+    }
+    if (accionesEnCurso.current.has(idMuestra)) return;
+    const esLiberacion = accion === 'liberar';
+    const endpoint = esLiberacion ? ENDPOINT_LIBERAR_MUESTRA : ENDPOINT_SEGUNDO_AJUSTE;
+    if (!endpoint) {
+      setMensajeMuestras({ tipo: 'error', texto: 'La liberación de muestras aún no está configurada.' });
+      return;
+    }
+
+    accionesEnCurso.current.add(idMuestra);
+    setAccionesMuestra(prev => ({ ...prev, [idMuestra]: accion }));
+    setMensajeMuestras(null);
+    try {
+      // El endpoint de liberación recibe id_Muestra y estatus_Muestra.
+      const response = await fetch(endpoint, {
+        method: esLiberacion ? METODO_LIBERAR_MUESTRA : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(esLiberacion
+          ? { id_Muestra: muestra.id_Muestra ?? muestra.id, estatus_Muestra: ESTATUS_MUESTRA_LIBERADA }
+          : { id_Muestra: muestra.id_Muestra ?? muestra.id }),
+      });
+      const texto = await response.text();
+      let resultado: { success?: boolean; error?: string; message?: string } | null = null;
+      if (texto.trim()) {
+        try { resultado = JSON.parse(texto); }
+        catch { throw new Error('El servidor devolvió una respuesta no válida.'); }
+      }
+      if (!response.ok || resultado?.success === false) {
+        throw new Error(resultado?.error || resultado?.message || `No se pudo completar la acción (HTTP ${response.status}).`);
+      }
+      // Recargar desde el servidor: no inventar un estado local ni liberar el tanque.
+      const actualizado = await cargarMuestrasDictaminadas();
+      setMensajeMuestras({
+        tipo: actualizado ? 'exito' : 'error',
+        texto: actualizado
+          ? (esLiberacion ? 'Muestra liberada correctamente.' : 'Solicitud de segundo ajuste enviada correctamente.')
+          : 'La acción se guardó, pero no se pudo actualizar la lista. Recarga la página para consultar el resultado.',
+      });
+    } catch (error) {
+      setMensajeMuestras({ tipo: 'error', texto: error instanceof Error ? error.message : 'No se pudo completar la acción.' });
+    } finally {
+      accionesEnCurso.current.delete(idMuestra);
+      setAccionesMuestra(prev => {
+        const siguiente = { ...prev };
+        delete siguiente[idMuestra];
+        return siguiente;
+      });
+    }
+  };
 
 // 3. Ejecutar al cargar la página (junto con tus otras peticiones)
 useEffect(() => {
@@ -333,8 +398,8 @@ useEffect(() => {
 }, []);
 
 // 4. Muestras filtradas / Contadores calculados
-const muestrasAprobadas = muestrasDictaminadas.filter(m => m.estado_Muestra === 'APROBADO');
-const muestrasRechazadas = muestrasDictaminadas.filter(m => m.estado_Muestra === 'RECHAZADO');
+const muestrasAprobadas = muestrasDictaminadas.filter(m => obtenerEstadoMuestra(m) === 'APROBADO');
+const muestrasRechazadas = muestrasDictaminadas.filter(m => obtenerEstadoMuestra(m) === 'RECHAZADO');
 
   // Totales
   const totalLiberados = inventario.filter(i => i.categoria === 'LIBERADO').reduce((a, b) => a + b.cantidadContenedores, 0);
@@ -541,7 +606,7 @@ const handleAsignarORellenarTanque = async (e: React.FormEvent) => {
 
     persistirEnDB(
   nuevosTanques,
-  inventario
+  nuevoInventario
 );
 
 await guardarRegistroBitacora(
@@ -642,7 +707,9 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
   };
 
   return (
-    <main className="p-6 max-w-[98vw] mx-auto space-y-6 bg-slate-50 min-h-screen">
+    <main className="w-full min-w-0 p-3 sm:p-6 max-w-[1600px] mx-auto space-y-6 bg-slate-50 min-h-screen">
+      <a href="/trazabilidad" className="text-blue-700 underline">Consultar y exportar tiempos</a>
+      {tanqueHistorial && <HistorialTiempos entidad="TANQUE" id={tanqueHistorial} onClose={() => setTanqueHistorial(null)} />}
       {/* Resumen KPI */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-xl border shadow-sm">
         <div>
@@ -677,11 +744,17 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
         </div>
       </div>
 
+      {mensajeMuestras && (
+        <div role={mensajeMuestras.tipo === 'error' ? 'alert' : 'status'}
+          className={`rounded-lg border p-3 text-sm break-words ${mensajeMuestras.tipo === 'error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          {mensajeMuestras.texto}
+        </div>
+      )}
       {/* SECCIÓN DE MUESTRAS DICTAMINADAS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* MUESTRAS ACEPTADAS / APROBADAS */}
-        <div className="bg-white border rounded-xl shadow-sm p-4">
-          <div className="flex justify-between items-center mb-3">
+        <div className="min-w-0 bg-white border rounded-xl shadow-sm p-4">
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
             <h3 className="font-bold text-emerald-800 text-sm flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> 
               Muestras Aprobadas
@@ -738,8 +811,8 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
         </div>
 
         {/* MUESTRAS RECHAZADAS */}
-        <div className="bg-white border rounded-xl shadow-sm p-4">
-          <div className="flex justify-between items-center mb-3">
+        <div className="min-w-0 bg-white border rounded-xl shadow-sm p-4">
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
             <h3 className="font-bold text-rose-800 text-sm flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span> 
               Muestras Rechazadas
@@ -750,7 +823,7 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
+            <table className="w-full min-w-[640px] text-xs text-left">
               <thead className="bg-rose-50 text-rose-800">
                 <tr>
                   <th className="p-2">Producto</th>
@@ -758,12 +831,13 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
                   <th className="p-2">Tanque</th>
                   <th className="p-2">Cliente</th>
                   <th className="p-2 text-center">Estado</th>
+                  <th className="p-2">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {muestrasRechazadas.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-6 text-slate-400 italic">
+                    <td colSpan={6} className="text-center py-6 text-slate-400 italic">
                       No hay muestras rechazadas registradas.
                     </td>
                   </tr>
@@ -787,6 +861,22 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
                           RECHAZADO
                         </span>
                       </td>
+                      <td className="p-2 align-top">
+                        <div className="flex min-w-[160px] flex-col gap-2" aria-busy={Boolean(accionesMuestra[obtenerIdMuestra(item)])}>
+                          <button type="button"
+                            disabled={!obtenerIdMuestra(item) || Boolean(accionesMuestra[obtenerIdMuestra(item)])}
+                            onClick={() => handleAccionMuestra(item, 'liberar')}
+                            className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">
+                            {accionesMuestra[obtenerIdMuestra(item)] === 'liberar' ? 'Liberando...' : 'Liberar muestra'}
+                          </button>
+                          <button type="button"
+                            disabled={!obtenerIdMuestra(item) || Boolean(accionesMuestra[obtenerIdMuestra(item)])}
+                            onClick={() => handleAccionMuestra(item, 'segundoAjuste')}
+                            className="rounded border border-amber-300 bg-amber-50 px-3 py-2 font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
+                            {accionesMuestra[obtenerIdMuestra(item)] === 'segundoAjuste' ? 'Enviando...' : 'Solicitar segundo ajuste'}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -798,23 +888,27 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
 
       {/* Grid de Tanques */}
       <section>
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
           <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">
             Tanques de Proceso
           </h2>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-6">
           {tanques.map(tanque => (
-            <div key={tanque.id} className="relative group">
+            <div key={tanque.id} className="flex min-w-0 flex-col gap-3">
+              <div className="min-w-0 flow-root">
               <TanqueCard
                 tanque={tanque}
-                onCambiarStatus={handleCambiarStatus}
-                onVaciarTanque={handleVaciarTanque}
+                onCambiarStatus={(id, estado) => { void handleCambiarStatus(id, estado).catch(e => alert(e.message)); }}
+                onVaciarTanque={(id) => { void handleVaciarTanque(id).catch(e => alert(e.message)); }}
               />
+              </div>
+              <button type="button" onClick={() => setTanqueHistorial(tanque.id)} className="w-full rounded border p-2 text-xs">Ver tiempos e historial</button>
               {tanque.loteActual && (
                 <button
-                  onClick={() => setTanqueAMover(tanque)}
-                  className="mt-2 w-full text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 border font-medium py-1 rounded transition"
+                  type="button"
+                  onClick={() => { setTanqueDestinoId(null); setTanqueAMover(tanque); }}
+                  className="relative shrink-0 w-full whitespace-normal break-words text-xs leading-5 bg-slate-100 hover:bg-slate-200 text-slate-700 border font-medium px-3 py-2 rounded transition"
                 >
                   ⇄ Mover a otro Tanque
                 </button>
@@ -827,12 +921,12 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
       {/* Tablas de Inventario */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* GRAFITO SUCIO */}
-        <div className="bg-white border rounded-xl shadow-sm p-4">
-          <div className="flex justify-between items-center mb-3">
+        <div className="min-w-0 bg-white border rounded-xl shadow-sm p-4">
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
             <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span> Grafito Sucio
             </h3>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs bg-slate-100 px-2 py-0.5 rounded font-bold">{totalSucios} Contenedores</span>
               <button
                 onClick={() => setMostrarModalNuevoSucio(true)}
@@ -898,8 +992,8 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
         </div>
 
         {/* GRAFITO LIBERADO */}
-        <div className="bg-white border rounded-xl shadow-sm p-4">
-          <div className="flex justify-between items-center mb-3">
+        <div className="min-w-0 bg-white border rounded-xl shadow-sm p-4">
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
             <h3 className="font-bold text-emerald-800 text-sm flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Grafito Liberado
             </h3>
@@ -949,7 +1043,7 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
       </div>
 
       {/* BITÁCORA */}
-      <section className="bg-white border rounded-xl shadow-sm p-4">
+      <section className="min-w-0 bg-white border rounded-xl shadow-sm p-4">
         <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
           <span>📋</span> Bitácora de Movimientos
         </h3>
@@ -1005,7 +1099,7 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
       {/* Modales manteniéndose funcionales */}
       {mostrarModalNuevoSucio && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-5 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
+          <div className="bg-white p-5 rounded-xl max-w-sm w-full max-h-[90dvh] overflow-y-auto space-y-4 shadow-xl">
             <h3 className="font-bold text-slate-800 text-sm border-b pb-2">
               Ingresar Grafito Sucio
             </h3>
@@ -1082,12 +1176,12 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
 
       {itemACargar && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-5 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
+          <div className="bg-white p-5 rounded-xl max-w-sm w-full max-h-[90dvh] overflow-y-auto space-y-4 shadow-xl">
             <h3 className="font-bold text-slate-800 text-sm border-b pb-2">
               Asignar / Rellenar Tanque con Lote {itemACargar.lote}
             </h3>
 
-            <form onSubmit={handleAsignarORellenarTanque} className="space-y-3 text-xs">
+            <form onSubmit={e => { void handleAsignarORellenarTanque(e).catch(error => { alert(error.message); void fetchDataDB(); }); }} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-500 font-semibold mb-1">
                   Cantidad de Contenedores a subir (Máx. {itemACargar.cantidadContenedores}):
@@ -1141,12 +1235,12 @@ const obtenerTanquesAptosParaCarga = (item: ContenedorGrafito) => {
 
       {tanqueAMover && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-5 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
+          <div className="bg-white p-5 rounded-xl max-w-sm w-full max-h-[90dvh] overflow-y-auto space-y-4 shadow-xl">
             <h3 className="font-bold text-slate-800 text-sm border-b pb-2">
               Trasvasar {tanqueAMover.nombre} a otro Tanque
             </h3>
 
-            <form onSubmit={handleMoverDeTanque} className="space-y-3 text-xs">
+            <form onSubmit={e => { void handleMoverDeTanque(e).catch(error => { alert(error.message); void fetchDataDB(); }); }} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-500 font-semibold mb-1">Seleccionar Tanque Destino (Vacío):</label>
                 <select

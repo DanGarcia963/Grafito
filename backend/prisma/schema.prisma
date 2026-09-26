@@ -98,7 +98,7 @@ model especificaciones_producto {
   id_Especifi_Product    Int                    @id @default(autoincrement())
   producto_id            Int
   parametro_id           Int
-  valor_Minimo           Decimal?               @db.Decimal(12, 4)
+  valor_Minimo           String?                @db.VarChar(255)
   valor_Maximo           Decimal?               @db.Decimal(12, 4)
   parametros_laboratorio parametros_laboratorio @relation(fields: [parametro_id], references: [id_Parametro], onUpdate: Restrict, map: "fk_esp_parametro")
   productos_materiales   productos_materiales   @relation(fields: [producto_id], references: [id_Produc_Mater], onUpdate: Restrict, map: "fk_esp_producto")
@@ -234,12 +234,27 @@ model muestras {
   estado_Muestra                           muestras_estado_Muestra    @default(PENDIENTE)
   categoria_Muestra                        muestras_categoria_Muestra @default(MUESTRA_INICIAL)
   observaciones                            String?                    @db.Text
+  area_Muestra                             String                     @default("CALIDAD") @db.VarChar(24)
+  vendedor_id                              Int?
+  caracterizacion                          String?                    @db.VarChar(20)
+  cantidad_proyecto                        Decimal?                   @db.Decimal(14, 4)
+  unidad_proyecto                          String?                    @db.VarChar(30)
+  viabilidad_id                            Int?
+  viabilidad_nombre                        String?                    @db.VarChar(100)
+  fecha_recoleccion                        DateTime?
+  fecha_ingreso_laboratorio                DateTime?
+  ficha_nombre                             String?                    @db.VarChar(200)
+  ficha_mime                               String?                    @db.VarChar(100)
+  ficha_contenido                          Bytes?                     @db.MediumBlob
+  id_ejecuciones                           id_ejecuciones[]
   personas_muestras_analista_idTopersonas  personas?                  @relation("muestras_analista_idTopersonas", fields: [analista_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_muestras_personas_analista")
   personas_muestras_cliente_idTopersonas   personas?                  @relation("muestras_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_cliente_rel")
   lotes_produccion                         lotes_produccion?          @relation(fields: [lote_id], references: [id_Lote_Produccion], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_lote_rel")
   productos_materiales                     productos_materiales       @relation(fields: [producto_id], references: [id_Produc_Mater], onUpdate: Restrict, map: "fk_muestra_producto_rel")
   personas_muestras_proveedor_idTopersonas personas?                  @relation("muestras_proveedor_idTopersonas", fields: [proveedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_proveedor")
   equipos_tanques                          equipos_tanques?           @relation(fields: [tanque_id], references: [id_Equipos_Tanques], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_tanque_rel")
+  personas_muestras_vendedor_idTopersonas  personas?                  @relation("muestras_vendedor_idTopersonas", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+  id_viabilidades                          id_viabilidades?           @relation(fields: [viabilidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
   resultado_analisis                       resultado_analisis[]
 
   @@index([analista_id], map: "fk_muestra_analista")
@@ -248,6 +263,9 @@ model muestras {
   @@index([producto_id], map: "fk_muestra_producto")
   @@index([proveedor_id], map: "fk_muestra_proveedor")
   @@index([tanque_id], map: "fk_muestra_tanque")
+  @@index([area_Muestra, vendedor_id])
+  @@index([vendedor_id], map: "muestras_vendedor_id_fkey")
+  @@index([viabilidad_id], map: "muestras_viabilidad_id_fkey")
 }
 
 model no_conformidades {
@@ -363,6 +381,7 @@ model personas {
   entregas_logistica_entregas_logistica_transportista_idTopersonas                                  entregas_logistica[]              @relation("entregas_logistica_transportista_idTopersonas")
   evaluacion_proveedores                                                                            evaluacion_proveedores[]
   incidencias_proveedores                                                                           incidencias_proveedores[]
+  kpi_configuraciones                                                                               kpi_configuraciones[]
   movimientos_inventario_movimientos_inventario_autoriza_idTopersonas                               movimientos_inventario[]          @relation("movimientos_inventario_autoriza_idTopersonas")
   movimientos_inventario_movimientos_inventario_entrega_idTopersonas                                movimientos_inventario[]          @relation("movimientos_inventario_entrega_idTopersonas")
   movimientos_inventario_movimientos_inventario_recibe_idTopersonas                                 movimientos_inventario[]          @relation("movimientos_inventario_recibe_idTopersonas")
@@ -370,6 +389,7 @@ model personas {
   muestras_muestras_analista_idTopersonas                                                           muestras[]                        @relation("muestras_analista_idTopersonas")
   muestras_muestras_cliente_idTopersonas                                                            muestras[]                        @relation("muestras_cliente_idTopersonas")
   muestras_muestras_proveedor_idTopersonas                                                          muestras[]                        @relation("muestras_proveedor_idTopersonas")
+  muestras_muestras_vendedor_idTopersonas                                                           muestras[]                        @relation("muestras_vendedor_idTopersonas")
   no_conformidades_no_conformidades_aprobado_Por_idTopersonas                                       no_conformidades[]                @relation("no_conformidades_aprobado_Por_idTopersonas")
   no_conformidades_no_conformidades_autoridad_Libera_idTopersonas                                   no_conformidades[]                @relation("no_conformidades_autoridad_Libera_idTopersonas")
   no_conformidades_no_conformidades_inspector_idTopersonas                                          no_conformidades[]                @relation("no_conformidades_inspector_idTopersonas")
@@ -480,6 +500,7 @@ model resultado_analisis {
   cumple_Especificacion  Boolean?               @default(true)
   fecha_Resultado        DateTime               @db.Date
   hora_Resultado         DateTime?              @db.Time(0)
+  ciclo_analisis         Int?
   muestras               muestras               @relation(fields: [muestra_id], references: [id_Muestra], onUpdate: Restrict, map: "fk_res_muestra")
   parametros_laboratorio parametros_laboratorio @relation(fields: [parametro_id], references: [id_Parametro], onDelete: Cascade, onUpdate: Restrict, map: "fk_res_parametro")
 
@@ -543,6 +564,248 @@ model lotes_llegada {
   ordenes_produccion   ordenes_produccion?            @relation(fields: [orden_produccion_id], references: [id_Orden_Produc], onDelete: Restrict, onUpdate: Restrict, map: "fk_lotellegada_Orden")
 
   @@index([orden_produccion_id], map: "fk_lotellegada_Orden")
+}
+
+model areas_legales {
+  id_Area           Int                 @id @default(autoincrement())
+  nombre_Area       String              @unique(map: "nombre_Area") @db.VarChar(150)
+  activo            Boolean?            @default(true)
+  catalogo_tramites catalogo_tramites[]
+}
+
+model areas_organizacionales {
+  id_Area         Int               @id @default(autoincrement())
+  codigo          String            @unique(map: "uq_area_org_codigo") @db.VarChar(30)
+  nombre          String            @unique(map: "uq_area_org_nombre") @db.VarChar(150)
+  activo          Boolean           @default(true)
+  creado_en       DateTime          @default(now())
+  kpi_indicadores kpi_indicadores[]
+}
+
+model catalogo_tramites {
+  id_Tramite_Catalogo Int                @id @default(autoincrement())
+  id_Area             Int
+  nombre_Tramite      String             @db.VarChar(300)
+  activo              Boolean?           @default(true)
+  areas_legales       areas_legales      @relation(fields: [id_Area], references: [id_Area], onUpdate: Restrict, map: "fk_catalogo_area")
+  tramites_legales    tramites_legales[]
+
+  @@unique([id_Area, nombre_Tramite], map: "uq_tramite_area")
+}
+
+model documentos_legales {
+  id_Documento     Int                @id @default(autoincrement())
+  nombre_archivo   String             @db.VarChar(255)
+  contenido_pdf    Bytes              @db.MediumBlob
+  tramites_legales tramites_legales[]
+}
+
+model kpi_configuraciones {
+  id_Configuracion       Int                                  @id @default(autoincrement())
+  indicador_id           Int
+  version                Int
+  vigente_desde          DateTime                             @db.Date
+  vigente_hasta          DateTime?                            @db.Date
+  responsable_persona_id Int?
+  tipo_dato              kpi_configuraciones_tipo_dato        @default(NUMERICO)
+  unidad                 String                               @db.VarChar(40)
+  decimales              Int                                  @default(2) @db.UnsignedTinyInt
+  periodicidad           kpi_configuraciones_periodicidad     @default(MENSUAL)
+  dias_limite_captura    Int                                  @default(10) @db.UnsignedSmallInt
+  metodo_calculo         kpi_configuraciones_metodo_calculo   @default(DIRECTO)
+  formula_descriptiva    String?                              @db.Text
+  parametros_calculo     String?                              @db.LongText
+  opciones_permitidas    String?                              @db.LongText
+  regla_evaluacion       kpi_configuraciones_regla_evaluacion
+  meta_minima            Decimal?                             @db.Decimal(18, 6)
+  meta_maxima            Decimal?                             @db.Decimal(18, 6)
+  meta_booleano          Boolean?
+  meta_opcion            String?                              @db.VarChar(100)
+  agregacion             kpi_configuraciones_agregacion       @default(NO_AGREGAR)
+  fuente_datos           String?                              @db.Text
+  requiere_evidencia     Boolean                              @default(true)
+  motivo_version         String                               @db.Text
+  creado_por             String
+  creado_en              DateTime                             @default(now())
+  kpi_indicadores        kpi_indicadores                      @relation(fields: [indicador_id], references: [id_Indicador], onUpdate: Restrict, map: "fk_kpi_config_indicador")
+  personas               personas?                            @relation(fields: [responsable_persona_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_kpi_config_responsable")
+  kpi_resultados         kpi_resultados[]
+
+  @@unique([id_Configuracion, indicador_id], map: "uq_kpi_config_indicador")
+  @@unique([indicador_id, version], map: "uq_kpi_config_version")
+  @@index([responsable_persona_id], map: "fk_kpi_config_responsable")
+  @@index([indicador_id, vigente_desde, vigente_hasta], map: "idx_kpi_config_vigencia")
+}
+
+model kpi_evidencias {
+  id_Evidencia            Int                     @id @default(autoincrement())
+  historial_id            Int
+  nombre_original         String                  @db.VarChar(255)
+  tipo_mime               String                  @db.VarChar(150)
+  contenido               Bytes                   @db.MediumBlob
+  descripcion             String?                 @db.VarChar(500)
+  subido_por              String
+  subido_en               DateTime                @default(now())
+  kpi_resultado_historial kpi_resultado_historial @relation(fields: [historial_id], references: [id_Historial], onUpdate: Restrict, map: "fk_kpi_evidencia_historial")
+
+  @@index([historial_id], map: "idx_kpi_evidencia_historial")
+}
+
+model kpi_indicadores {
+  id_Indicador           Int                    @id @default(autoincrement())
+  area_id                Int
+  codigo                 String                 @unique(map: "uq_kpi_codigo") @db.VarChar(40)
+  nombre                 String                 @db.VarChar(255)
+  objetivo               String?                @db.Text
+  activo_desde           DateTime               @db.Date
+  activo_hasta           DateTime?              @db.Date
+  activo                 Boolean                @default(true)
+  creado_en              DateTime               @default(now())
+  kpi_configuraciones    kpi_configuraciones[]
+  areas_organizacionales areas_organizacionales @relation(fields: [area_id], references: [id_Area], onUpdate: Restrict, map: "fk_kpi_area")
+
+  @@index([area_id, activo], map: "idx_kpi_area_activo")
+}
+
+model kpi_resultado_historial {
+  id_Historial   Int                            @id @default(autoincrement())
+  resultado_id   Int
+  revision       Int
+  accion         kpi_resultado_historial_accion
+  datos_revision String                         @db.LongText
+  motivo         String                         @db.Text
+  realizado_por  String
+  realizado_en   DateTime                       @default(now())
+  kpi_evidencias kpi_evidencias[]
+  kpi_resultados kpi_resultados                 @relation(fields: [resultado_id], references: [id_Resultado], onUpdate: Restrict, map: "fk_kpi_historial_resultado")
+
+  @@unique([resultado_id, revision], map: "uq_kpi_historial_revision")
+}
+
+model kpi_resultados {
+  id_Resultado            Int                       @id @default(autoincrement())
+  indicador_id            Int
+  configuracion_id        Int
+  periodo_inicio          DateTime                  @db.Date
+  periodo_fin             DateTime                  @db.Date
+  fecha_limite_captura    DateTime                  @db.Date
+  valor_numerico          Decimal?                  @db.Decimal(18, 6)
+  valor_booleano          Boolean?
+  valor_opcion            String?                   @db.VarChar(100)
+  datos_base              String?                   @db.LongText
+  origen                  kpi_resultados_origen     @default(MANUAL)
+  referencia_origen       String?                   @db.LongText
+  estado                  kpi_resultados_estado     @default(PENDIENTE)
+  evaluacion              kpi_resultados_evaluacion @default(NO_EVALUABLE)
+  observaciones           String?                   @db.Text
+  analisis                String?                   @db.Text
+  acciones_propuestas     String?                   @db.Text
+  justificacion_no_aplica String?                   @db.Text
+  capturado_por           String?
+  capturado_en            DateTime?
+  revisado_por            String?
+  revisado_en             DateTime?
+  revision_actual         Int                       @default(1)
+  creado_en               DateTime                  @default(now())
+  actualizado_en          DateTime                  @default(now())
+  kpi_resultado_historial kpi_resultado_historial[]
+  kpi_configuraciones     kpi_configuraciones       @relation(fields: [configuracion_id, indicador_id], references: [id_Configuracion, indicador_id], onUpdate: Restrict, map: "fk_kpi_resultado_config")
+
+  @@unique([indicador_id, periodo_inicio, periodo_fin], map: "uq_kpi_resultado_periodo")
+  @@index([configuracion_id, indicador_id], map: "idx_kpi_resultado_config")
+  @@index([periodo_inicio, estado, evaluacion], map: "idx_kpi_resultado_dashboard")
+  @@index([estado, fecha_limite_captura], map: "idx_kpi_resultado_pendientes")
+}
+
+model proceso_eventos {
+  id         Int      @id @default(autoincrement())
+  entidad    String   @db.VarChar(16)
+  entidad_id Int
+  lote_id    Int?
+  tanque_id  Int?
+  ciclo      Int      @default(1)
+  accion     String   @db.VarChar(64)
+  fecha      DateTime
+  detalle    String?  @db.LongText
+
+  @@index([entidad, entidad_id, fecha])
+  @@index([lote_id, fecha])
+}
+
+model proceso_tramos {
+  id         Int       @id @default(autoincrement())
+  entidad    String    @db.VarChar(16)
+  entidad_id Int
+  lote_id    Int?
+  tanque_id  Int?
+  ciclo      Int       @default(1)
+  etapa      String    @db.VarChar(64)
+  inicio     DateTime
+  fin        DateTime?
+  activo     String?   @unique @db.VarChar(64)
+
+  @@index([entidad, entidad_id, ciclo])
+  @@index([inicio, etapa])
+  @@index([lote_id, inicio])
+}
+
+model tramites_legales {
+  id_Tramite_Legal    Int                              @id @default(autoincrement())
+  duracion_Tramite    Decimal                          @db.Decimal(12, 4)
+  responsable_Interno String                           @db.VarChar(255)
+  proveedor           String                           @db.VarChar(255)
+  fecha_Expedicion    DateTime                         @db.Date
+  fecha_Vencimiento   DateTime                         @db.Date
+  estatus_Tramite     tramites_legales_estatus_Tramite
+  documento_ID        Int
+  observaciones       String                           @db.VarChar(255)
+  id_Tramite_Catalogo Int
+  costo_Vigencia      Decimal                          @db.Decimal(12, 4)
+  costo_Por_Anio      Decimal                          @db.Decimal(12, 4)
+  catalogo_tramites   catalogo_tramites                @relation(fields: [id_Tramite_Catalogo], references: [id_Tramite_Catalogo], onUpdate: Restrict, map: "fk_tramite_catalogo")
+  documentos_legales  documentos_legales               @relation(fields: [documento_ID], references: [id_Documento], onUpdate: Restrict, map: "fk_tramite_documento")
+
+  @@index([id_Tramite_Catalogo], map: "fk_tramite_catalogo")
+  @@index([documento_ID], map: "fk_tramite_documento")
+}
+
+model id_ejecuciones {
+  id                Int         @id @default(autoincrement())
+  muestra_id        Int
+  proceso_id        Int
+  ciclo             Int         @default(1)
+  orden             Int
+  nombre            String      @db.VarChar(100)
+  estandar_segundos Int?
+  estandar_version  Int
+  disponible_desde  DateTime?
+  inicio            DateTime?
+  fin               DateTime?
+  inicio_por        String?     @db.VarChar(100)
+  fin_por           String?     @db.VarChar(100)
+  resultado         String?     @db.Text
+  muestras          muestras    @relation(fields: [muestra_id], references: [id_Muestra], onUpdate: Restrict)
+  id_procesos       id_procesos @relation(fields: [proceso_id], references: [id], onUpdate: Restrict)
+
+  @@unique([muestra_id, ciclo, orden])
+  @@index([inicio, proceso_id])
+  @@index([proceso_id], map: "id_ejecuciones_proceso_id_fkey")
+}
+
+model id_procesos {
+  id                Int              @id @default(autoincrement())
+  nombre            String           @unique @db.VarChar(100)
+  estandar_segundos Int?
+  version           Int              @default(1)
+  activo            Boolean          @default(true)
+  id_ejecuciones    id_ejecuciones[]
+}
+
+model id_viabilidades {
+  id       Int        @id @default(autoincrement())
+  nombre   String     @unique @db.VarChar(100)
+  activo   Boolean    @default(true)
+  muestras muestras[]
 }
 
 enum no_conformidades_tipo {
@@ -754,4 +1017,83 @@ enum productos_materiales_UM {
   Kilogramos
   Litros
   Piezas
+}
+
+enum kpi_resultado_historial_accion {
+  CREACION
+  CAPTURA
+  ENVIO_REVISION
+  APROBACION
+  CORRECCION
+  NO_APLICA
+  EVIDENCIA
+}
+
+enum kpi_configuraciones_tipo_dato {
+  NUMERICO
+  BOOLEANO
+  OPCION
+}
+
+enum tramites_legales_estatus_Tramite {
+  EN_RENOVACION
+  EN_TRAMITE
+  VENCIDO
+  VIGENTE
+}
+
+enum kpi_configuraciones_periodicidad {
+  MENSUAL
+  TRIMESTRAL
+  SEMESTRAL
+  ANUAL
+}
+
+enum kpi_resultados_origen {
+  MANUAL
+  IMPORTADO
+  AUTOMATICO
+}
+
+enum kpi_configuraciones_metodo_calculo {
+  DIRECTO
+  SUMA
+  DIFERENCIA
+  RAZON
+  PORCENTAJE
+  REDUCCION_PORCENTUAL
+  PROMEDIO
+  PROMEDIO_PONDERADO
+}
+
+enum kpi_resultados_estado {
+  PENDIENTE
+  BORRADOR
+  EN_REVISION
+  APROBADO
+  NO_APLICA
+}
+
+enum kpi_resultados_evaluacion {
+  CUMPLE
+  NO_CUMPLE
+  NO_EVALUABLE
+}
+
+enum kpi_configuraciones_regla_evaluacion {
+  MAYOR_IGUAL
+  MENOR_IGUAL
+  ENTRE
+  IGUAL
+}
+
+enum kpi_configuraciones_agregacion {
+  SUMA
+  PROMEDIO
+  PROMEDIO_PONDERADO
+  RECALCULAR_BASES
+  ULTIMO
+  MAXIMO
+  MINIMO
+  NO_AGREGAR
 }

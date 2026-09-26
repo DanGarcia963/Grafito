@@ -1,7 +1,9 @@
 
 'use client';
+import { API_URL, apiFetch as fetch, sesionActual } from '@/utils/api';
+import HistorialTiempos from '@/components/HistorialTiempos';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/context/SocketContext';
 import { EstadoMuestra } from '@/types/muestras';
@@ -55,6 +57,23 @@ interface ContenedorState {
 
 export const CalidadMuestrasScreen: React.FC = () => {
   const socket = useSocket();
+  const router = useRouter();
+  const [sesionLista, setSesionLista] = useState(false);
+  const [erroresCarga, setErroresCarga] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const comprobar = () => {
+      const valida = Boolean(sesionActual()?.token);
+      setSesionLista(valida);
+      if (!valida) router.replace('/');
+    };
+    comprobar();
+    window.addEventListener('sesion-cambiada', comprobar);
+    window.addEventListener('storage', comprobar);
+    return () => {
+      window.removeEventListener('sesion-cambiada', comprobar);
+      window.removeEventListener('storage', comprobar);
+    };
+  }, [router]);
   const [muestras, setMuestras] = useState<any[]>([]);
   const [loadingMuestras, setLoadingMuestras] = useState<boolean>(true);
   const [loadingMuestrasDictaminadas, setLoadingMuestrasDictaminadas] = useState<boolean>(true);
@@ -151,7 +170,7 @@ const cargarLotesLlegada = async () => {
     setCargandoLotes(true);
     try {
       const response = await fetch(
-        'http://localhost:4002/api/calidad/obtenerOrdenesPendientesDeLlegada'
+        `${API_URL}/api/calidad/obtenerOrdenesPendientesDeLlegada`
       );
       const res = await response.json();
 
@@ -168,10 +187,10 @@ const cargarLotesLlegada = async () => {
   };
 
   useEffect(() => {
-    if (vistaActiva === 'CHECKLIST') {
+    if (sesionLista && vistaActiva === 'CHECKLIST') {
       cargarLotesLlegada();
     }
-  }, [vistaActiva]);
+  }, [vistaActiva, sesionLista]);
 
 // ============================================================
   // MANEJO DEL MODAL Y EXTRACCIÓN DINÁMICA DE CONTENEDORES
@@ -274,7 +293,7 @@ const cargarLotesLlegada = async () => {
     setGuardandoChecklist(true);
 
     try {
-      const response = await fetch('http://localhost:4002/api/calidad/crearLoteConChecklist', {
+      const response = await fetch(`${API_URL}/api/calidad/crearLoteConChecklist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -299,11 +318,19 @@ const cargarLotesLlegada = async () => {
   };
 
   // 1. Cargar Muestras desde la API
+  const versionMuestras = useRef(0);
+  const versionDictaminadas = useRef(0);
   const fetchMuestras = useCallback(async () => {
+    const version = ++versionMuestras.current;
     setLoadingMuestras(true);
     try {
-      const res = await fetch('http://localhost:4002/api/calidad/obtenerMuestras');
-      if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+      setErroresCarga(prev => ({ ...prev, 'Muestras': '' }));
+      const res = await fetch(`${API_URL}/api/calidad/obtenerMuestras`);
+      if (!res.ok) {
+        const detalle = await res.json().catch(() => null);
+        const mensaje = detalle?.message || detalle?.error || res.statusText;
+        throw new Error(`HTTP ${res.status}: ${Array.isArray(mensaje) ? mensaje.join(', ') : mensaje}`);
+      }
       
       const data = await res.json();
 
@@ -323,19 +350,26 @@ const cargarLotesLlegada = async () => {
         lista = data.muestras;
       }
 
-      setMuestras(lista);
+      if (version === versionMuestras.current) setMuestras(lista);
     } catch (err) {
+      setErroresCarga(prev => ({ ...prev, 'Muestras': err instanceof Error ? err.message : 'Error de conexión' }));
       console.error('Error al cargar muestras:', err);
     } finally {
-      setLoadingMuestras(false);
+      if (version === versionMuestras.current) setLoadingMuestras(false);
     }
   }, []);
 
 const fetchMuestrasDictaminadas = useCallback(async () => {
+  const version = ++versionDictaminadas.current;
   setLoadingMuestrasDictaminadas(true);
   try {
-    const res = await fetch('http://localhost:4002/api/calidad/obtenerMuestrasDictaminadas');
-    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+      setErroresCarga(prev => ({ ...prev, 'Muestras dictaminadas': '' }));
+    const res = await fetch(`${API_URL}/api/calidad/obtenerMuestrasDictaminadas`);
+    if (!res.ok) {
+        const detalle = await res.json().catch(() => null);
+        const mensaje = detalle?.message || detalle?.error || res.statusText;
+        throw new Error(`HTTP ${res.status}: ${Array.isArray(mensaje) ? mensaje.join(', ') : mensaje}`);
+      }
     
     const data = await res.json();
     let lista = [];
@@ -344,11 +378,12 @@ const fetchMuestrasDictaminadas = useCallback(async () => {
     else if (Array.isArray(data.data?.result)) lista = data.data.result;
     else if (Array.isArray(data.data)) lista = data.data;
 
-    setMuestrasDictaminadas(lista); // <--- Corrección aquí
+    if (version === versionDictaminadas.current) setMuestrasDictaminadas(lista); // <--- Corrección aquí
   } catch (err) {
+      setErroresCarga(prev => ({ ...prev, 'Muestras dictaminadas': err instanceof Error ? err.message : 'Error de conexión' }));
     console.error('Error al cargar muestras dictaminadas:', err);
   } finally {
-    setLoadingMuestrasDictaminadas(false);
+    if (version === versionDictaminadas.current) setLoadingMuestrasDictaminadas(false);
   }
 }, []);
 
@@ -370,8 +405,13 @@ const obtenerTipoMuestra = (muestra: any): string => {
   const fetchParametros = useCallback(async () => {
     setLoadingParametros(true);
     try {
-      const res = await fetch('http://localhost:4002/api/calidad/obtenerParametros');
-      if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+      setErroresCarga(prev => ({ ...prev, 'Parámetros': '' }));
+      const res = await fetch(`${API_URL}/api/calidad/obtenerParametros`);
+      if (!res.ok) {
+        const detalle = await res.json().catch(() => null);
+        const mensaje = detalle?.message || detalle?.error || res.statusText;
+        throw new Error(`HTTP ${res.status}: ${Array.isArray(mensaje) ? mensaje.join(', ') : mensaje}`);
+      }
       
       const data = await res.json();
       console.log("Respuesta servidor Parámetros:", data);
@@ -389,6 +429,7 @@ const obtenerTipoMuestra = (muestra: any): string => {
 
       setParametros(listaParametros);
     } catch (err) {
+      setErroresCarga(prev => ({ ...prev, 'Parámetros': err instanceof Error ? err.message : 'Error de conexión' }));
       console.error('Error al cargar parámetros:', err);
     } finally {
       setLoadingParametros(false);
@@ -396,43 +437,29 @@ const obtenerTipoMuestra = (muestra: any): string => {
   }, []);
 
 useEffect(() => {
-    if (!socket) return;
-
-    // A) Reutilizar el evento existente de Tanques:
-    // Si un tanque cambia a "En Espera de Calidad", refrescamos las muestras
-    const handleEstatusTanque = () => {
-      console.log('⚡ Cambio en tanques detectado. Refrescando muestras de Calidad...');
-      fetchMuestras();
-    };
-
-    // B) Eventos específicos de Calidad (Nuevos o recomendados):
-    const handleMuestraCreada = () => {
-      console.log('🧪 Nueva muestra recibida en laboratorio. Refrescando...');
-      fetchMuestras();
-    };
-
-    const handleMuestraActualizada = () => {
-      console.log('✅ Dictamen de muestra actualizado. Refrescando...');
-      fetchMuestras();
-    };
-
-    // Suscripción
-    socket.on('ESTATUS_TANQUE_CAMBIADO', handleEstatusTanque);
-    socket.on('MUESTRA_CREADA', handleMuestraCreada);
-    socket.on('MUESTRA_ACTUALIZADA', handleMuestraActualizada);
-
-    // Limpieza (Cleanup)
-    return () => {
-      socket.off('ESTATUS_TANQUE_CAMBIADO', handleEstatusTanque);
-      socket.off('MUESTRA_CREADA', handleMuestraCreada);
-      socket.off('MUESTRA_ACTUALIZADA', handleMuestraActualizada);
-    };
-  }, [socket, fetchMuestras]);
-
-  useEffect(() => {
-    fetchMuestras();
+    if (!sesionLista) return;
+    const refrescar = () => { void fetchMuestras(); void fetchMuestrasDictaminadas(); };
+    refrescar();
     fetchParametros();
-  }, [fetchMuestras, fetchParametros]);
+    if (!socket) return;
+    const eventos = ['connect', 'ESTATUS_TANQUE_CAMBIADO', 'MUESTRA_CREADA', 'MUESTRA_ACTUALIZADA'];
+    eventos.forEach(evento => socket.on(evento, refrescar));
+    return () => { eventos.forEach(evento => socket.off(evento, refrescar)); };
+  }, [sesionLista, socket, fetchMuestras, fetchMuestrasDictaminadas, fetchParametros]);
+
+  const [accionTiempo, setAccionTiempo] = useState<number | null>(null);
+  const [errorTiempo, setErrorTiempo] = useState('');
+  const [muestraHistorial, setMuestraHistorial] = useState<number | null>(null);
+  const ejecutarTiempo = async (id: number, accion: 'recibir' | 'iniciar' | 'reabrir') => {
+    setAccionTiempo(id); setErrorTiempo('');
+    try {
+      const res = await fetch(`${API_URL}/api/calidad/${id}/${accion}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || data.error || 'No se pudo guardar');
+      await Promise.all([fetchMuestras(), fetchMuestrasDictaminadas()]);
+    } catch (error) { setErrorTiempo(error instanceof Error ? error.message : 'Error de conexión'); }
+    finally { setAccionTiempo(null); }
+  };
 
 // Al abrir el modal, inicializamos los parámetros seleccionados con los que vienen de la BD
 const abrirModalCaptura = async (muestra: any) => {
@@ -450,7 +477,7 @@ const muestraData = getMuestraData(muestra);
     setEspecificacionesGuardadas([]);
 
     try {
-      const res = await fetch(`http://localhost:4002/api/calidad/${muestraData.id}/especificaciones`);
+      const res = await fetch(`${API_URL}/api/calidad/${muestraData.id}/especificaciones`);
       if (res.ok) {
         const data = await res.json();
         // Si data viene envuelto en algún objeto de respuesta o directamente como array
@@ -537,41 +564,14 @@ const guardarResultados = async (e: React.FormEvent) => {
       valor: String(valor),
     }));
 
-    // 2. Un solo POST al backend enviando todo el paquete
-    const resResultados = await fetch('http://localhost:4002/api/calidad/crearResultado', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id_Muestra: idMuestra,
-        mediciones: listaMediciones,
-        observaciones,
-      }),
+    const respuesta = await fetch(`${API_URL}/api/calidad/finalizarAnalisis`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idMuestra: Number(idMuestra), mediciones: listaMediciones,
+        dictamen, tipoMuestra, observaciones, analistaNombre: analistaNombre.trim() }),
     });
-
-    const dataResultados = await resResultados.json();
-    if (!dataResultados.success) {
-      throw new Error(dataResultados.error || 'Error al guardar los resultados');
-    }
-
-    // 3. Actualizar el dictamen, observaciones y tipo de muestra
-    const resEstado = await fetch('http://localhost:4002/api/calidad/actualizarEstadoMuestra', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        idMuestra: Number(idMuestra),
-        dictamen: dictamen,
-        tipoMuestra: tipoMuestra, // Se envía el tipo de muestra
-        observaciones: observaciones, // Se envían las observaciones
-        analistaNombre: analistaNombre.trim(), // <--- Enviamos el nombre escrito
-      }),
-    });
-
-    const dataEstado = await resEstado.json();
-    console.log('Respuesta actualización estado:', dataEstado);
-
-    if (!dataEstado.success || dataEstado.count === 0) {
-      console.warn('⚠️ No se actualizó ningún registro en muestras. Revisa el idMuestra o los campos.');
-    }
+    const resultado = await respuesta.json();
+    if (!respuesta.ok || !resultado.success) throw new Error(resultado.message || resultado.error || 'No se pudo finalizar');
+    await fetchMuestrasDictaminadas();
     cerrarModal();
     await fetchMuestras();
     const lotesLlegada = await cargarLotesLlegada()
@@ -579,6 +579,8 @@ const guardarResultados = async (e: React.FormEvent) => {
     
   } catch (err) {
     console.error('Error al registrar resultados de laboratorio:', err);
+    setErrorTiempo(err instanceof Error ? err.message : 'No se pudo finalizar el análisis');
+    alert(err instanceof Error ? err.message : 'No se pudo finalizar el análisis');
   } finally {
     setSubmitting(false);
   }
@@ -608,7 +610,7 @@ const buscarAnalistas = async (query: string) => {
   }
 
   try {
-    const res = await fetch(`http://localhost:4002/api/calidad/buscarAnalistas?q=${encodeURIComponent(query)}`);
+    const res = await fetch(`${API_URL}/api/calidad/buscarAnalistas?q=${encodeURIComponent(query)}`);
     const data = await res.json();
     if (data.success) {
       setSugerenciasAnalistas(data.analistas);
@@ -632,6 +634,7 @@ const renderBadgeEstado = (estado: string) => {
     case 'EN ANALISIS':
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
+
           <Clock className="w-3.5 h-3.5" /> En Análisis
         </span>
       );
@@ -658,8 +661,17 @@ const renderBadgeEstado = (estado: string) => {
   }
 };
 
+if (!sesionLista) return <p className="p-6">Verificando sesión…</p>;
+
 return (
   <div className="p-6 bg-slate-950 min-h-screen text-slate-100 space-y-6">
+      <div className="mb-4 flex flex-wrap gap-3"><a href="/trazabilidad" className="text-cyan-400 underline">Consultar y exportar tiempos</a></div>
+      {Object.entries(erroresCarga).filter(([, mensaje]) => mensaje).map(([consulta, mensaje]) => (
+        <p key={consulta} role="alert" className="rounded bg-red-900 p-3 text-white">{consulta}: {mensaje}</p>
+      ))}
+      {errorTiempo && <p role="alert" className="mb-4 rounded bg-red-900 p-3 text-white">{errorTiempo}</p>}
+      {muestraHistorial && <HistorialTiempos entidad="MUESTRA" id={muestraHistorial} onClose={() => setMuestraHistorial(null)} />}
+
     {/* Header */}
     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-5">
       <div className="flex items-center gap-3">
@@ -846,10 +858,19 @@ return (
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-800">
+                  <div className="pt-3 border-t border-slate-800 space-y-2">
+                    <p className="text-xs text-slate-300">Etapa: {muestra.tiempoActual?.fin ? 'FINALIZADA' : (muestra.tiempoActual?.etapa || 'SIN RECEPCIÓN REGISTRADA')} · Ciclo {muestra.tiempoActual?.ciclo || '—'}</p>
+                    {!esFinalizada && (!muestra.tiempoActual || ['TRASLADO', 'REANALISIS_PENDIENTE'].includes(muestra.tiempoActual.etapa)) && (
+                      <button type="button" disabled={accionTiempo !== null} onClick={() => ejecutarTiempo(Number(data.id), 'recibir')} className="w-full rounded bg-blue-700 p-2 text-white disabled:opacity-50">Recibir muestra</button>
+                    )}
+                    {!esFinalizada && muestra.tiempoActual?.etapa === 'ESPERA_ANALISIS' && !muestra.tiempoActual.fin && (
+                      <button type="button" disabled={accionTiempo !== null} onClick={() => ejecutarTiempo(Number(data.id), 'iniciar')} className="w-full rounded bg-cyan-700 p-2 text-white disabled:opacity-50">Iniciar análisis</button>
+                    )}
+                    {esFinalizada && <button type="button" disabled={accionTiempo !== null} onClick={() => ejecutarTiempo(Number(data.id), 'reabrir')} className="w-full rounded border border-amber-500 p-2 text-amber-300">Solicitar nuevo ciclo de análisis</button>}
+                    <button type="button" onClick={() => setMuestraHistorial(Number(data.id))} className="w-full rounded border p-2 text-slate-300">Ver tiempos e historial</button>
                     <button
                       onClick={() => abrirModalCaptura(muestra)}
-                      disabled={esPendiente}
+                      disabled={!esFinalizada && (muestra.tiempoActual?.etapa !== 'ANALISIS' || Boolean(muestra.tiempoActual?.fin))}
                       className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-colors ${
                         esPendiente
                           ? 'bg-slate-900/40 text-slate-500 border border-slate-800/80 cursor-not-allowed'
@@ -1243,6 +1264,7 @@ return (
                                 <tr key={idx} className="hover:bg-slate-800/30">
                                   <td className="p-3 font-medium">
                                     {spec.parametros_laboratorio?.nombre_Parametro || 'N/A'}
+                                    <span className="block text-xs text-slate-500">Ciclo {spec.ciclo_analisis ?? 'histórico sin ciclo'} · {spec.fecha_Resultado ? new Date(spec.fecha_Resultado).toLocaleString('es-MX') : ''}</span>
                                   </td>
                                   <td className="p-3 font-mono text-cyan-400">
                                     {spec.valor_Obtenido_Num ?? 'N/A'}
