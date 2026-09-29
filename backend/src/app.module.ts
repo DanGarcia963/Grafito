@@ -24,7 +24,7 @@ imports: [AuthModule, TrazabilidadModule, InvestigacionModule,
     }),
     BullModule.registerQueue({
       name: 'cola-lotes',
-    }),VentasModule, ProductionModule, CalidadModule ,
+    }),VentasModule, ProductionModule, CalidadModule , InvestigacionModule
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService, LotesProducer, LotesProcessor],

@@ -34,7 +34,7 @@ exports.AppModule = AppModule = __decorate([
             }),
             bullmq_1.BullModule.registerQueue({
                 name: 'cola-lotes',
-            }), ventas_module_1.VentasModule, production_module_1.ProductionModule, calidad_module_1.CalidadModule,
+            }), ventas_module_1.VentasModule, production_module_1.ProductionModule, calidad_module_1.CalidadModule, id_module_1.InvestigacionModule
         ],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService, prisma_service_1.PrismaService, lotes_producer_1.LotesProducer, lotes_processor_1.LotesProcessor],

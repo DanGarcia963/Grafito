@@ -90,8 +90,14 @@ let InvestigacionService = class InvestigacionService {
             throw new common_1.BadRequestException('Fecha de recolección inválida o futura');
         const result = await this.prisma.$transaction(async (tx) => {
             const [prod, cli, vend, v] = await Promise.all([tx.productos_materiales.findUnique({ where: { id_Produc_Mater: producto } }), tx.personas.findFirst({ where: { id_Persona: cliente, tipo_persona: 'CLIENTE' } }), tx.personas.findUnique({ where: { id_Persona: u.personaId } }), tx.id_viabilidades.findFirst({ where: { id: viabilidad, activo: true } })]);
-            if (!prod || !cli || !vend || !v)
-                throw new common_1.BadRequestException('Producto, cliente, vendedor o viabilidad inválidos');
+            if (!prod)
+                throw new common_1.BadRequestException(`Producto no encontrado para id: ${producto}`);
+            if (!cli)
+                throw new common_1.BadRequestException(`Cliente no encontrado o no es tipo CLIENTE para id: ${cliente}`);
+            if (!vend)
+                throw new common_1.BadRequestException(`Vendedor (personaId: ${u.personaId}) no encontrado`);
+            if (!v)
+                throw new common_1.BadRequestException(`Viabilidad no encontrada o inactiva para id: ${viabilidad}`);
             const m = await tx.muestras.create({ data: { no_Muestra: `ID-${(0, crypto_1.randomUUID)()}`, area_Muestra: 'INVESTIGACION_DESARROLLO', producto_id: producto, cliente_id: cliente, vendedor_id: u.personaId,
                     fecha_Toma: recoleccion, Hora_Toma: recoleccion, fecha_recoleccion: recoleccion, caracterizacion: body.caracterizacion, cantidad_proyecto: new client_1.Prisma.Decimal(cantidad), unidad_proyecto: unidad,
                     viabilidad_id: viabilidad, viabilidad_nombre: v.nombre, ficha_nombre: f.nombre, ficha_mime: f.mime, ficha_contenido: new Uint8Array(file.buffer), observaciones: body.observaciones ? (0, id_logic_1.texto)(body.observaciones, 4000) : null }, select: { id_Muestra: true } });
