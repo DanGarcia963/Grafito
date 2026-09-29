@@ -1,11 +1,12 @@
 'use client';
-import { API_URL, apiFetch as fetch } from '@/utils/api';
+import { API_URL, apiFetch as fetch, sesionActual } from '@/utils/api';
 import HistorialTiempos from '@/components/HistorialTiempos';
 
 import { useState, useEffect, useRef } from 'react';
 import { Tanque, ContenedorGrafito, EstadoTanqueStatus, statusTanque, ProductoGrafito } from '@/types/tanques';
 import { Area, Rol, EstadoFlujo, ESTADOS_FLUJO, VentaFlujo } from '@/types/flujo';
 import TanqueCard from '@/components/TanqueCard';
+import { useRouter } from 'next/navigation';
 import { useSocket } from '@/context/SocketContext';
 
 // Cambia únicamente estado_Muestra en Prisma.
@@ -49,12 +50,27 @@ export interface RegistroBitacora {
 
 export default function InventarioTanquesPage() {
   const socket = useSocket(); // 2. Obtener la instancia del socket activa
+  const router = useRouter();
   const [tanques, setTanques] = useState<Tanque[]>([]);
   const [inventario, setInventario] = useState<ContenedorGrafito[]>([]);
   const [bitacora, setBitacora] = useState<RegistroBitacora[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [sesionLista, setSesionLista] = useState(false);
   const versionCarga = useRef(0);
-
+  useEffect(() => {
+    const comprobar = () => {
+      const valida = Boolean(sesionActual()?.token);
+      setSesionLista(valida);
+      if (!valida) router.replace('/');
+    };
+    comprobar();
+    window.addEventListener('sesion-cambiada', comprobar);
+    window.addEventListener('storage', comprobar);
+    return () => {
+      window.removeEventListener('sesion-cambiada', comprobar);
+      window.removeEventListener('storage', comprobar);
+    };
+  }, [router]);
 const [muestrasDictaminadas, setMuestrasDictaminadas] = useState<any[]>([]);
   const accionesEnCurso = useRef(new Set<string>());
   const [accionesMuestra, setAccionesMuestra] = useState<Record<string, AccionMuestra>>({});
