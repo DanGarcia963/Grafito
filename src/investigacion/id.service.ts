@@ -30,6 +30,7 @@ export class InvestigacionService {
  }
  private ctx(id:number){return {entidad:'MUESTRA_ID' as const,entidad_id:id};}
  private avisar(id:number){this.eventos.notificar('ID_MUESTRA_ACTUALIZADA',{id_Muestra:id});}
+ 
  async catalogos(){return {success:true,
   viabilidades:await this.prisma.id_viabilidades.findMany({orderBy:{nombre:'asc'}}),
   procesos:await this.prisma.id_procesos.findMany({orderBy:{nombre:'asc'}})};}
@@ -61,7 +62,10 @@ export class InvestigacionService {
   if(isNaN(+recoleccion)||+recoleccion>Date.now())throw new BadRequestException('Fecha de recolección inválida o futura');
   const result=await this.prisma.$transaction(async tx=>{
    const [prod,cli,vend,v]=await Promise.all([tx.productos_materiales.findUnique({where:{id_Produc_Mater:producto}}),tx.personas.findFirst({where:{id_Persona:cliente,tipo_persona:'CLIENTE'}}),tx.personas.findUnique({where:{id_Persona:u.personaId}}),tx.id_viabilidades.findFirst({where:{id:viabilidad,activo:true}})]);
-   if(!prod||!cli||!vend||!v)throw new BadRequestException('Producto, cliente, vendedor o viabilidad inválidos');
+   if (!prod) throw new BadRequestException(`Producto no encontrado para id: ${producto}`);
+if (!cli) throw new BadRequestException(`Cliente no encontrado o no es tipo CLIENTE para id: ${cliente}`);
+if (!vend) throw new BadRequestException(`Vendedor (personaId: ${u.personaId}) no encontrado`);
+if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para id: ${viabilidad}`);
    // Solo aceptar campos explícitos. lote_id, tanque_id y procedencia_Origen quedan NULL.
    const m=await tx.muestras.create({data:{no_Muestra:`ID-${randomUUID()}`,area_Muestra:'INVESTIGACION_DESARROLLO',producto_id:producto,cliente_id:cliente,vendedor_id:u.personaId,
     fecha_Toma:recoleccion,Hora_Toma:recoleccion,fecha_recoleccion:recoleccion,caracterizacion:body.caracterizacion,cantidad_proyecto:new Prisma.Decimal(cantidad),unidad_proyecto:unidad,

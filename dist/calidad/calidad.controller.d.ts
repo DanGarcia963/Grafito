@@ -79,7 +79,7 @@ export declare class CalidadController {
                 lote_id: number | null;
                 tanque_id: number | null;
                 id_Muestra: number;
-                no_Muestra: string;
+                no_Muestra: string | null;
                 fecha_Toma: Date;
                 Hora_Toma: Date | null;
                 procedencia_Origen: string | null;
@@ -114,7 +114,7 @@ export declare class CalidadController {
     buscarEspecificacionesMuestra(muestraID: number): Promise<{
         muestras: {
             id_Muestra: number;
-            no_Muestra: string;
+            no_Muestra: string | null;
         };
         parametros_laboratorio: {
             id_Parametro: number;
@@ -175,7 +175,7 @@ export declare class CalidadController {
                 lote_id: number | null;
                 tanque_id: number | null;
                 id_Muestra: number;
-                no_Muestra: string;
+                no_Muestra: string | null;
                 fecha_Toma: Date;
                 Hora_Toma: Date | null;
                 procedencia_Origen: string | null;
@@ -235,7 +235,7 @@ export declare class CalidadController {
             lote_id: number | null;
             tanque_id: number | null;
             id_Muestra: number;
-            no_Muestra: string;
+            no_Muestra: string | null;
             fecha_Toma: Date;
             Hora_Toma: Date | null;
             procedencia_Origen: string | null;

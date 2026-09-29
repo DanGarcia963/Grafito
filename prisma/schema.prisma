@@ -220,7 +220,7 @@ model movimientos_inventario {
 
 model muestras {
   id_Muestra                               Int                        @id @default(autoincrement())
-  no_Muestra                               String                     @db.VarChar(50)
+  no_Muestra                               String?                    @db.VarChar(50)
   fecha_Toma                               DateTime                   @db.Date
   Hora_Toma                                DateTime?                  @db.Time(0)
   procedencia_Origen                       String?                    @db.VarChar(50)
