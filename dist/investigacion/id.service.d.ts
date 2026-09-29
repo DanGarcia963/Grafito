@@ -89,7 +89,7 @@ export declare class InvestigacionService {
             productos_materiales: {
                 nombre_Producto: string;
             };
-            no_Muestra: string;
+            no_Muestra: string | null;
             etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
             estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
             categoria_Muestra: import("@prisma/client").$Enums.muestras_categoria_Muestra;
@@ -164,7 +164,7 @@ export declare class InvestigacionService {
             productos_materiales: {
                 nombre_Producto: string;
             };
-            no_Muestra: string;
+            no_Muestra: string | null;
             etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
             estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
             categoria_Muestra: import("@prisma/client").$Enums.muestras_categoria_Muestra;
@@ -229,7 +229,7 @@ export declare class InvestigacionService {
             desviacionSegundos: number | null;
             desviacionPorcentaje: number | null;
             muestras: {
-                no_Muestra: string;
+                no_Muestra: string | null;
                 producto_id: number;
                 cliente_id: number | null;
             };
