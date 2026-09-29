@@ -29,7 +29,36 @@ export default function MuestrasID({area}:{area:'id'|'ventas'}){
  };
  const abrir=async(id:number)=>{try{const d=await pedir(`/api/investigacion/muestras/${id}`,undefined,'GET');setDetalle(d.data);setPlan([]);setNuevoCiclo(false);setTerminando(null);setEtiqueta(false);}catch(e){setError(e instanceof Error?e.message:'Error');}};
  const referencias=async()=>{try{const r=await pedir(`/api/investigacion/referencias?q=${encodeURIComponent(busqueda)}`,undefined,'GET');setRefs((prev:any)=>({productos:Array.from(new Map([...prev.productos,...r.productos].map((p:any)=>[p.id_Produc_Mater,p])).values()),clientes:Array.from(new Map([...prev.clientes,...r.clientes].map((p:any)=>[p.id_Persona,p])).values())}));}catch(e){setError(e instanceof Error?e.message:'Error');}};
- const registrar=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const form=e.currentTarget;const data=new FormData(form);data.set('fecha_recoleccion',new Date(String(data.get('fecha_recoleccion'))).toISOString());await ejecutar(async()=>{const r=await apiFetch(`${API_URL}/api/investigacion/muestras`,{method:'POST',body:data});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||'No se pudo registrar');setCrear(false);await abrir(d.data.id_Muestra);},'Muestra registrada. Puedes imprimir su etiqueta.');};
+ const registrar = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const data = new FormData(form);
+
+  // Validar y formatear la fecha solo si existe un valor válido
+  const fechaRaw = data.get('fecha_recoleccion');
+  if (fechaRaw) {
+    const fecha = new Date(String(fechaRaw));
+    if (!isNaN(fecha.getTime())) {
+      data.set('fecha_recoleccion', fecha.toISOString());
+    }
+  }
+
+  await ejecutar(async () => {
+    const r = await apiFetch('http://localhost:4002/api/investigacion/muestras', {
+      method: 'POST',
+      body: data,
+    });
+
+    const d = await r.json();
+
+    if (!r.ok || !d.success) {
+      throw new Error(d.message || 'No se pudo registrar');
+    }
+
+    setCrear(false);
+    await abrir(d.data.id_Muestra);
+  }, 'Muestra registrada. Puedes imprimir su etiqueta.');
+};
  const descargarFicha=async()=>{try{const r=await apiFetch(`${API_URL}/api/investigacion/muestras/${detalleId}/ficha`);if(!r.ok)throw new Error('No se pudo descargar la ficha');const url=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=url;a.download=detalle.ficha_nombre;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(e instanceof Error?e.message:'Error');}};
  const cargarReporte=async()=>{await ejecutar(async()=>{const q=new URLSearchParams();if(desde)q.set('desde',new Date(desde).toISOString());if(hasta)q.set('hasta',new Date(hasta).toISOString());let pag=1,all:any[]=[];let n=0;do{q.set('pagina',String(pag++));const d=await pedir(`/api/investigacion/reporte?${q}`,undefined,'GET');all.push(...d.data);n=d.total;}while(all.length<n);setReporte(all);},'Reporte actualizado');};
  const csv=()=>{const campos=['id','muestra_id','ciclo','orden','nombre','estandar_version','estandar_segundos','disponible_desde','inicio','fin','duracionSegundos','esperaSegundos','desviacionSegundos','desviacionPorcentaje','inicio_por','fin_por'];const quote=(v:any)=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replace(/"/g,'""')+'"';const texto=[campos.join(','),...(reporte||[]).map(p=>campos.map(k=>quote(p[k])).join(','))].join('\r\n');const url=URL.createObjectURL(new Blob(['\uFEFF'+texto],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='procesos_ID.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};

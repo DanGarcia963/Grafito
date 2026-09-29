@@ -73,7 +73,7 @@ __decorate([
 __decorate([
     (0, auth_guard_1.Areas)('ventas'),
     (0, common_1.Post)('muestras'),
-    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('ficha', { limits: { fileSize: 10 * 1024 * 1024, files: 1 } })),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('ficha', { limits: { fileSize: 80 * 1024 * 1024, files: 1 } })),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, common_1.UploadedFile)()),
     __param(2, (0, common_1.Req)()),
