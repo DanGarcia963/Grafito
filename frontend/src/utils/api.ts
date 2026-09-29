@@ -1,10 +1,18 @@
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4002').replace(/\/$/, '');
 export function sesionActual(){try{return JSON.parse(localStorage.getItem('sesion')||'null');}catch{return null;}}
 export async function apiFetch(input:RequestInfo|URL,init:RequestInit={}){
- const headers=new Headers(init.headers),sesion=typeof window==='undefined'?null:sesionActual();
+
+ const headers=new Headers(init.headers), sesion=typeof window==='undefined'?null:sesionActual();
  const url=String(input);
+
  if(sesion?.token&&(url===API_URL||url.startsWith(API_URL+'/')))headers.set('Authorization',`Bearer ${sesion.token}`);
+ 
  const res=await globalThis.fetch(input,{...init,headers});
+// Agrega esto temporalmente para depurar el error 400:
+  if (!res.ok) {
+    const errorBody = await res.clone().json().catch(() => null);
+    console.error(' Error devuelto por el servidor (NestJS):', errorBody);
+  }
  if(res.status===401&&typeof window!=='undefined'&&!url.endsWith('/auth/login')){
   localStorage.removeItem('sesion');window.dispatchEvent(new Event('sesion-cambiada'));window.location.assign('/');
  }
