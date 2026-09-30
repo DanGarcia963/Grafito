@@ -7,9 +7,9 @@ export declare class CalidadController {
         data: {
             success: boolean;
             result: {
-                UM: string | null;
                 id_Parametro: number;
                 nombre_Parametro: string;
+                UM: string | null;
                 tipo_Dato: import("@prisma/client").$Enums.parametros_laboratorio_tipo_Dato;
             }[];
             error?: undefined;
@@ -24,22 +24,37 @@ export declare class CalidadController {
         data: {
             success: boolean;
             result: {
+                resultado_analisis: {
+                    valor_Obtenido_Num: import("@prisma/client/runtime/library").Decimal | null;
+                    id_Resultado_Analisis: number;
+                    muestra_id: number;
+                    parametro_id: number;
+                    cumple_Especificacion: boolean | null;
+                    fecha_Resultado: Date;
+                    hora_Resultado: Date | null;
+                    ciclo_analisis: number | null;
+                }[];
                 tiempoActual: {
+                    lote_id: number | null;
+                    tanque_id: number | null;
                     id: number;
                     entidad: string;
                     entidad_id: number;
-                    lote_id: number | null;
-                    tanque_id: number | null;
                     ciclo: number;
                     etapa: string;
                     inicio: Date;
                     fin: Date | null;
                     activo: string | null;
                 } | null;
-                equipos_tanques: {
-                    id_Equipos_Tanques: number;
-                    nombre_Equipo: string;
-                    estatus_proceso: import("@prisma/client").$Enums.equipos_tanques_estatus_proceso;
+                personas_muestras_analista_idTopersonas: {
+                    id_Persona: number;
+                    nombre: string;
+                    tipo_persona: string;
+                } | null;
+                personas_muestras_cliente_idTopersonas: {
+                    id_Persona: number;
+                    nombre: string;
+                    tipo_persona: string;
                 } | null;
                 lotes_produccion: {
                     equipos_tanques: {
@@ -51,41 +66,26 @@ export declare class CalidadController {
                     cantidad_Total_Producida: import("@prisma/client/runtime/library").Decimal | null;
                 } | null;
                 productos_materiales: {
+                    UM: import("@prisma/client").$Enums.productos_materiales_UM;
                     id_Produc_Mater: number;
                     nombre_Producto: string;
-                    UM: import("@prisma/client").$Enums.productos_materiales_UM;
                     presentacion: string | null;
                 };
-                resultado_analisis: {
-                    muestra_id: number;
-                    id_Resultado_Analisis: number;
-                    parametro_id: number;
-                    valor_Obtenido_Num: import("@prisma/client/runtime/library").Decimal | null;
-                    cumple_Especificacion: boolean | null;
-                    fecha_Resultado: Date;
-                    hora_Resultado: Date | null;
-                    ciclo_analisis: number | null;
-                }[];
-                personas_muestras_analista_idTopersonas: {
-                    id_Persona: number;
-                    nombre: string;
-                    tipo_persona: string;
+                equipos_tanques: {
+                    id_Equipos_Tanques: number;
+                    nombre_Equipo: string;
+                    estatus_proceso: import("@prisma/client").$Enums.equipos_tanques_estatus_proceso;
                 } | null;
-                personas_muestras_cliente_idTopersonas: {
-                    id_Persona: number;
-                    nombre: string;
-                    tipo_persona: string;
-                } | null;
-                lote_id: number | null;
-                tanque_id: number | null;
                 id_Muestra: number;
                 no_Muestra: string | null;
                 fecha_Toma: Date;
                 Hora_Toma: Date | null;
                 procedencia_Origen: string | null;
+                lote_id: number | null;
                 producto_id: number;
                 proveedor_id: number | null;
                 cliente_id: number | null;
+                tanque_id: number | null;
                 analista_id: number | null;
                 etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
                 estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
@@ -112,15 +112,15 @@ export declare class CalidadController {
         };
     }>;
     buscarEspecificacionesMuestra(muestraID: number): Promise<{
-        muestras: {
-            id_Muestra: number;
-            no_Muestra: string | null;
-        };
+        valor_Obtenido_Num: import("@prisma/client/runtime/library").Decimal | null;
         parametros_laboratorio: {
             id_Parametro: number;
             nombre_Parametro: string;
         };
-        valor_Obtenido_Num: import("@prisma/client/runtime/library").Decimal | null;
+        muestras: {
+            id_Muestra: number;
+            no_Muestra: string | null;
+        };
         cumple_Especificacion: boolean | null;
         fecha_Resultado: Date;
         ciclo_analisis: number | null;
@@ -131,21 +131,26 @@ export declare class CalidadController {
             success: boolean;
             result: {
                 tiempoActual: {
+                    lote_id: number | null;
+                    tanque_id: number | null;
                     id: number;
                     entidad: string;
                     entidad_id: number;
-                    lote_id: number | null;
-                    tanque_id: number | null;
                     ciclo: number;
                     etapa: string;
                     inicio: Date;
                     fin: Date | null;
                     activo: string | null;
                 } | null;
-                equipos_tanques: {
-                    id_Equipos_Tanques: number;
-                    nombre_Equipo: string;
-                    estatus_proceso: import("@prisma/client").$Enums.equipos_tanques_estatus_proceso;
+                personas_muestras_analista_idTopersonas: {
+                    id_Persona: number;
+                    nombre: string;
+                    tipo_persona: string;
+                } | null;
+                personas_muestras_cliente_idTopersonas: {
+                    id_Persona: number;
+                    nombre: string;
+                    tipo_persona: string;
                 } | null;
                 lotes_produccion: {
                     equipos_tanques: {
@@ -157,31 +162,26 @@ export declare class CalidadController {
                     cantidad_Total_Producida: import("@prisma/client/runtime/library").Decimal | null;
                 } | null;
                 productos_materiales: {
+                    UM: import("@prisma/client").$Enums.productos_materiales_UM;
                     id_Produc_Mater: number;
                     nombre_Producto: string;
-                    UM: import("@prisma/client").$Enums.productos_materiales_UM;
                     presentacion: string | null;
                 };
-                personas_muestras_analista_idTopersonas: {
-                    id_Persona: number;
-                    nombre: string;
-                    tipo_persona: string;
+                equipos_tanques: {
+                    id_Equipos_Tanques: number;
+                    nombre_Equipo: string;
+                    estatus_proceso: import("@prisma/client").$Enums.equipos_tanques_estatus_proceso;
                 } | null;
-                personas_muestras_cliente_idTopersonas: {
-                    id_Persona: number;
-                    nombre: string;
-                    tipo_persona: string;
-                } | null;
-                lote_id: number | null;
-                tanque_id: number | null;
                 id_Muestra: number;
                 no_Muestra: string | null;
                 fecha_Toma: Date;
                 Hora_Toma: Date | null;
                 procedencia_Origen: string | null;
+                lote_id: number | null;
                 producto_id: number;
                 proveedor_id: number | null;
                 cliente_id: number | null;
+                tanque_id: number | null;
                 analista_id: number | null;
                 etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
                 estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
@@ -213,9 +213,9 @@ export declare class CalidadController {
         result: {
             producto_id: number;
             parametro_id: number;
-            id_Especifi_Product: number;
             valor_Minimo: string | null;
             valor_Maximo: import("@prisma/client/runtime/library").Decimal | null;
+            id_Especifi_Product: number;
         };
         error?: undefined;
     } | {
@@ -232,16 +232,16 @@ export declare class CalidadController {
     actualizarEstatusMuestra(body: unknown): Promise<{
         success: boolean;
         data: {
-            lote_id: number | null;
-            tanque_id: number | null;
             id_Muestra: number;
             no_Muestra: string | null;
             fecha_Toma: Date;
             Hora_Toma: Date | null;
             procedencia_Origen: string | null;
+            lote_id: number | null;
             producto_id: number;
             proveedor_id: number | null;
             cliente_id: number | null;
+            tanque_id: number | null;
             analista_id: number | null;
             etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
             estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
@@ -292,16 +292,16 @@ export declare class CalidadController {
     crearLoteConChecklist(body: any): Promise<{
         success: boolean;
         result: {
-            id: number;
             observaciones: string | null;
+            id: number;
             no_lote: string;
-            orden_produccion_id: number | null;
-            reviso_nombre: string;
-            estado_checklist: import("@prisma/client").$Enums.lotes_llegada_estado_checklist;
             fecha_llegada: Date;
             fecha_Revision: Date;
+            reviso_nombre: string;
+            estado_checklist: import("@prisma/client").$Enums.lotes_llegada_estado_checklist;
             createdAt: Date;
             updatedAt: Date;
+            orden_produccion_id: number | null;
         };
         error?: undefined;
     } | {

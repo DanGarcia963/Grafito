@@ -15,24 +15,24 @@ const {InvestigacionService}=require('../src/investigacion/id.service.ts');
  const auth=new AuthService();assert.throws(()=>auth.login({usuario:'prueba',password,area:'id'},'test'));
  const s=auth.login({usuario:'prueba',password,area:'ventas'},'test');assert.equal(auth.verificar(s.token).area,'ventas');auth.salir(s.token);assert.throws(()=>auth.verificar(s.token));
  const user={usuario:'laboratorio',area:'id',personaId:1,expira:Date.now()+10000};
- let sample={id_Muestra:1,area_Muestra:'INVESTIGACION_DESARROLLO',estado_Muestra:'PENDIENTE',fecha_ingreso_laboratorio:new Date(),procesos_id:[]};
+ let sample={id_Muestra:1,area_Muestra:'INVESTIGACION_DESARROLLO',estado_Muestra:'PENDIENTE',fecha_ingreso_laboratorio:new Date(),id_ejecuciones:[]};
  const catalog={id:1,nombre:'Filtración',estandar_segundos:120,version:1,activo:true};
  let emitted=0;
  const tx={
   $queryRaw:async()=>[],
   muestras:{findFirst:async({where})=>where.vendedor_id&&where.vendedor_id!==2?null:sample,update:async({data})=>Object.assign(sample,data)},
   id_procesos:{findMany:async()=>[catalog]},
-  id_ejecuciones:{deleteMany:async()=>{sample.procesos_id=[]},createMany:async({data})=>{sample.procesos_id=data.map((p,i)=>({...p,id:i+1,inicio:null,fin:null}));},update:async({where,data})=>Object.assign(sample.procesos_id.find(p=>p.id===where.id),data)}
+  id_ejecuciones:{deleteMany:async()=>{sample.id_ejecuciones=[]},createMany:async({data})=>{sample.id_ejecuciones=data.map((p,i)=>({...p,id:i+1,inicio:null,fin:null}));},update:async({where,data})=>Object.assign(sample.id_ejecuciones.find(p=>p.id===where.id),data)}
  };
  const service=new InvestigacionService({$transaction:async fn=>fn(tx)}, {notificar:()=>emitted++}, {evento:async()=>{},transicion:async()=>({id:1})});
  await service.planificar(1,{procesos:[1,1]},user);
- catalog.estandar_segundos=999;assert.equal(sample.procesos_id[0].estandar_segundos,120);
+ catalog.estandar_segundos=999;assert.equal(sample.id_ejecuciones[0].estandar_segundos,120);
  const before=emitted;await assert.rejects(service.proceso(1,2,'iniciar',{},user));assert.equal(emitted,before);
  await assert.rejects(service.proceso(1,1,'iniciar',{}, {...user,area:'ventas',personaId:3}));
- await service.proceso(1,1,'iniciar',{},user);const start=sample.procesos_id[0].inicio;
- await service.proceso(1,1,'iniciar',{},user);assert.equal(sample.procesos_id[0].inicio,start);
+ await service.proceso(1,1,'iniciar',{},user);const start=sample.id_ejecuciones[0].inicio;
+ await service.proceso(1,1,'iniciar',{},user);assert.equal(sample.id_ejecuciones[0].inicio,start);
  await assert.rejects(service.finalizar(1,{dictamen:'APROBADO'},user));
- await service.proceso(1,1,'terminar',{resultado:'Conforme'},user);assert.ok(sample.procesos_id[1].disponible_desde);
+ await service.proceso(1,1,'terminar',{resultado:'Conforme'},user);assert.ok(sample.id_ejecuciones[1].disponible_desde);
  await service.proceso(1,2,'iniciar',{},user);await service.proceso(1,2,'terminar',{resultado:'Conforme'},user);
  await service.finalizar(1,{dictamen:'APROBADO'},user);assert.equal(sample.estado_Muestra,'APROBADO');
  console.log('OK: métricas, archivos, autorización, estándar histórico, orden, idempotencia y cierre.');

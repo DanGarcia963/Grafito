@@ -55,9 +55,9 @@ let InvestigacionService = class InvestigacionService {
             procesos: await this.prisma.id_procesos.findMany({ orderBy: { nombre: 'asc' } }) };
     }
     async referencias(q) {
-        const whereNombre = { contains: String(q || '').slice(0, 100) };
+        const whereNombre = { contains: String(q || '').slice(0, 100), mode: 'insensitive' };
         return { success: true, productos: await this.prisma.productos_materiales.findMany({ where: { nombre_Producto: whereNombre }, select: { id_Produc_Mater: true, nombre_Producto: true }, take: 50 }),
-            clientes: await this.prisma.personas.findMany({ where: { tipo_persona: 'CLIENTE', nombre: whereNombre }, select: { id_Persona: true, nombre: true }, take: 50 }) };
+            clientes: await this.prisma.personas.findMany({ where: { tipo_persona: { equals: 'CLIENTE', mode: 'insensitive' }, nombre: whereNombre }, select: { id_Persona: true, nombre: true }, take: 50 }) };
     }
     async guardarCatalogo(tipo, body, u) {
         const nombre = (0, id_logic_1.texto)(body?.nombre), activo = body.activo == null ? true : body.activo;
@@ -89,7 +89,7 @@ let InvestigacionService = class InvestigacionService {
         if (isNaN(+recoleccion) || +recoleccion > Date.now())
             throw new common_1.BadRequestException('Fecha de recolección inválida o futura');
         const result = await this.prisma.$transaction(async (tx) => {
-            const [prod, cli, vend, v] = await Promise.all([tx.productos_materiales.findUnique({ where: { id_Produc_Mater: producto } }), tx.personas.findFirst({ where: { id_Persona: cliente, tipo_persona: 'CLIENTE' } }), tx.personas.findUnique({ where: { id_Persona: u.personaId } }), tx.id_viabilidades.findFirst({ where: { id: viabilidad, activo: true } })]);
+            const [prod, cli, vend, v] = await Promise.all([tx.productos_materiales.findUnique({ where: { id_Produc_Mater: producto } }), tx.personas.findFirst({ where: { id_Persona: cliente, tipo_persona: { equals: 'CLIENTE', mode: 'insensitive' } } }), tx.personas.findUnique({ where: { id_Persona: u.personaId } }), tx.id_viabilidades.findFirst({ where: { id: viabilidad, activo: true } })]);
             if (!prod)
                 throw new common_1.BadRequestException(`Producto no encontrado para id: ${producto}`);
             if (!cli)
@@ -122,7 +122,7 @@ let InvestigacionService = class InvestigacionService {
             throw new common_1.BadRequestException('Selecciona entre 1 y 50 procesos en orden');
         const ids = body.procesos.map(id_logic_1.idValido);
         const result = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra=${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
             const m = await this.muestra(tx, id, u), ciclo = m.id_ejecuciones.at(-1)?.ciclo ?? 1;
             const anteriores = m.id_ejecuciones.filter(p => p.ciclo === ciclo);
             const nuevo = body.nuevoCiclo === true;
@@ -152,7 +152,7 @@ let InvestigacionService = class InvestigacionService {
     }
     async recibir(id, u) {
         const r = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra=${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
             const m = await this.muestra(tx, id, u);
             if (m.fecha_ingreso_laboratorio)
                 return { success: true, repetida: true };
@@ -168,7 +168,7 @@ let InvestigacionService = class InvestigacionService {
     }
     async proceso(id, ejecucion, accion, body, u) {
         const r = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra=${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
             const m = await this.muestra(tx, id, u);
             if (!m.fecha_ingreso_laboratorio)
                 throw new common_1.BadRequestException('Registra la recepción primero');
@@ -208,7 +208,7 @@ let InvestigacionService = class InvestigacionService {
         if (!['APROBADO', 'RECHAZADO'].includes(body?.dictamen))
             throw new common_1.BadRequestException('Dictamen inválido');
         const r = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra=${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
             const m = await this.muestra(tx, id, u);
             if (['APROBADO', 'RECHAZADO'].includes(m.estado_Muestra))
                 throw new common_1.BadRequestException('Ciclo ya finalizado');

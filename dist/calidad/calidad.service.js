@@ -11,10 +11,12 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var CalidadService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CalidadService = void 0;
+const inputs_1 = require("../config/inputs");
 const trazabilidad_service_1 = require("../trazabilidad/trazabilidad.service");
 const events_gateway_1 = require("../events.gateway");
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma.service");
+const client_1 = require("@prisma/client");
 let CalidadService = CalidadService_1 = class CalidadService {
     prisma;
     tiempos;
@@ -88,7 +90,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
             });
             return {
                 success: true,
-                result: await Promise.all(muestras.map(async (m) => ({ ...m, tiempoActual: await this.prisma.proceso_tramos.findFirst({ where: { entidad: 'MUESTRA', entidad_id: m.id_Muestra }, orderBy: { id: 'desc' } }) }))),
+                result: await Promise.all(muestras.map(async (m) => ({ ...m, resultado_analisis: m.resultado_analisis.map(r => ({ ...r, valor_Obtenido_Num: r.valor_Obtenido_Num })), tiempoActual: await this.prisma.proceso_tramos.findFirst({ where: { entidad: 'MUESTRA', entidad_id: m.id_Muestra }, orderBy: { id: 'desc' } }) }))),
             };
         }
         catch (error) {
@@ -128,7 +130,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
             if (!especificaciones || especificaciones.length === 0) {
                 throw new common_1.NotFoundException(`No se encontraron especificaciones o análisis para la muestra con ID ${id}`);
             }
-            return especificaciones;
+            return especificaciones.map(r => ({ ...r, valor_Obtenido_Num: r.valor_Obtenido_Num }));
         }
         catch (error) {
             if (error instanceof common_1.NotFoundException) {
@@ -232,7 +234,12 @@ let CalidadService = CalidadService_1 = class CalidadService {
                 });
                 let cumpleEspecificacion = false;
                 const valorIngresado = String(med.valor ?? '').trim();
-                const tipoDato = String(parametro?.tipo_Dato ?? '').toUpperCase();
+                if (!parametro)
+                    throw new common_1.BadRequestException('Parámetro inexistente');
+                const tipoDato = String(parametro.tipo_Dato).toUpperCase();
+                if (tipoDato === 'NUMERICO' && !/^[+-]?\d{1,8}(?:\.\d{1,4})?$/.test(valorIngresado)) {
+                    throw new common_1.BadRequestException('Resultado numérico inválido: máximo 8 enteros y 4 decimales');
+                }
                 if (tipoDato === 'NUMERICO') {
                     const valorNum = parseFloat(valorIngresado);
                     const minStr = especificacion?.valor_Minimo != null ? String(especificacion.valor_Minimo).trim() : null;
@@ -261,7 +268,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
                     muestra_id: id_Muestra,
                     ciclo_analisis: payload.ciclo_analisis,
                     parametro_id: med.id_Parametro,
-                    valor_Obtenido_Num: valorIngresado,
+                    valor_Obtenido_Num: tipoDato === 'NUMERICO' ? new client_1.Prisma.Decimal(valorIngresado) : null,
                     cumple_Especificacion: cumpleEspecificacion,
                     fecha_Resultado: fechaActualIso,
                 };
@@ -296,6 +303,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
                     where: {
                         nombre: {
                             equals: nombreLimpio,
+                            mode: 'insensitive',
                         },
                     },
                 });
@@ -363,7 +371,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
     async cambiarEtapaMuestra(idEntrada, accion) {
         const id = this.tiempos.id(idEntrada);
         const resultado = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
             const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
             if (!muestra || muestra.area_Muestra !== 'CALIDAD')
                 throw new common_1.NotFoundException('Muestra de Calidad no encontrada');
@@ -405,6 +413,8 @@ let CalidadService = CalidadService_1 = class CalidadService {
     }
     async finalizarAnalisis(payload) {
         const id = this.tiempos.id(payload?.idMuestra);
+        if (!Object.values(client_1.muestras_categoria_Muestra).includes(payload?.tipoMuestra))
+            throw new common_1.BadRequestException('Tipo de muestra inválido');
         if (!['APROBADO', 'RECHAZADO'].includes(payload?.dictamen))
             throw new common_1.BadRequestException('Dictamen inválido');
         if (!Array.isArray(payload?.mediciones) || !payload.mediciones.length)
@@ -417,7 +427,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
                 throw new common_1.BadRequestException('Resultado vacío');
         }
         const resultado = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
             const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
             if (!muestra || muestra.area_Muestra !== 'CALIDAD')
                 throw new common_1.NotFoundException('Muestra de Calidad no encontrada');
@@ -446,7 +456,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
         if (estado !== 'APROBADO')
             throw new common_1.BadRequestException('Usa recibir, iniciar o finalizar para registrar el ciclo. Este endpoint libera una muestra rechazada.');
         const result = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
             const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
             if (!muestra || muestra.area_Muestra !== 'CALIDAD')
                 throw new common_1.NotFoundException('Muestra de Calidad no encontrada');
@@ -468,6 +478,7 @@ let CalidadService = CalidadService_1 = class CalidadService {
                 where: {
                     nombre: {
                         contains: query,
+                        mode: 'insensitive',
                     },
                 },
                 take: 5,
@@ -534,28 +545,31 @@ let CalidadService = CalidadService_1 = class CalidadService {
                     error: 'Faltan campos requeridos (no_lote, orden_produccion_id, reviso_nombre o contenedores).'
                 };
             }
-            const nuevoLote = await this.prisma.lotes_llegada.create({
-                data: {
-                    no_lote,
-                    orden_produccion_id: Number(orden_produccion_id),
-                    reviso_nombre,
-                    estado_checklist,
-                    fecha_Revision,
-                    fecha_llegada,
-                    observaciones: observaciones == null ? observaciones : JSON.stringify(observaciones),
-                },
-            });
-            await this.prisma.checklist_contenedor.createMany({
-                data: contenedores.map((c) => ({
-                    lote_llegada_id: nuevoLote.id,
-                    no_consecutivo: Number(c.no_consecutivo),
-                    numero_contenedor: c.numero_contenedor,
-                    tapa_valvula: Boolean(c.tapa_valvula),
-                    rejilla_danada: Boolean(c.rejilla_danada),
-                    base_danada: Boolean(c.base_danada),
-                    derrame: Boolean(c.derrame),
-                    observaciones: c.observaciones || null,
-                })),
+            const nuevoLote = await this.prisma.$transaction(async (tx) => {
+                const lote = await tx.lotes_llegada.create({
+                    data: {
+                        no_lote,
+                        orden_produccion_id: Number(orden_produccion_id),
+                        reviso_nombre,
+                        estado_checklist,
+                        fecha_Revision: new Date(fecha_Revision),
+                        fecha_llegada: new Date(fecha_llegada),
+                        observaciones: observaciones == null ? observaciones : typeof observaciones === 'string' ? observaciones : JSON.stringify(observaciones),
+                    },
+                });
+                await tx.checklist_contenedor.createMany({
+                    data: contenedores.map((c) => ({
+                        lote_llegada_id: lote.id,
+                        no_consecutivo: Number(c.no_consecutivo),
+                        numero_contenedor: c.numero_contenedor,
+                        tapa_valvula: (0, inputs_1.booleanInput)(c.tapa_valvula),
+                        rejilla_danada: (0, inputs_1.booleanInput)(c.rejilla_danada),
+                        base_danada: (0, inputs_1.booleanInput)(c.base_danada),
+                        derrame: (0, inputs_1.booleanInput)(c.derrame),
+                        observaciones: c.observaciones || null,
+                    })),
+                });
+                return lote;
             });
             return { success: true, result: nuevoLote };
         }

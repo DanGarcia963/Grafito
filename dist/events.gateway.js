@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EventsGateway = void 0;
+const runtime_1 = require("./config/runtime");
 const websockets_1 = require("@nestjs/websockets");
 const socket_io_1 = require("socket.io");
 const auth_service_1 = require("./auth/auth.service");
@@ -47,7 +48,7 @@ __decorate([
     __metadata("design:type", socket_io_1.Server)
 ], EventsGateway.prototype, "server", void 0);
 exports.EventsGateway = EventsGateway = __decorate([
-    (0, websockets_1.WebSocketGateway)({ cors: { origin: true, methods: ['GET', 'POST'] } }),
+    (0, websockets_1.WebSocketGateway)({ cors: runtime_1.corsOptions, allowRequest: (req, callback) => callback(null, !req.headers.origin || (0, runtime_1.allowedOrigins)().includes(req.headers.origin)) }),
     __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], EventsGateway);
 //# sourceMappingURL=events.gateway.js.map

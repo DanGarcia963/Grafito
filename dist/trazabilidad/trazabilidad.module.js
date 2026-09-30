@@ -8,7 +8,6 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TrazabilidadModule = void 0;
 const common_1 = require("@nestjs/common");
-const prisma_service_1 = require("../prisma.service");
 const events_gateway_1 = require("../events.gateway");
 const trazabilidad_service_1 = require("./trazabilidad.service");
 const trazabilidad_controller_1 = require("./trazabilidad.controller");
@@ -17,6 +16,6 @@ let TrazabilidadModule = class TrazabilidadModule {
 exports.TrazabilidadModule = TrazabilidadModule;
 exports.TrazabilidadModule = TrazabilidadModule = __decorate([
     (0, common_1.Global)(),
-    (0, common_1.Module)({ providers: [prisma_service_1.PrismaService, events_gateway_1.EventsGateway, trazabilidad_service_1.TrazabilidadService], exports: [events_gateway_1.EventsGateway, trazabilidad_service_1.TrazabilidadService], controllers: [trazabilidad_controller_1.TrazabilidadController] })
+    (0, common_1.Module)({ providers: [events_gateway_1.EventsGateway, trazabilidad_service_1.TrazabilidadService], exports: [events_gateway_1.EventsGateway, trazabilidad_service_1.TrazabilidadService], controllers: [trazabilidad_controller_1.TrazabilidadController] })
 ], TrazabilidadModule);
 //# sourceMappingURL=trazabilidad.module.js.map

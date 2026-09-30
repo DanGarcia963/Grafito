@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 
-@Processor('lotes-queue')
+@Processor('cola-lotes')
 export class LotesProcessor extends WorkerHost {
   private readonly logger = new Logger(LotesProcessor.name);
 

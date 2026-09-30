@@ -1,7 +1,8 @@
+import { corsOptions, allowedOrigins } from './config/runtime';
 import { WebSocketGateway, WebSocketServer, OnGatewayConnection } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AuthService } from './auth/auth.service';
-@WebSocketGateway({cors:{origin:true,methods:['GET','POST']}})
+@WebSocketGateway({ cors: corsOptions, allowRequest: (req, callback) => callback(null, !req.headers.origin || allowedOrigins().includes(req.headers.origin)) })
 export class EventsGateway implements OnGatewayConnection {
  @WebSocketServer() server!:Server;
  constructor(private auth:AuthService){}

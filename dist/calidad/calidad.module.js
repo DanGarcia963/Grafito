@@ -10,14 +10,13 @@ exports.CalidadModule = void 0;
 const common_1 = require("@nestjs/common");
 const calidad_controller_1 = require("./calidad.controller");
 const calidad_service_1 = require("./calidad.service");
-const prisma_service_1 = require("../prisma.service");
 let CalidadModule = class CalidadModule {
 };
 exports.CalidadModule = CalidadModule;
 exports.CalidadModule = CalidadModule = __decorate([
     (0, common_1.Module)({
         controllers: [calidad_controller_1.CalidadController],
-        providers: [calidad_service_1.CalidadService, prisma_service_1.PrismaService],
+        providers: [calidad_service_1.CalidadService],
     })
 ], CalidadModule);
 //# sourceMappingURL=calidad.module.js.map

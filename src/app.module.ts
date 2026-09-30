@@ -1,32 +1,25 @@
-import { AuthModule } from './auth/auth.module';
-import { InvestigacionModule } from './investigacion/id.module';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { AuthModule } from './auth/auth.module';
+import { PrismaModule } from './prisma.module';
+import { InvestigacionModule } from './investigacion/id.module';
 import { TrazabilidadModule } from './trazabilidad/trazabilidad.module';
+import { VentasModule } from './ventas/ventas.module';
+import { CalidadModule } from './calidad/calidad.module';
+import { ProductionModule } from './production/production.module';
 import { LotesProducer } from './lotes.producer';
 import { LotesProcessor } from './lotes.processor';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { PrismaService } from './prisma.service';
-import { VentasModule } from './ventas/ventas.module';
+import { redisConnection } from './config/runtime';
 
-import { CalidadModule } from './calidad/calidad.module';
-import { ProductionModule} from './production/production.module';
-
-
+const queueEnabled = process.env.REDIS_ENABLED === 'true';
 @Module({
-imports: [AuthModule, TrazabilidadModule, InvestigacionModule,
-    BullModule.forRoot({
-      connection: {
-        host: '127.0.0.1', // Usar 127.0.0.1 explicitamente en lugar de 'localhost'
-        port: 6379,
-      },
-    }),
-    BullModule.registerQueue({
-      name: 'cola-lotes',
-    }),VentasModule, ProductionModule, CalidadModule , InvestigacionModule
+  imports: [PrismaModule, AuthModule, TrazabilidadModule, InvestigacionModule,
+    VentasModule, ProductionModule, CalidadModule,
+    ...(queueEnabled ? [BullModule.forRoot({ connection: redisConnection() }),
+      BullModule.registerQueue({ name: 'cola-lotes' })] : []),
   ],
   controllers: [AppController],
-  providers: [AppService, PrismaService, LotesProducer, LotesProcessor],
+  providers: queueEnabled ? [LotesProducer, LotesProcessor] : [],
 })
 export class AppModule {}

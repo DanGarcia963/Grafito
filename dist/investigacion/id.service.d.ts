@@ -17,13 +17,13 @@ export declare class InvestigacionService {
         success: boolean;
         viabilidades: {
             id: number;
-            nombre: string;
             activo: boolean;
+            nombre: string;
         }[];
         procesos: {
             id: number;
-            nombre: string;
             activo: boolean;
+            nombre: string;
             estandar_segundos: number | null;
             version: number;
         }[];
@@ -35,8 +35,8 @@ export declare class InvestigacionService {
             nombre_Producto: string;
         }[];
         clientes: {
-            nombre: string;
             id_Persona: number;
+            nombre: string;
         }[];
     }>;
     guardarCatalogo(tipo: 'proceso' | 'viabilidad', body: any, u: Usuario): Promise<{
@@ -60,28 +60,14 @@ export declare class InvestigacionService {
                 desviacionSegundos: number | null;
                 desviacionPorcentaje: number | null;
                 id: number;
-                nombre: string;
-                estandar_segundos: number | null;
                 ciclo: number;
-                orden: number;
-                estandar_version: number;
-                disponible_desde: Date | null;
                 inicio: Date | null;
                 fin: Date | null;
-                inicio_por: string | null;
-                fin_por: string | null;
-                resultado: string | null;
-            }[];
-            id_ejecuciones: {
-                id: number;
                 nombre: string;
-                estandar_segundos: number | null;
-                ciclo: number;
                 orden: number;
+                estandar_segundos: number | null;
                 estandar_version: number;
                 disponible_desde: Date | null;
-                inicio: Date | null;
-                fin: Date | null;
                 inicio_por: string | null;
                 fin_por: string | null;
                 resultado: string | null;
@@ -89,15 +75,34 @@ export declare class InvestigacionService {
             productos_materiales: {
                 nombre_Producto: string;
             };
+            id_ejecuciones: {
+                id: number;
+                ciclo: number;
+                inicio: Date | null;
+                fin: Date | null;
+                nombre: string;
+                orden: number;
+                estandar_segundos: number | null;
+                estandar_version: number;
+                disponible_desde: Date | null;
+                inicio_por: string | null;
+                fin_por: string | null;
+                resultado: string | null;
+            }[];
+            id_Muestra: number;
             no_Muestra: string | null;
+            producto_id: number;
+            cliente_id: number | null;
             etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
             estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
             categoria_Muestra: import("@prisma/client").$Enums.muestras_categoria_Muestra;
             observaciones: string | null;
             area_Muestra: string;
+            vendedor_id: number | null;
             caracterizacion: string | null;
             cantidad_proyecto: Prisma.Decimal | null;
             unidad_proyecto: string | null;
+            viabilidad_id: number | null;
             viabilidad_nombre: string | null;
             fecha_recoleccion: Date | null;
             fecha_ingreso_laboratorio: Date | null;
@@ -108,11 +113,6 @@ export declare class InvestigacionService {
             personas_muestras_vendedor_idTopersonas: {
                 nombre: string;
             } | null;
-            id_Muestra: number;
-            producto_id: number;
-            cliente_id: number | null;
-            vendedor_id: number | null;
-            viabilidad_id: number | null;
         }[];
     }>;
     detalle(id: number, u: Usuario): Promise<{
@@ -124,55 +124,60 @@ export declare class InvestigacionService {
                 desviacionSegundos: number | null;
                 desviacionPorcentaje: number | null;
                 id: number;
-                nombre: string;
-                estandar_segundos: number | null;
                 ciclo: number;
-                orden: number;
-                estandar_version: number;
-                disponible_desde: Date | null;
                 inicio: Date | null;
                 fin: Date | null;
+                nombre: string;
+                orden: number;
+                estandar_segundos: number | null;
+                estandar_version: number;
+                disponible_desde: Date | null;
                 inicio_por: string | null;
                 fin_por: string | null;
                 resultado: string | null;
             }[];
             eventos: {
                 id: number;
+                entidad: string;
+                entidad_id: number;
                 lote_id: number | null;
                 tanque_id: number | null;
                 ciclo: number;
-                entidad: string;
-                entidad_id: number;
                 accion: string;
                 fecha: Date;
                 detalle: string | null;
             }[];
+            productos_materiales: {
+                nombre_Producto: string;
+            };
             id_ejecuciones: {
                 id: number;
-                nombre: string;
-                estandar_segundos: number | null;
                 ciclo: number;
-                orden: number;
-                estandar_version: number;
-                disponible_desde: Date | null;
                 inicio: Date | null;
                 fin: Date | null;
+                nombre: string;
+                orden: number;
+                estandar_segundos: number | null;
+                estandar_version: number;
+                disponible_desde: Date | null;
                 inicio_por: string | null;
                 fin_por: string | null;
                 resultado: string | null;
             }[];
-            productos_materiales: {
-                nombre_Producto: string;
-            };
+            id_Muestra: number;
             no_Muestra: string | null;
+            producto_id: number;
+            cliente_id: number | null;
             etapa_Muestra: import("@prisma/client").$Enums.muestras_etapa_Muestra | null;
             estado_Muestra: import("@prisma/client").$Enums.muestras_estado_Muestra;
             categoria_Muestra: import("@prisma/client").$Enums.muestras_categoria_Muestra;
             observaciones: string | null;
             area_Muestra: string;
+            vendedor_id: number | null;
             caracterizacion: string | null;
             cantidad_proyecto: Prisma.Decimal | null;
             unidad_proyecto: string | null;
+            viabilidad_id: number | null;
             viabilidad_nombre: string | null;
             fecha_recoleccion: Date | null;
             fecha_ingreso_laboratorio: Date | null;
@@ -183,11 +188,6 @@ export declare class InvestigacionService {
             personas_muestras_vendedor_idTopersonas: {
                 nombre: string;
             } | null;
-            id_Muestra: number;
-            producto_id: number;
-            cliente_id: number | null;
-            vendedor_id: number | null;
-            viabilidad_id: number | null;
         };
     }>;
     ficha(id: number, u: Usuario): Promise<{
@@ -234,16 +234,16 @@ export declare class InvestigacionService {
                 cliente_id: number | null;
             };
             id: number;
-            nombre: string;
-            estandar_segundos: number | null;
-            muestra_id: number;
-            proceso_id: number;
             ciclo: number;
-            orden: number;
-            estandar_version: number;
-            disponible_desde: Date | null;
             inicio: Date | null;
             fin: Date | null;
+            nombre: string;
+            muestra_id: number;
+            proceso_id: number;
+            orden: number;
+            estandar_segundos: number | null;
+            estandar_version: number;
+            disponible_desde: Date | null;
             inicio_por: string | null;
             fin_por: string | null;
             resultado: string | null;

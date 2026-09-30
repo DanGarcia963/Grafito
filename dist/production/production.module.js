@@ -10,14 +10,13 @@ exports.ProductionModule = void 0;
 const common_1 = require("@nestjs/common");
 const production_controller_1 = require("./production.controller");
 const production_service_1 = require("./production.service");
-const prisma_service_1 = require("../prisma.service");
 let ProductionModule = class ProductionModule {
 };
 exports.ProductionModule = ProductionModule;
 exports.ProductionModule = ProductionModule = __decorate([
     (0, common_1.Module)({
         controllers: [production_controller_1.ProductionController],
-        providers: [production_service_1.ProductionService, prisma_service_1.PrismaService],
+        providers: [production_service_1.ProductionService],
     })
 ], ProductionModule);
 //# sourceMappingURL=production.module.js.map
