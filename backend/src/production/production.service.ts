@@ -2,7 +2,7 @@ import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
 import { EventsGateway } from '../events.gateway';
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common'; 
 import { PrismaService } from '../prisma.service'; 
-import { equipos_tanques_estatus_proceso, lotes_produccion_estado_Calida, muestras_estado_Muestra, muestras_etapa_Muestra, ordenes_produccion_estatus_flujo } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
+import { equipos_tanques_tipo, equipos_tanques_estatus_proceso, lotes_produccion_estado_Calida, muestras_estado_Muestra, muestras_etapa_Muestra, ordenes_produccion_estatus_flujo } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
 
 @Injectable() 
 export class ProductionService { 
@@ -54,6 +54,7 @@ export class ProductionService {
          },
         orderBy: { fecha_Confirmacion: 'desc' } 
       }); 
+      console.log(grafitos);
       return { success: true, result: grafitos, bitacora: grafitos.flatMap(o => o.lotes_produccion.flatMap(l => {
         try { const lista = l.bitacora ? JSON.parse(l.bitacora) : []; return Array.isArray(lista) ? lista : []; } catch { return []; }
       })) }; 
@@ -64,18 +65,16 @@ export class ProductionService {
  
 async tanquesAreaProduccion(tipo: string) { 
   try { 
-    // Usamos queryRaw o ignoramos la validación estricta del Enum mapeando la respuesta
-    const tanques = await this.prisma.$queryRaw`
-      SELECT 
-        id_Equipos_Tanques, 
-        codigo_Equipo, 
-        nombre_Equipo, 
-        status, 
-        estatus_proceso 
-      FROM equipos_tanques 
-      WHERE tipo = ${tipo}
-    `;
-
+    const tipoNormalizado = String(tipo ?? '').trim().toUpperCase();
+    if (!Object.values(equipos_tanques_tipo).includes(tipoNormalizado as equipos_tanques_tipo)) {
+      throw new BadRequestException('Tipo de tanque inválido');
+    }
+    const tanques = await this.prisma.equipos_tanques.findMany({
+      where: { tipo: tipoNormalizado as equipos_tanques_tipo },
+      select: { id_Equipos_Tanques: true, codigo_Equipo: true, nombre_Equipo: true, status: true, estatus_proceso: true },
+      orderBy: { id_Equipos_Tanques: 'asc' },
+    });
+    console.log(tanques);
     return { success: true, result: tanques }; 
   } catch (error: any) { 
     return { success: false, error: error.message }; 
@@ -87,7 +86,7 @@ async tanquesAreaProduccion(tipo: string) {
     const destino = tanqueId == null ? null : this.tiempos.id(tanqueId);
     await this.prisma.$transaction(async tx => {
       // Orden de bloqueo consistente con las transiciones de tanque.
-      await tx.$queryRaw`SELECT id_Equipos_Tanques FROM equipos_tanques ORDER BY id_Equipos_Tanques FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Equipos_Tanques" FROM equipos_tanques ORDER BY "id_Equipos_Tanques" FOR UPDATE`;
       const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
       if (!lote) throw new NotFoundException('Lote no encontrado');
       if (lote.tanque_id === destino) return;
@@ -116,7 +115,7 @@ async tanquesAreaProduccion(tipo: string) {
   async actualizarEstatusCalidad({ idLoteProduccion }: { idLoteProduccion: number; estadoCalidad: 'LIBERADO' }) {
     const id = this.tiempos.id(idLoteProduccion);
     const result = await this.prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id_Lote_Produccion FROM lotes_produccion WHERE id_Lote_Produccion = ${id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${id} FOR UPDATE`;
       const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
       if (!lote) throw new NotFoundException('Lote no encontrado');
       if (lote.estado_Calida !== 'LIBERADO' && lote.tanque_id) {
@@ -133,7 +132,7 @@ async tanquesAreaProduccion(tipo: string) {
   async agregarRegistroBitacora({ idLoteProduccion, registro }: { idLoteProduccion: number; registro: any }) {
     const id = this.tiempos.id(idLoteProduccion);
     const result = await this.prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id_Lote_Produccion FROM lotes_produccion WHERE id_Lote_Produccion = ${id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${id} FOR UPDATE`;
       const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
       if (!lote) throw new NotFoundException('Lote no encontrado');
       // No reemplazar silenciosamente una bitácora ilegible.
@@ -152,7 +151,7 @@ async tanquesAreaProduccion(tipo: string) {
     const estado = String(estatus_proceso ?? '').trim().toUpperCase().replace(/\s+/g, '_');
     if (!Object.values(equipos_tanques_estatus_proceso).includes(estado as equipos_tanques_estatus_proceso)) throw new BadRequestException('Etapa de tanque inválida');
     const result = await this.prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id_Equipos_Tanques FROM equipos_tanques WHERE id_Equipos_Tanques = ${id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Equipos_Tanques" FROM equipos_tanques WHERE "id_Equipos_Tanques" = ${id} FOR UPDATE`;
       const tanque = await tx.equipos_tanques.findUnique({ where: { id_Equipos_Tanques: id } });
       if (!tanque) throw new NotFoundException('Tanque no encontrado');
       const lote = await tx.lotes_produccion.findFirst({ where: { tanque_id: id }, include: { ordenes_produccion: true } });

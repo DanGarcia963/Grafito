@@ -26,18 +26,20 @@ let VentasService = class VentasService {
                         where: {
                             nombre: {
                                 equals: data.nombreVendedor,
+                                mode: 'insensitive',
                             },
+                            tipo_persona: { equals: 'VENDEDOR', mode: 'insensitive' },
                         },
                     });
                     if (!vendedor) {
                         vendedor = await tx.personas.create({
                             data: {
                                 nombre: data.nombreVendedor,
-                                tipo_persona: 'Vendedor',
+                                tipo_persona: 'VENDEDOR',
                             },
                         });
                     }
-                    vendedorId = Number(vendedor.id_Persona || vendedor.id);
+                    vendedorId = Number(vendedor.id_Persona);
                 }
                 let clienteId = Number(data.cliente_id);
                 if (!clienteId && data.cliente) {
@@ -45,23 +47,26 @@ let VentasService = class VentasService {
                         where: {
                             nombre: {
                                 equals: data.cliente,
+                                mode: 'insensitive',
                             },
+                            tipo_persona: { equals: 'CLIENTE', mode: 'insensitive' },
                         },
                     });
                     if (!cliente) {
                         cliente = await tx.personas.create({
                             data: {
                                 nombre: data.cliente,
-                                tipo_persona: 'Cliente',
+                                tipo_persona: 'CLIENTE',
                             },
                         });
                     }
-                    clienteId = Number(cliente.id_Persona || cliente.id);
+                    clienteId = Number(cliente.id_Persona);
                 }
                 let producto = await tx.productos_materiales.findFirst({
                     where: {
                         nombre_Producto: {
                             equals: data.producto,
+                            mode: 'insensitive',
                         }
                     },
                 });
@@ -74,7 +79,7 @@ let VentasService = class VentasService {
                         },
                     });
                 }
-                const productoId = Number(producto.id_Produc_Mater || producto.id);
+                const productoId = Number(producto.id_Produc_Mater);
                 const orden = await tx.ordenes_produccion.create({
                     data: {
                         id_Venta_Origen: Number(data.idVenta),
@@ -84,6 +89,8 @@ let VentasService = class VentasService {
                         producto_id: productoId,
                         servicio: data.servicio,
                         cantidad_Venta: Number(data.cantidadVentas),
+                        status_Produccion: 'PENDIENTE',
+                        cantidad_Producida: 0,
                         fecha_Confirmacion: data.fechaConfirmacion ? new Date(data.fechaConfirmacion) : null,
                         fecha_Compromiso: data.fechaCompromisoPago ? new Date(data.fechaCompromisoPago) : null,
                         urgencia: data.urgencia,
@@ -148,7 +155,7 @@ let VentasService = class VentasService {
                 ...orden,
                 estadoActual: {
                     area: orden.estatus_flujo.toLowerCase(),
-                    label: etiquetasArea[orden.estatus_flujo],
+                    label: etiquetasArea[orden.estatus_flujo.toUpperCase()],
                 },
             }));
             return { success: true, result };

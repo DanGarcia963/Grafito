@@ -68,6 +68,7 @@ let ProductionService = class ProductionService {
                 },
                 orderBy: { fecha_Confirmacion: 'desc' }
             });
+            console.log(grafitos);
             return { success: true, result: grafitos, bitacora: grafitos.flatMap(o => o.lotes_produccion.flatMap(l => {
                     try {
                         const lista = l.bitacora ? JSON.parse(l.bitacora) : [];
@@ -84,16 +85,16 @@ let ProductionService = class ProductionService {
     }
     async tanquesAreaProduccion(tipo) {
         try {
-            const tanques = await this.prisma.$queryRaw `
-      SELECT 
-        id_Equipos_Tanques, 
-        codigo_Equipo, 
-        nombre_Equipo, 
-        status, 
-        estatus_proceso 
-      FROM equipos_tanques 
-      WHERE tipo = ${tipo}
-    `;
+            const tipoNormalizado = String(tipo ?? '').trim().toUpperCase();
+            if (!Object.values(client_1.equipos_tanques_tipo).includes(tipoNormalizado)) {
+                throw new common_1.BadRequestException('Tipo de tanque inválido');
+            }
+            const tanques = await this.prisma.equipos_tanques.findMany({
+                where: { tipo: tipoNormalizado },
+                select: { id_Equipos_Tanques: true, codigo_Equipo: true, nombre_Equipo: true, status: true, estatus_proceso: true },
+                orderBy: { id_Equipos_Tanques: 'asc' },
+            });
+            console.log(tanques);
             return { success: true, result: tanques };
         }
         catch (error) {
@@ -104,7 +105,7 @@ let ProductionService = class ProductionService {
         const id = this.tiempos.id(idLoteProduccion);
         const destino = tanqueId == null ? null : this.tiempos.id(tanqueId);
         await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Equipos_Tanques FROM equipos_tanques ORDER BY id_Equipos_Tanques FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Equipos_Tanques" FROM equipos_tanques ORDER BY "id_Equipos_Tanques" FOR UPDATE`;
             const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
             if (!lote)
                 throw new common_1.NotFoundException('Lote no encontrado');
@@ -136,7 +137,7 @@ let ProductionService = class ProductionService {
     async actualizarEstatusCalidad({ idLoteProduccion }) {
         const id = this.tiempos.id(idLoteProduccion);
         const result = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Lote_Produccion FROM lotes_produccion WHERE id_Lote_Produccion = ${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${id} FOR UPDATE`;
             const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
             if (!lote)
                 throw new common_1.NotFoundException('Lote no encontrado');
@@ -153,7 +154,7 @@ let ProductionService = class ProductionService {
     async agregarRegistroBitacora({ idLoteProduccion, registro }) {
         const id = this.tiempos.id(idLoteProduccion);
         const result = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Lote_Produccion FROM lotes_produccion WHERE id_Lote_Produccion = ${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${id} FOR UPDATE`;
             const lote = await tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } });
             if (!lote)
                 throw new common_1.NotFoundException('Lote no encontrado');
@@ -173,7 +174,7 @@ let ProductionService = class ProductionService {
         if (!Object.values(client_1.equipos_tanques_estatus_proceso).includes(estado))
             throw new common_1.BadRequestException('Etapa de tanque inválida');
         const result = await this.prisma.$transaction(async (tx) => {
-            await tx.$queryRaw `SELECT id_Equipos_Tanques FROM equipos_tanques WHERE id_Equipos_Tanques = ${id} FOR UPDATE`;
+            await tx.$queryRaw `SELECT "id_Equipos_Tanques" FROM equipos_tanques WHERE "id_Equipos_Tanques" = ${id} FOR UPDATE`;
             const tanque = await tx.equipos_tanques.findUnique({ where: { id_Equipos_Tanques: id } });
             if (!tanque)
                 throw new common_1.NotFoundException('Tanque no encontrado');

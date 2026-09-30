@@ -26,6 +26,6 @@ let LotesProcessor = LotesProcessor_1 = class LotesProcessor extends bullmq_1.Wo
 };
 exports.LotesProcessor = LotesProcessor;
 exports.LotesProcessor = LotesProcessor = LotesProcessor_1 = __decorate([
-    (0, bullmq_1.Processor)('lotes-queue')
+    (0, bullmq_1.Processor)('cola-lotes')
 ], LotesProcessor);
 //# sourceMappingURL=lotes.processor.js.map

@@ -7,7 +7,7 @@ export class VentasService {
 
   async crearOrdenVenta(data: any) {
     try {
-      return await this.prisma.$transaction(async (tx: any) => {
+      return await this.prisma.$transaction(async (tx) => {
         
         // -------------------------------------------------------------
         // 1. GESTIÓN DE PERSONA: VENDEDOR (Buscar o Crear)
@@ -20,9 +20,10 @@ export class VentasService {
             where: {
               nombre: {
                 equals: data.nombreVendedor,
+                mode: 'insensitive',
               },
               // Si tienes una columna de tipo de persona o rol:
-              // tipo: 'Vendedor', 
+              tipo_persona: { equals: 'VENDEDOR', mode: 'insensitive' }, 
             },
           });
 
@@ -30,12 +31,12 @@ export class VentasService {
             vendedor = await tx.personas.create({
               data: {
                 nombre: data.nombreVendedor,
-                tipo_persona: 'Vendedor', // Asegúrate de que este campo exista en tu tabla personas
+                tipo_persona: 'VENDEDOR', // Asegúrate de que este campo exista en tu tabla personas
                 // agrega otros campos requeridos de tu tabla persona si aplica (ej. tipo: 'Vendedor')
               },
             });
           }
-          vendedorId = Number(vendedor.id_Persona || vendedor.id);
+          vendedorId = Number(vendedor.id_Persona);
         }
 
         // -------------------------------------------------------------
@@ -49,8 +50,9 @@ export class VentasService {
             where: {
               nombre: {
                 equals: data.cliente,
+                mode: 'insensitive',
               },
-              // tipo: 'Cliente',
+              tipo_persona: { equals: 'CLIENTE', mode: 'insensitive' },
             },
           });
 
@@ -58,12 +60,12 @@ export class VentasService {
             cliente = await tx.personas.create({
               data: {
                 nombre: data.cliente,
-                tipo_persona: 'Cliente', // Asegúrate de que este campo exista en tu tabla personas
+                tipo_persona: 'CLIENTE', // Asegúrate de que este campo exista en tu tabla personas
                 // agrega otros campos requeridos de tu tabla persona si aplica (ej. tipo: 'Cliente')
               },
             });
           }
-          clienteId = Number(cliente.id_Persona || cliente.id);
+          clienteId = Number(cliente.id_Persona);
         }
 
         // -------------------------------------------------------------
@@ -73,6 +75,7 @@ export class VentasService {
           where: {
             nombre_Producto: {
               equals: data.producto,
+                mode: 'insensitive',
             }
           },
         });
@@ -87,7 +90,7 @@ export class VentasService {
           });
         }
 
-        const productoId = Number(producto.id_Produc_Mater || producto.id);
+        const productoId = Number(producto.id_Produc_Mater);
 
         // -------------------------------------------------------------
         // 4. INSERTAR ORDEN DE PRODUCCIÓN
@@ -101,6 +104,8 @@ export class VentasService {
             producto_id: productoId,
             servicio: data.servicio,
             cantidad_Venta: Number(data.cantidadVentas),
+            status_Produccion: 'PENDIENTE',
+            cantidad_Producida: 0,
             fecha_Confirmacion: data.fechaConfirmacion ? new Date(data.fechaConfirmacion) : null,
             fecha_Compromiso: data.fechaCompromisoPago ? new Date(data.fechaCompromisoPago) : null,
             urgencia: data.urgencia,
@@ -172,7 +177,7 @@ const result = ordenes.map((orden: any) => ({
       // 👈 Se construye estadoActual de forma segura y centralizada
       estadoActual: {
         area: orden.estatus_flujo.toLowerCase(),
-        label: etiquetasArea[orden.estatus_flujo],
+        label: etiquetasArea[orden.estatus_flujo.toUpperCase()],
       },
     }));
 

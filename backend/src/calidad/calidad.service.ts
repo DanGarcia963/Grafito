@@ -1,8 +1,9 @@
+import { booleanInput } from '../config/inputs';
 import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
 import { EventsGateway } from '../events.gateway';
 import { Injectable, BadRequestException, InternalServerErrorException, NotFoundException } from '@nestjs/common'; 
 import { PrismaService } from '../prisma.service'; 
-import {lotes_produccion_estado_Calida, muestras_estado_Muestra } from '@prisma/client';
+import { Prisma, muestras_categoria_Muestra, lotes_produccion_estado_Calida, muestras_estado_Muestra } from '@prisma/client';
 
 // Interfaces para tipar la recepción de datos desde el Frontend
 export interface ContenedorInput {
@@ -100,7 +101,7 @@ const muestras = await this.prisma.muestras.findMany({
 
     return {
       success: true,
-      result: await Promise.all(muestras.map(async m => ({ ...m, tiempoActual: await this.prisma.proceso_tramos.findFirst({ where: { entidad: 'MUESTRA', entidad_id: m.id_Muestra }, orderBy: { id: 'desc' } }) }))),
+      result: await Promise.all(muestras.map(async m => ({ ...m, resultado_analisis: m.resultado_analisis.map(r => ({ ...r, valor_Obtenido_Num: r.valor_Obtenido_Num })), tiempoActual: await this.prisma.proceso_tramos.findFirst({ where: { entidad: 'MUESTRA', entidad_id: m.id_Muestra }, orderBy: { id: 'desc' } }) }))),
     };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -146,7 +147,7 @@ async buscarEspecificacionesMuestra(muestraID: number) {
         );
       }
 
-      return especificaciones;
+      return especificaciones.map(r => ({ ...r, valor_Obtenido_Num: r.valor_Obtenido_Num }));
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -274,7 +275,11 @@ private async crearResultadosMuestraCalidad(payload: {
           const valorIngresado = String(med.valor ?? '').trim();
 
           // Evaluamos el tipo de dato del parámetro de forma segura
-          const tipoDato = String(parametro?.tipo_Dato ?? '').toUpperCase();
+          if (!parametro) throw new BadRequestException('Parámetro inexistente');
+          const tipoDato = String(parametro.tipo_Dato).toUpperCase();
+          if (tipoDato === 'NUMERICO' && !/^[+-]?\d{1,8}(?:\.\d{1,4})?$/.test(valorIngresado)) {
+            throw new BadRequestException('Resultado numérico inválido: máximo 8 enteros y 4 decimales');
+          }
 
           if (tipoDato === 'NUMERICO') {
             // Lógica NUMÉRICA
@@ -310,7 +315,8 @@ private async crearResultadosMuestraCalidad(payload: {
             muestra_id: id_Muestra,
             ciclo_analisis: payload.ciclo_analisis,
             parametro_id: med.id_Parametro,
-            valor_Obtenido_Num: valorIngresado,
+            valor_Obtenido_Num: tipoDato === 'NUMERICO' ? new Prisma.Decimal(valorIngresado) : null,
+            
             cumple_Especificacion: cumpleEspecificacion,
             fecha_Resultado: fechaActualIso,
             //hora_Resultado: horaActual,
@@ -367,6 +373,7 @@ private async actualizarEstadoMuestra({
         where: {
           nombre: {
             equals: nombreLimpio,
+            mode: 'insensitive',
           },
         },
       });
@@ -412,7 +419,7 @@ private async actualizarEstadoMuestra({
           data: {
             // Ajusta este campo al valor correspondiente en tu enum de Prisma
             // Ej: 'AJUSTE', 'RECHAZADO', 'REPROCESO', 'CALIDAD_RECHAZADO', etc.
-            estatus_flujo: 'produccion' as any, 
+            estatus_flujo: 'produccion', 
           },
         });
       }
@@ -424,7 +431,7 @@ private async actualizarEstadoMuestra({
       },
       data: {
         estado_Muestra: dictamen as muestras_estado_Muestra,
-        categoria_Muestra: tipoMuestra as any,
+        categoria_Muestra: tipoMuestra as muestras_categoria_Muestra,
         observaciones: observaciones,
         analista_id: idAnalista, // <--- Asignamos la llave foránea
       },
@@ -449,7 +456,7 @@ private async actualizarEstadoMuestra({
 async cambiarEtapaMuestra(idEntrada: unknown, accion: 'RECIBIR' | 'INICIAR' | 'REABRIR') {
   const id = this.tiempos.id(idEntrada);
   const resultado = await this.prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+    await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
     const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
     if (!muestra || muestra.area_Muestra !== 'CALIDAD') throw new NotFoundException('Muestra de Calidad no encontrada');
     const ctx = { entidad: 'MUESTRA' as const, entidad_id: id, lote_id: muestra.lote_id, tanque_id: muestra.tanque_id };
@@ -484,6 +491,7 @@ async cambiarEtapaMuestra(idEntrada: unknown, accion: 'RECIBIR' | 'INICIAR' | 'R
 
 async finalizarAnalisis(payload: any) {
   const id = this.tiempos.id(payload?.idMuestra);
+  if (!Object.values(muestras_categoria_Muestra).includes(payload?.tipoMuestra)) throw new BadRequestException('Tipo de muestra inválido');
   if (!['APROBADO', 'RECHAZADO'].includes(payload?.dictamen)) throw new BadRequestException('Dictamen inválido');
   if (!Array.isArray(payload?.mediciones) || !payload.mediciones.length) throw new BadRequestException('Captura al menos un resultado');
   if (new Set(payload.mediciones.map((m: any) => m.id_Parametro)).size !== payload.mediciones.length) throw new BadRequestException('Parámetros duplicados');
@@ -492,7 +500,7 @@ async finalizarAnalisis(payload: any) {
     if (typeof m.valor !== 'string' || !m.valor.trim()) throw new BadRequestException('Resultado vacío');
   }
   const resultado = await this.prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+    await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
     const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
     if (!muestra || muestra.area_Muestra !== 'CALIDAD') throw new NotFoundException('Muestra de Calidad no encontrada');
     const ctx = { entidad: 'MUESTRA' as const, entidad_id: id, lote_id: muestra.lote_id, tanque_id: muestra.tanque_id };
@@ -519,7 +527,7 @@ async actualizarEstatusMuestra(payload: any) {
   // Inicio/recepción y fin tienen endpoints propios para no omitir sus tiempos.
   if (estado !== 'APROBADO') throw new BadRequestException('Usa recibir, iniciar o finalizar para registrar el ciclo. Este endpoint libera una muestra rechazada.');
   const result = await this.prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT id_Muestra FROM muestras WHERE id_Muestra = ${id} FOR UPDATE`;
+    await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
     const muestra = await tx.muestras.findUnique({ where: { id_Muestra: id } });
     if (!muestra || muestra.area_Muestra !== 'CALIDAD') throw new NotFoundException('Muestra de Calidad no encontrada');
     if (muestra.estado_Muestra === 'APROBADO') return muestra;
@@ -539,6 +547,7 @@ async buscarAnalistas(query: string) {
       where: {
         nombre: {
           contains: query,
+          mode: 'insensitive',
         },
       },
       take: 5, // Limitar resultados
@@ -629,31 +638,34 @@ async obtenerOrdenesPendientesDeLlegada(fechaFiltro?: Date | string) {
         };
       }
 
-const nuevoLote = await this.prisma.lotes_llegada.create({
+const nuevoLote = await this.prisma.$transaction(async tx => {
+const lote = await tx.lotes_llegada.create({
   data: {
     no_lote,
     orden_produccion_id: Number(orden_produccion_id),
     reviso_nombre,
     estado_checklist,
-    fecha_Revision,
-    fecha_llegada,
-    observaciones: observaciones == null ? observaciones : JSON.stringify(observaciones),
+    fecha_Revision: new Date(fecha_Revision),
+    fecha_llegada: new Date(fecha_llegada),
+    observaciones: observaciones == null ? observaciones : typeof observaciones === 'string' ? observaciones : JSON.stringify(observaciones),
   },
 });
 
-await this.prisma.checklist_contenedor.createMany({
+await tx.checklist_contenedor.createMany({
   data: contenedores.map((c) => ({
-    lote_llegada_id: nuevoLote.id,
+    lote_llegada_id: lote.id,
     no_consecutivo: Number(c.no_consecutivo),
     numero_contenedor: c.numero_contenedor,
-    tapa_valvula: Boolean(c.tapa_valvula),
-    rejilla_danada: Boolean(c.rejilla_danada),
-    base_danada: Boolean(c.base_danada),
-    derrame: Boolean(c.derrame),
+    tapa_valvula: booleanInput(c.tapa_valvula),
+    rejilla_danada: booleanInput(c.rejilla_danada),
+    base_danada: booleanInput(c.base_danada),
+    derrame: booleanInput(c.derrame),
     observaciones: c.observaciones || null,
   })),
 });
 
+return lote;
+});
       return { success: true, result: nuevoLote };
     } catch (error: any) {
       console.error('Error al registrar lote de llegada con checklist:', error);

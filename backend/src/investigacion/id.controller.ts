@@ -17,7 +17,7 @@ export class InvestigacionController {
 
  @Areas('id') @Put('catalogos/viabilidad') viabilidad(@Body() body:any,@Req() req:any){return this.servicio.guardarCatalogo('viabilidad',body,req.usuario);}
 
- @Areas('ventas') @Post('muestras') @UseInterceptors(FileInterceptor('ficha',{limits:{fileSize:80*1024*1024,files:1}}))
+ @Areas('ventas') @Post('muestras') @UseInterceptors(FileInterceptor('ficha',{limits:{fileSize:10*1024*1024,files:1}}))
  crear(@Body() body:any,@UploadedFile() ficha:any,@Req() req:any){return this.servicio.crear(body,ficha,req.usuario);}
 
  @Get('muestras') listar(@Req() req:any,@Query('pagina') pagina:string){return this.servicio.listar(req.usuario,pagina);}

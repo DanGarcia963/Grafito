@@ -14,6 +14,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VentasController = void 0;
 const common_1 = require("@nestjs/common");
+const auth_guard_1 = require("../auth/auth.guard");
+const common_2 = require("@nestjs/common");
 const ventas_service_1 = require("./ventas.service");
 let VentasController = class VentasController {
     ventasService;
@@ -29,20 +31,23 @@ let VentasController = class VentasController {
 };
 exports.VentasController = VentasController;
 __decorate([
-    (0, common_1.Post)('crear'),
-    __param(0, (0, common_1.Body)()),
+    (0, auth_guard_1.Areas)('ventas'),
+    (0, common_2.Post)('crear'),
+    __param(0, (0, common_2.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], VentasController.prototype, "crearVenta", null);
 __decorate([
-    (0, common_1.Get)('test'),
+    (0, common_2.Get)('test'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], VentasController.prototype, "test", null);
 exports.VentasController = VentasController = __decorate([
-    (0, common_1.Controller)('api/ventas'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, auth_guard_1.Areas)('ventas', 'produccion', 'calidad'),
+    (0, common_2.Controller)('api/ventas'),
     __metadata("design:paramtypes", [ventas_service_1.VentasService])
 ], VentasController);
 //# sourceMappingURL=ventas.controller.js.map

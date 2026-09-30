@@ -10,38 +10,38 @@ export declare class ProductionService {
         success: boolean;
         result: ({
             lotes_produccion: {
-                tanque_id: number | null;
                 id_Lote_Produccion: number;
                 no_Lote: string;
+                tanque_id: number | null;
                 cantidad_Total_Producida: import("@prisma/client/runtime/library").Decimal | null;
                 bitacora: string | null;
             }[];
+            personas_ordenes_produccion_cliente_idTopersonas: {
+                id_Persona: number;
+                nombre: string;
+                tipo_persona: string;
+            } | null;
             productos_materiales: {
                 id_Produc_Mater: number;
                 nombre_Producto: string;
                 UM: import("@prisma/client").$Enums.productos_materiales_UM;
                 presentacion: string | null;
             };
-            personas_ordenes_produccion_cliente_idTopersonas: {
-                id_Persona: number;
-                nombre: string;
-                tipo_persona: string;
-            } | null;
             personas_ordenes_produccion_vendedor_idTopersonas: {
                 id_Persona: number;
                 nombre: string;
                 tipo_persona: string;
             } | null;
         } & {
-            producto_id: number;
-            cliente_id: number | null;
-            observaciones: string | null;
-            vendedor_id: number | null;
             id_Orden_Produc: number;
             id_Venta_Origen: number | null;
+            vendedor_id: number | null;
+            cliente_id: number | null;
+            producto_id: number;
             linea_Produccion: string | null;
             servicio: string;
             cantidad_Venta: number;
+            observaciones: string | null;
             fecha_Compromiso: Date | null;
             fecha_Confirmacion: Date | null;
             fecha_Llegada: Date | null;
@@ -71,7 +71,13 @@ export declare class ProductionService {
     }>;
     tanquesAreaProduccion(tipo: string): Promise<{
         success: boolean;
-        result: unknown;
+        result: {
+            id_Equipos_Tanques: number;
+            codigo_Equipo: string;
+            nombre_Equipo: string;
+            status: import("@prisma/client").$Enums.equipos_tanques_status;
+            estatus_proceso: import("@prisma/client").$Enums.equipos_tanques_estatus_proceso;
+        }[];
         error?: undefined;
     } | {
         success: boolean;
@@ -89,11 +95,11 @@ export declare class ProductionService {
         idLoteProduccion: number;
         estadoCalidad: 'LIBERADO';
     }): Promise<{
-        tanque_id: number | null;
         producto_id: number;
         id_Lote_Produccion: number;
         no_Lote: string;
         orden_Produccion_id: number;
+        tanque_id: number | null;
         cantidad_Total_Producida: import("@prisma/client/runtime/library").Decimal | null;
         bitacora: string | null;
         fecha_Fabricacion: Date | null;

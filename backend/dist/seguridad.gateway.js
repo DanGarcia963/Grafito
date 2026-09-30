@@ -13,17 +13,34 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SeguridadGateway = void 0;
+const runtime_1 = require("./config/runtime");
+const auth_service_1 = require("./auth/auth.service");
 const websockets_1 = require("@nestjs/websockets");
 const socket_io_1 = require("socket.io");
 let SeguridadGateway = class SeguridadGateway {
+    auth;
+    constructor(auth) {
+        this.auth = auth;
+    }
+    handleConnection(client) {
+        try {
+            this.auth.verificar(client.handshake.auth?.token);
+        }
+        catch {
+            client.disconnect(true);
+        }
+    }
     server;
     handleCrearTramite(data, client) {
+        this.auth.verificar(client.handshake.auth?.token);
         this.server.emit('TRAMITE_CREADO', data);
     }
-    handleActualizarTramite(data) {
+    handleActualizarTramite(data, client) {
+        this.auth.verificar(client.handshake.auth?.token);
         this.server.emit('TRAMITE_ACTUALIZADO', data);
     }
-    handleEliminarTramite(id) {
+    handleEliminarTramite(id, client) {
+        this.auth.verificar(client.handshake.auth?.token);
         this.server.emit('TRAMITE_ELIMINADO', id);
     }
 };
@@ -43,18 +60,21 @@ __decorate([
 __decorate([
     (0, websockets_1.SubscribeMessage)('actualizar_tramite'),
     __param(0, (0, websockets_1.MessageBody)()),
+    __param(1, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
     __metadata("design:returntype", void 0)
 ], SeguridadGateway.prototype, "handleActualizarTramite", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('eliminar_tramite'),
     __param(0, (0, websockets_1.MessageBody)()),
+    __param(1, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, socket_io_1.Socket]),
     __metadata("design:returntype", void 0)
 ], SeguridadGateway.prototype, "handleEliminarTramite", null);
 exports.SeguridadGateway = SeguridadGateway = __decorate([
-    (0, websockets_1.WebSocketGateway)({ cors: { origin: '*' } })
+    (0, websockets_1.WebSocketGateway)({ cors: runtime_1.corsOptions }),
+    __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], SeguridadGateway);
 //# sourceMappingURL=seguridad.gateway.js.map

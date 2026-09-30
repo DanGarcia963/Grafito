@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppController = void 0;
+const auth_guard_1 = require("./auth/auth.guard");
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("./prisma.service");
 let AppController = class AppController {
@@ -17,12 +18,13 @@ let AppController = class AppController {
     constructor(prisma) {
         this.prisma = prisma;
     }
+    health() { return { status: 'ok' }; }
     async testDb() {
         try {
             const result = await this.prisma.$queryRaw `SELECT NOW() as fecha_servidor`;
             return {
                 success: true,
-                message: '¡Conexión exitosa a MySQL en XAMPP usando Prisma y NestJS!',
+                message: '¡Conexión exitosa a PostgreSQL en Supabase usando Prisma y NestJS!',
                 data: result,
             };
         }
@@ -36,6 +38,13 @@ let AppController = class AppController {
 };
 exports.AppController = AppController;
 __decorate([
+    (0, common_1.Get)('health'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AppController.prototype, "health", null);
+__decorate([
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, common_1.Get)('test-db'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
