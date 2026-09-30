@@ -44,7 +44,7 @@ export default function MuestrasID({area}:{area:'id'|'ventas'}){
   }
 
   await ejecutar(async () => {
-    const r = await apiFetch('http://localhost:4002/api/investigacion/muestras', {
+    const r = await apiFetch(`${API_URL}/api/investigacion/muestras`, {
       method: 'POST',
       body: data,
     });
