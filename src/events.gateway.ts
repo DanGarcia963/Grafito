@@ -16,6 +16,7 @@ export class EventsGateway implements OnGatewayConnection {
   }catch{client.disconnect(true);}
  }
  notificar(evento:string,data:unknown){
+  if (evento.startsWith('CRM_')) { this.server?.to('ventas').emit(evento, data); return; }
   if (evento.startsWith('TRAMITE_')) { this.server?.to('seguridad').emit(evento, data); return; }
   const areas=evento.startsWith('ID_')?['id','ventas']:['calidad','produccion'];
   // Las pantallas recuperan datos autorizados desde el API al recibir esta señal.
