@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-export type Area = 'produccion' | 'calidad' | 'id' | 'ventas';
+export type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'seguridad';
 export type Usuario = { usuario: string; area: Area; personaId: number; expira: number };
 @Injectable()
 export class AuthService {
@@ -18,7 +18,7 @@ export class AuthService {
   if(intento.n>=10)throw new UnauthorizedException('Demasiados intentos. Espera un minuto.');
   intento.n++;this.intentos.set(clave,intento);
   const cuenta=cuentas.find(c=>c.usuario===String(body?.usuario??'').trim() && Array.isArray(c.areas) && c.areas.includes(body?.area));
-  if(!cuenta || typeof body?.password!=='string' || body.password.length>256 || !['calidad','id','ventas','produccion'].includes(body?.area))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
+  if(!cuenta || typeof body?.password!=='string' || body.password.length>256 || !['calidad','id','ventas','produccion','seguridad'].includes(body?.area))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
   const esperado=Buffer.from(String(cuenta.hash),'hex');
   const actual=scryptSync(body.password,String(cuenta.salt),64);
   if(esperado.length!==actual.length || !timingSafeEqual(actual,esperado))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
