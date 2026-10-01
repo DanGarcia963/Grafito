@@ -25,7 +25,7 @@ try {
   throw new Error('El servidor no devolvió un token de sesión. Revisa la respuesta de /api/auth/login.');
  }
  localStorage.setItem('sesion',JSON.stringify(sesion));window.dispatchEvent(new Event('sesion-cambiada'));
- router.push(area ==='seguridad'?'/seguridad':area==='calidad'?'/calidad':area==='produccion'?'/tanques':area==='ventas'?'/ventas-muestras':'/investigacion');
+ router.push(area ==='seguridad'?'/matriz':area==='calidad'?'/calidad':area==='produccion'?'/tanques':area==='ventas'?'/ventas-muestras':'/investigacion');
 } catch(e){setError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
 
 };
