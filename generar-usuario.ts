@@ -30,8 +30,14 @@ const usuarios: UsuarioConfig[] = [
     usuario: 'usuario_ventas',
     password: 'Ventas123!',
     areas: ['ventas'],
-    personaId: 4,
+    personaId: 11,
   },
+  {
+    usuario: 'usuario_seguridad',
+    password: 'Seguridad123!',
+    areas: ['seguridad'],
+    personaId: 5,
+  }
 ];
 
 const cuentas = usuarios.map(({ usuario, password, areas, personaId }) => {
