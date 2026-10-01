@@ -1,3 +1,5 @@
+import { SeguridadModule } from './seguridad/seguridad.module';
+import { KpisModule } from './kpis/kpis.module';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { AuthModule } from './auth/auth.module';
@@ -14,7 +16,7 @@ import { redisConnection } from './config/runtime';
 
 const queueEnabled = process.env.REDIS_ENABLED === 'true';
 @Module({
-  imports: [PrismaModule, AuthModule, TrazabilidadModule, InvestigacionModule,
+  imports: [SeguridadModule, KpisModule, PrismaModule, AuthModule, TrazabilidadModule, InvestigacionModule,
     VentasModule, ProductionModule, CalidadModule,
     ...(queueEnabled ? [BullModule.forRoot({ connection: redisConnection() }),
       BullModule.registerQueue({ name: 'cola-lotes' })] : []),
