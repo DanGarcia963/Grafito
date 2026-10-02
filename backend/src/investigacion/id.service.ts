@@ -8,7 +8,7 @@ import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
 import { Usuario } from '../auth/auth.service';
 import { texto, idValido, estandar, metricas, fichaValida } from './id.logic';
 const seleccion = {id_Muestra:true,no_Muestra:true,area_Muestra:true,
-  oportunidad_id:true,estado_Muestra:true,categoria_Muestra:true,etapa_Muestra:true,
+  crm_oportunidades:{select:{etapa:true}},oportunidad_id:true,estado_Muestra:true,categoria_Muestra:true,etapa_Muestra:true,
  producto_id:true,cliente_id:true,vendedor_id:true,caracterizacion:true,
  cantidad_proyecto:true,unidad_proyecto:true,
  viabilidad_nombre:true,viabilidad_id:true,fecha_recoleccion:true,
@@ -31,7 +31,7 @@ export class InvestigacionService {
  }
  private async bloquear(tx:Prisma.TransactionClient,id:number,u:Usuario){
   const ref=await tx.muestras.findFirst({where:{...this.filtro(u),id_Muestra:id},select:{oportunidad_id:true}});
-  if(ref?.oportunidad_id){const o=await bloquearOportunidad(tx,ref.oportunidad_id,u);abierta(o);}
+  if(ref?.oportunidad_id){await bloquearOportunidad(tx,ref.oportunidad_id,u);}
   await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
  }
  private ctx(id:number){return {entidad:'MUESTRA_ID' as const,entidad_id:id};}
