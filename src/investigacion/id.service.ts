@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { abierta, bloquearOportunidad, eventoCrm, reiniciarTecnico } from '../ventas/crm.workflow';
 import { randomUUID } from 'crypto';
 import { Prisma, muestras_estado_Muestra } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
@@ -7,7 +8,7 @@ import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
 import { Usuario } from '../auth/auth.service';
 import { texto, idValido, estandar, metricas, fichaValida } from './id.logic';
 const seleccion = {id_Muestra:true,no_Muestra:true,area_Muestra:true,
-  estado_Muestra:true,categoria_Muestra:true,etapa_Muestra:true,
+  oportunidad_id:true,estado_Muestra:true,categoria_Muestra:true,etapa_Muestra:true,
  producto_id:true,cliente_id:true,vendedor_id:true,caracterizacion:true,
  cantidad_proyecto:true,unidad_proyecto:true,
  viabilidad_nombre:true,viabilidad_id:true,fecha_recoleccion:true,
@@ -28,6 +29,11 @@ export class InvestigacionService {
   const m=await db.muestras.findFirst({where:{...this.filtro(u),id_Muestra:id},select:seleccion});
   if(!m)throw new NotFoundException('Muestra de I+D no encontrada');return m;
  }
+ private async bloquear(tx:Prisma.TransactionClient,id:number,u:Usuario){
+  const ref=await tx.muestras.findFirst({where:{...this.filtro(u),id_Muestra:id},select:{oportunidad_id:true}});
+  if(ref?.oportunidad_id){const o=await bloquearOportunidad(tx,ref.oportunidad_id,u);abierta(o);}
+  await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
+ }
  private ctx(id:number){return {entidad:'MUESTRA_ID' as const,entidad_id:id};}
  private avisar(id:number){this.eventos.notificar('ID_MUESTRA_ACTUALIZADA',{id_Muestra:id});}
  
@@ -37,7 +43,7 @@ export class InvestigacionService {
  async referencias(q:string){
   const whereNombre={contains:String(q||'').slice(0,100),mode:'insensitive' as const};
   return {success:true,productos:await this.prisma.productos_materiales.findMany({where:{nombre_Producto:whereNombre},select:{id_Produc_Mater:true,nombre_Producto:true},take:50}),
-   clientes:await this.prisma.personas.findMany({where:{tipo_persona:{equals:'CLIENTE',mode:'insensitive'},nombre:whereNombre},select:{id_Persona:true,nombre:true},take:50})};
+   clientes:await this.prisma.personas.findMany({where:{tipo_persona:{in:['CLIENTE','PROSPECTO'],mode:'insensitive'},nombre:whereNombre},select:{id_Persona:true,nombre:true},take:50})};
  }
  async guardarCatalogo(tipo:'proceso'|'viabilidad',body:any,u:Usuario){
   const nombre=texto(body?.nombre),activo=body.activo==null?true:body.activo;
@@ -61,15 +67,18 @@ export class InvestigacionService {
   const unidad=texto(body.unidad_proyecto,30),recoleccion=new Date(body.fecha_recoleccion);
   if(isNaN(+recoleccion)||+recoleccion>Date.now())throw new BadRequestException('Fecha de recolección inválida o futura');
   const result=await this.prisma.$transaction(async tx=>{
-   const [prod,cli,vend,v]=await Promise.all([tx.productos_materiales.findUnique({where:{id_Produc_Mater:producto}}),tx.personas.findFirst({where:{id_Persona:cliente,tipo_persona:{equals:'CLIENTE',mode:'insensitive'}}}),tx.personas.findUnique({where:{id_Persona:u.personaId}}),tx.id_viabilidades.findFirst({where:{id:viabilidad,activo:true}})]);
+   const oportunidad=await bloquearOportunidad(tx,idValido(body.oportunidad_id),u);abierta(oportunidad);
+   if(oportunidad.persona_id!==cliente)throw new BadRequestException('La muestra debe pertenecer a la cuenta de la oportunidad');
+   const [prod,cli,vend,v]=await Promise.all([tx.productos_materiales.findUnique({where:{id_Produc_Mater:producto}}),tx.personas.findFirst({where:{id_Persona:cliente,tipo_persona:{in:['CLIENTE','PROSPECTO'],mode:'insensitive'}}}),tx.personas.findUnique({where:{id_Persona:u.personaId}}),tx.id_viabilidades.findFirst({where:{id:viabilidad,activo:true}})]);
    if (!prod) throw new BadRequestException(`Producto no encontrado para id: ${producto}`);
-if (!cli) throw new BadRequestException(`Cliente no encontrado o no es tipo CLIENTE para id: ${cliente}`);
+if (!cli) throw new BadRequestException(`Prospecto o cliente no encontrado para id: ${cliente}`);
 if (!vend) throw new BadRequestException(`Vendedor (personaId: ${u.personaId}) no encontrado`);
 if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para id: ${viabilidad}`);
    // Solo aceptar campos explícitos. lote_id, tanque_id y procedencia_Origen quedan NULL.
-   const m=await tx.muestras.create({data:{no_Muestra:`ID-${randomUUID()}`,area_Muestra:'INVESTIGACION_DESARROLLO',producto_id:producto,cliente_id:cliente,vendedor_id:u.personaId,
+   const m=await tx.muestras.create({data:{oportunidad_id:oportunidad.id,no_Muestra:`ID-${randomUUID()}`,area_Muestra:'INVESTIGACION_DESARROLLO',producto_id:producto,cliente_id:cliente,vendedor_id:u.personaId,
     fecha_Toma:recoleccion,Hora_Toma:recoleccion,fecha_recoleccion:recoleccion,caracterizacion:body.caracterizacion,cantidad_proyecto:new Prisma.Decimal(cantidad),unidad_proyecto:unidad,
     viabilidad_id:viabilidad,viabilidad_nombre:v.nombre,ficha_nombre:f.nombre,ficha_mime:f.mime,ficha_contenido:new Uint8Array(file!.buffer),observaciones:body.observaciones?texto(body.observaciones,4000):null},select:{id_Muestra:true}});
+   await reiniciarTecnico(tx,oportunidad,u,`Muestra registrada: ${m.id_Muestra}`);
    const tramo=await this.tiempos.transicion(tx,this.ctx(m.id_Muestra),'TRASLADO');
    await tx.proceso_tramos.update({where:{id:tramo!.id},data:{inicio:recoleccion}});
    await this.tiempos.evento(tx,this.ctx(m.id_Muestra),1,'REGISTRO_VENTAS',{usuario:u.usuario,fechaRecoleccionDeclarada:recoleccion.toISOString()});return m;
@@ -86,7 +95,7 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
   if(!Array.isArray(body?.procesos)||!body.procesos.length||body.procesos.length>50)throw new BadRequestException('Selecciona entre 1 y 50 procesos en orden');
   const ids=body.procesos.map(idValido);
   const result=await this.prisma.$transaction(async tx=>{
-   await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
+   await this.bloquear(tx,id,u);
    const m=await this.muestra(tx,id,u),ciclo=m.id_ejecuciones.at(-1)?.ciclo??1;
    const anteriores=m.id_ejecuciones.filter(p=>p.ciclo===ciclo);
    const nuevo=body.nuevoCiclo===true;
@@ -99,14 +108,15 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
    if(!nuevo)await tx.id_ejecuciones.deleteMany({where:{muestra_id:id,ciclo}});
    const ahora=new Date();
    await tx.id_ejecuciones.createMany({data:ids.map((pid:number,i:number)=>{const p=cat.find(c=>c.id===pid)!;return {muestra_id:id,proceso_id:pid,ciclo:num,orden:i+1,nombre:p.nombre,estandar_segundos:p.estandar_segundos,estandar_version:p.version,disponible_desde:i===0?(nuevo?ahora:m.fecha_ingreso_laboratorio):null};})});
-   if(nuevo){await tx.muestras.update({where:{id_Muestra:id},data:{estado_Muestra:'PENDIENTE'}});await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS',true);}
+   if(nuevo){if(m.oportunidad_id){const o=await bloquearOportunidad(tx,m.oportunidad_id,u);await reiniciarTecnico(tx,o,u,`Nuevo ciclo en muestra ${id}`);}await tx.muestras.update({where:{id_Muestra:id},data:{estado_Muestra:'PENDIENTE'}});await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS',true);}
    await this.tiempos.evento(tx,this.ctx(id),num,'PLAN_PROCESOS',{usuario:u.usuario,procesos:ids,nuevoCiclo:nuevo});return {success:true};
   });this.avisar(id);return result;
  }
  async recibir(id:number,u:Usuario){
   const r=await this.prisma.$transaction(async tx=>{
-   await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
+   await this.bloquear(tx,id,u);
    const m=await this.muestra(tx,id,u);if(m.fecha_ingreso_laboratorio)return {success:true,repetida:true};
+   if(m.oportunidad_id){const o=await bloquearOportunidad(tx,m.oportunidad_id,u);await eventoCrm(tx,o,u,'RECEPCION_ID',`Recepción de muestra ${id}`);}
    const ahora=new Date();await tx.muestras.update({where:{id_Muestra:id},data:{fecha_ingreso_laboratorio:ahora}});
    await tx.id_ejecuciones.updateMany({where:{muestra_id:id,ciclo:1,orden:1,inicio:null},data:{disponible_desde:ahora}});
    await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS');await this.tiempos.evento(tx,this.ctx(id),1,'RECEPCION_LABORATORIO',{usuario:u.usuario});return {success:true};
@@ -114,7 +124,7 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
  }
  async proceso(id:number,ejecucion:number,accion:'iniciar'|'terminar',body:any,u:Usuario){
   const r=await this.prisma.$transaction(async tx=>{
-   await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
+   await this.bloquear(tx,id,u);
    const m=await this.muestra(tx,id,u);if(!m.fecha_ingreso_laboratorio)throw new BadRequestException('Registra la recepción primero');
    const ciclo=m.id_ejecuciones.at(-1)?.ciclo,lista=m.id_ejecuciones.filter(p=>p.ciclo===ciclo),p=lista.find(p=>p.id===ejecucion);
    if(!p)throw new NotFoundException('Proceso no pertenece al ciclo actual');
@@ -139,7 +149,7 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
  async finalizar(id:number,body:any,u:Usuario){
   if(!['APROBADO','RECHAZADO'].includes(body?.dictamen))throw new BadRequestException('Dictamen inválido');
   const r=await this.prisma.$transaction(async tx=>{
-   await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra"=${id} FOR UPDATE`;
+   await this.bloquear(tx,id,u);
    const m=await this.muestra(tx,id,u);
    if(['APROBADO','RECHAZADO'].includes(m.estado_Muestra))throw new BadRequestException('Ciclo ya finalizado');
    const ciclo=m.id_ejecuciones.at(-1)?.ciclo,lista=m.id_ejecuciones.filter(p=>p.ciclo===ciclo);

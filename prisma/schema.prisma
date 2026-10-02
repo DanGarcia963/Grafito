@@ -249,6 +249,7 @@ model muestras {
   ficha_nombre                             String?                    @db.VarChar(200)
   ficha_mime                               String?                    @db.VarChar(100)
   ficha_contenido                          Bytes?                     @db.ByteA
+  oportunidad_id                           Int?
   id_ejecuciones                           id_ejecuciones[]
   personas_muestras_analista_idTopersonas  personas?                  @relation("muestras_analista_idTopersonas", fields: [analista_id], references: [id_Persona], onDelete: Cascade, onUpdate: Restrict, map: "fk_muestras_personas_analista")
   personas_muestras_cliente_idTopersonas   personas?                  @relation("muestras_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_cliente_rel")
@@ -258,6 +259,7 @@ model muestras {
   equipos_tanques                          equipos_tanques?           @relation(fields: [tanque_id], references: [id_Equipos_Tanques], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_tanque_rel")
   personas_muestras_vendedor_idTopersonas  personas?                  @relation("muestras_vendedor_idTopersonas", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
   id_viabilidades                          id_viabilidades?           @relation(fields: [viabilidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  crm_oportunidades                        crm_oportunidades?          @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_oportunidad")
   resultado_analisis                       resultado_analisis[]
 
   @@index([analista_id], map: "idx_fk_muestra_analista")
@@ -269,6 +271,7 @@ model muestras {
   @@index([area_Muestra, vendedor_id])
   @@index([vendedor_id], map: "idx_muestras_vendedor_id_fkey")
   @@index([viabilidad_id], map: "idx_muestras_viabilidad_id_fkey")
+  @@index([oportunidad_id], map: "idx_muestras_oportunidad")
 }
 
 model no_conformidades {
@@ -320,6 +323,7 @@ model no_conformidades {
 model ordenes_produccion {
   id_Orden_Produc                                   Int                              @id @default(autoincrement())
   id_Venta_Origen                                   Int?
+  orden_venta_id                                    Int?
   vendedor_id                                       Int?
   cliente_id                                        Int?
   producto_id                                       Int
@@ -351,10 +355,12 @@ model ordenes_produccion {
   personas_ordenes_produccion_cliente_idTopersonas  personas?                        @relation("ordenes_produccion_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_ord_cliente")
   productos_materiales                              productos_materiales             @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Cascade, onUpdate: Restrict, map: "fk_ord_producto")
   personas_ordenes_produccion_vendedor_idTopersonas personas?                        @relation("ordenes_produccion_vendedor_idTopersonas", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_ord_vendedor")
+  crm_ordenes_venta                                 crm_ordenes_venta?                @relation(fields: [orden_venta_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_ord_orden_venta")
 
   @@index([cliente_id], map: "idx_fk_ord_cliente")
   @@index([producto_id], map: "idx_fk_ord_producto")
   @@index([vendedor_id], map: "idx_fk_ord_vendedor")
+  @@index([orden_venta_id], map: "idx_fk_ord_orden_venta")
 }
 
 model parametros_laboratorio {
@@ -409,6 +415,12 @@ model personas {
   solicitudes_analisis_desarrollo_solicitudes_analisis_desarrollo_cliente_idTopersonas              solicitudes_analisis_desarrollo[] @relation("solicitudes_analisis_desarrollo_cliente_idTopersonas")
   solicitudes_analisis_desarrollo_solicitudes_analisis_desarrollo_responsable_Analisis_idTopersonas solicitudes_analisis_desarrollo[] @relation("solicitudes_analisis_desarrollo_responsable_Analisis_idTopersonas")
   solicitudes_analisis_desarrollo_solicitudes_analisis_desarrollo_vendedor_idTopersonas             solicitudes_analisis_desarrollo[] @relation("solicitudes_analisis_desarrollo_vendedor_idTopersonas")
+  crm_perfil_comercial                                                                              crm_perfiles_comerciales?       @relation("crm_perfil_persona")
+  crm_perfiles_como_vendedor                                                                        crm_perfiles_comerciales[]      @relation("crm_perfil_vendedor")
+  crm_oportunidades_cliente                                                                         crm_oportunidades[]             @relation("crm_oportunidad_cliente")
+  crm_oportunidades_vendedor                                                                        crm_oportunidades[]             @relation("crm_oportunidad_vendedor")
+  crm_ordenes_venta_cliente                                                                         crm_ordenes_venta[]             @relation("crm_orden_venta_cliente")
+  crm_ordenes_venta_vendedor                                                                        crm_ordenes_venta[]             @relation("crm_orden_venta_vendedor")
 }
 
 model productos_materiales {
@@ -428,6 +440,8 @@ model productos_materiales {
   no_conformidades          no_conformidades[]
   ordenes_produccion        ordenes_produccion[]
   requisiciones_compra      requisiciones_compra[]
+  crm_oportunidades          crm_oportunidades[]
+  crm_ordenes_venta          crm_ordenes_venta[]
 }
 
 model proyecto_investigacion {
@@ -772,6 +786,176 @@ model tramites_legales {
   @@index([documento_ID], map: "idx_fk_tramite_documento")
 }
 
+model crm_perfiles_comerciales {
+  id                              Int                 @id @default(autoincrement())
+  persona_id                      Int                 @unique(map: "uq_crm_perfil_persona")
+  vendedor_responsable_id         Int?
+  estado_comercial                crm_estado_persona  @default(PROSPECTO)
+  nombre_contacto                 String?             @db.VarChar(150)
+  puesto_contacto                 String?             @db.VarChar(120)
+  correo                          String?             @db.VarChar(180)
+  telefono                        String?             @db.VarChar(60)
+  origen_prospecto                String?             @db.VarChar(120)
+  fecha_alta_prospecto            DateTime            @default(now())
+  fecha_primera_conversion        DateTime?
+  frecuencia_esperada_dias        Int?
+  frecuencia_esperada_descripcion String?             @db.VarChar(120)
+  observaciones                   String?             @db.Text
+  activo                          Boolean             @default(true)
+  creado_en                       DateTime            @default(now())
+  actualizado_en                  DateTime            @updatedAt
+  persona                         personas            @relation("crm_perfil_persona", fields: [persona_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+  vendedor_responsable            personas?           @relation("crm_perfil_vendedor", fields: [vendedor_responsable_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([estado_comercial, activo], map: "idx_crm_perfil_estado")
+  @@index([vendedor_responsable_id], map: "idx_crm_perfil_vendedor")
+  @@index([fecha_alta_prospecto], map: "idx_crm_perfil_alta")
+}
+
+model crm_oportunidades {
+  id                        Int                         @id @default(autoincrement())
+  folio                     String                      @unique(map: "uq_crm_oportunidad_folio") @db.VarChar(50)
+  persona_id                Int
+  vendedor_id               Int
+  producto_id               Int?
+  titulo                    String                      @db.VarChar(180)
+  necesidad                 String?                     @db.Text
+  cantidad_estimada         Decimal?                    @db.Decimal(14, 4)
+  unidad                    String?                     @db.VarChar(30)
+  etapa                     crm_oportunidad_etapa       @default(RECOLECCION_AGENDADA)
+  estado_tecnico            crm_oportunidad_estado_id   @default(PENDIENTE)
+  fecha_apertura            DateTime                    @default(now())
+  fecha_recoleccion_agendada DateTime?
+  proximo_contacto          DateTime?
+  fecha_cierre              DateTime?
+  motivo_cierre             String?                     @db.Text
+  version                   Int                         @default(1)
+  creado_por                String?                     @db.VarChar(100)
+  creado_en                 DateTime                    @default(now())
+  actualizado_en            DateTime                    @updatedAt
+  cliente                   personas                    @relation("crm_oportunidad_cliente", fields: [persona_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+  vendedor                  personas                    @relation("crm_oportunidad_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+  producto                  productos_materiales?       @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict, onUpdate: Restrict)
+  muestras                  muestras[]
+  historial                 crm_oportunidad_historial[]
+  reportes_id               id_reportes_oportunidad[]
+  cotizaciones              crm_cotizaciones[]
+  orden_venta               crm_ordenes_venta?
+
+  @@index([persona_id, fecha_apertura], map: "idx_crm_oportunidad_cliente")
+  @@index([vendedor_id, etapa], map: "idx_crm_oportunidad_vendedor_etapa")
+  @@index([producto_id], map: "idx_crm_oportunidad_producto")
+  @@index([etapa, fecha_apertura], map: "idx_crm_oportunidad_etapa_fecha")
+  @@index([estado_tecnico], map: "idx_crm_oportunidad_estado_tecnico")
+}
+
+model crm_oportunidad_historial {
+  id                      Int                              @id @default(autoincrement())
+  oportunidad_id          Int
+  accion                  crm_oportunidad_historial_accion
+  etapa_anterior          crm_oportunidad_etapa?
+  etapa_nueva             crm_oportunidad_etapa?
+  estado_tecnico_anterior crm_oportunidad_estado_id?
+  estado_tecnico_nuevo    crm_oportunidad_estado_id?
+  nota                    String?                          @db.Text
+  proximo_contacto        DateTime?
+  realizado_por           String                           @db.VarChar(100)
+  realizado_en            DateTime                         @default(now())
+  oportunidad             crm_oportunidades                @relation(fields: [oportunidad_id], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([oportunidad_id, realizado_en], map: "idx_crm_oportunidad_historial")
+  @@index([accion, realizado_en], map: "idx_crm_historial_accion")
+}
+
+model id_reportes_oportunidad {
+  id                 Int                  @id @default(autoincrement())
+  oportunidad_id     Int
+  version            Int
+  estado             id_reporte_estado    @default(BORRADOR)
+  resultado          id_reporte_resultado
+  resumen            String?              @db.Text
+  observaciones      String?              @db.Text
+  nombre_archivo     String?              @db.VarChar(255)
+  tipo_mime          String?              @db.VarChar(150)
+  contenido          Bytes?               @db.ByteA
+  creado_por         String               @db.VarChar(100)
+  creado_en          DateTime             @default(now())
+  publicado_por      String?              @db.VarChar(100)
+  publicado_en       DateTime?
+  anulado_en         DateTime?
+  motivo_anulacion   String?              @db.Text
+  oportunidad        crm_oportunidades    @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([oportunidad_id, version], map: "uq_id_reporte_oportunidad_version")
+  @@index([estado, publicado_en], map: "idx_id_reporte_estado_publicacion")
+}
+
+model crm_cotizaciones {
+  id                    Int                    @id @default(autoincrement())
+  oportunidad_id        Int
+  version               Int
+  folio                 String?                @unique(map: "uq_crm_cotizacion_folio") @db.VarChar(60)
+  estado                crm_cotizacion_estado  @default(BORRADOR)
+  moneda                crm_moneda             @default(MXN)
+  subtotal              Decimal?               @db.Decimal(18, 2)
+  impuestos             Decimal?               @db.Decimal(18, 2)
+  total                 Decimal                @db.Decimal(18, 2)
+  vigencia_hasta        DateTime?              @db.Date
+  condiciones_comerciales String?              @db.Text
+  partidas_json         String?                @db.Text
+  notas                 String?                @db.Text
+  nombre_archivo        String?                @db.VarChar(255)
+  tipo_mime             String?                @db.VarChar(150)
+  contenido             Bytes?                 @db.ByteA
+  creado_por            String                 @db.VarChar(100)
+  creado_en             DateTime               @default(now())
+  enviado_en            DateTime?
+  aceptado_en           DateTime?
+  rechazado_en          DateTime?
+  oportunidad           crm_oportunidades      @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  orden_venta           crm_ordenes_venta?
+
+  @@unique([oportunidad_id, version], map: "uq_crm_cotizacion_oportunidad_version")
+  @@index([oportunidad_id, estado], map: "idx_crm_cotizacion_oportunidad_estado")
+  @@index([estado, vigencia_hasta], map: "idx_crm_cotizacion_estado_vigencia")
+}
+
+model crm_ordenes_venta {
+  id                    Int                     @id @default(autoincrement())
+  folio                 String                  @unique(map: "uq_crm_orden_venta_folio") @db.VarChar(60)
+  oportunidad_id        Int                     @unique(map: "uq_crm_orden_venta_oportunidad")
+  cotizacion_id         Int                     @unique(map: "uq_crm_orden_venta_cotizacion")
+  persona_id            Int
+  vendedor_id           Int
+  producto_id           Int?
+  orden_cliente         String?                 @db.VarChar(100)
+  cantidad              Decimal?                @db.Decimal(14, 4)
+  unidad                String?                 @db.VarChar(30)
+  moneda                crm_moneda              @default(MXN)
+  importe_total         Decimal                 @db.Decimal(18, 2)
+  tipo_compra           crm_tipo_compra
+  estado                crm_orden_venta_estado  @default(CONFIRMADA)
+  fecha_confirmacion    DateTime                @default(now())
+  fecha_compromiso      DateTime?               @db.Date
+  fecha_cancelacion     DateTime?
+  motivo_cancelacion    String?                 @db.Text
+  observaciones         String?                 @db.Text
+  creado_por            String                  @db.VarChar(100)
+  creado_en             DateTime                @default(now())
+  actualizado_en        DateTime                @updatedAt
+  oportunidad           crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cotizacion            crm_cotizaciones        @relation(fields: [cotizacion_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cliente               personas                @relation("crm_orden_venta_cliente", fields: [persona_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+  vendedor              personas                @relation("crm_orden_venta_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+  producto              productos_materiales?   @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict, onUpdate: Restrict)
+  ordenes_produccion    ordenes_produccion[]
+
+  @@index([persona_id, fecha_confirmacion], map: "idx_crm_orden_venta_cliente_fecha")
+  @@index([vendedor_id, fecha_confirmacion], map: "idx_crm_orden_venta_vendedor_fecha")
+  @@index([estado, fecha_confirmacion], map: "idx_crm_orden_venta_estado_fecha")
+  @@index([producto_id], map: "idx_crm_orden_venta_producto")
+}
+
 model id_ejecuciones {
   id                Int         @id @default(autoincrement())
   muestra_id        Int
@@ -809,6 +993,88 @@ model id_viabilidades {
   nombre   String     @unique @db.VarChar(100)
   activo   Boolean    @default(true)
   muestras muestras[]
+}
+
+enum crm_estado_persona {
+  PROSPECTO
+  CLIENTE
+  INACTIVO
+}
+
+enum crm_oportunidad_etapa {
+  RECOLECCION_AGENDADA
+  EN_ANALISIS_ID
+  COTIZACION
+  SEGUIMIENTO_COTIZACION
+  GANADA
+  PERDIDA
+  CANCELADA
+}
+
+enum crm_oportunidad_estado_id {
+  PENDIENTE
+  EN_ANALISIS
+  VIABLE
+  NO_VIABLE
+  REQUIERE_NUEVA_MUESTRA
+}
+
+enum crm_oportunidad_historial_accion {
+  CREACION
+  SEGUIMIENTO
+  CAMBIO_ETAPA
+  MUESTRA_ASOCIADA
+  RECEPCION_ID
+  REPORTE_ID_PUBLICADO
+  REPORTE_ID_ANULADO
+  COTIZACION_CREADA
+  COTIZACION_ENVIADA
+  COTIZACION_ACEPTADA
+  COTIZACION_RECHAZADA
+  CIERRE_GANADA
+  CIERRE_PERDIDA
+  CANCELACION
+  REAPERTURA
+}
+
+enum id_reporte_estado {
+  BORRADOR
+  PUBLICADO
+  ANULADO
+}
+
+enum id_reporte_resultado {
+  VIABLE
+  NO_VIABLE
+  REQUIERE_NUEVA_MUESTRA
+}
+
+enum crm_cotizacion_estado {
+  BORRADOR
+  ENVIADA
+  ACEPTADA
+  RECHAZADA
+  VENCIDA
+  CANCELADA
+}
+
+enum crm_moneda {
+  MXN
+  USD
+  EUR
+}
+
+enum crm_tipo_compra {
+  PRIMERA_COMPRA
+  RECOMPRA
+}
+
+enum crm_orden_venta_estado {
+  BORRADOR
+  CONFIRMADA
+  EN_PRODUCCION
+  COMPLETADA
+  CANCELADA
 }
 
 enum no_conformidades_tipo {
