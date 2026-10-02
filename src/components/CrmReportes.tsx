@@ -39,7 +39,7 @@ export default function CrmReportes({
     try {
       await fn();
       await cargar();
-      setMensaje("Reporte actualizado");
+      setMensaje("Información actualizada");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally {
@@ -74,6 +74,10 @@ export default function CrmReportes({
             reporte viable habilita la cotización. Publicar una nueva versión
             invalida las cotizaciones anteriores.
           </p>
+          {["PERDIDA", "CANCELADA"].includes(o.etapa) && <p className="text-sm">
+            La oportunidad está cerrada comercialmente. Puedes terminar el análisis y publicar
+            su reporte; esto conserva el cierre y no habilita una cotización.
+          </p>}
           <ul>
             {o.muestras.map((m: any) => (
               <li key={m.id_Muestra}>
@@ -81,7 +85,7 @@ export default function CrmReportes({
               </li>
             ))}
           </ul>
-          {!["GANADA", "PERDIDA", "CANCELADA"].includes(o.etapa) && (
+          {o.etapa !== "GANADA" && (
             <form
               className="grid gap-3"
               onSubmit={(e) => {
@@ -160,7 +164,7 @@ export default function CrmReportes({
                 </button>
               )}
               {r.estado === "PUBLICADO" &&
-                !["GANADA", "PERDIDA", "CANCELADA"].includes(o.etapa) && (
+                o.etapa !== "GANADA" && (
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
