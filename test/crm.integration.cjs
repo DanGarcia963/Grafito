@@ -360,6 +360,52 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       seller,
     );
     assert.equal((await crm.metricas(seller, {})).data.efectividad, 50);
+    // El cierre comercial no interrumpe un ciclo técnico pendiente.
+    const enCurso = (await id.detalle(m4, lab)).data.procesos_id.at(-1);
+    await id.proceso(m4, enCurso.id, 'iniciar', {}, lab);
+    await id.proceso(m4, enCurso.id, 'terminar', { resultado: 'Conforme' }, lab);
+    await id.finalizar(m4, { dictamen: 'APROBADO' }, lab);
+    await report(o3.id);
+    assert.equal((await crm.detalle(o3.id, seller)).data.etapa, 'PERDIDA');
+    await assert.rejects(quote(o3.id), (e) => e.status === 409);
+    await id.planificar(m4, { procesos: [proc.id], nuevoCiclo: true }, lab);
+    assert.equal((await crm.detalle(o3.id, seller)).data.etapa, 'PERDIDA');
+    assert.equal(await p.id_reportes_oportunidad.count({
+      where: { oportunidad_id: o3.id, estado: 'PUBLICADO' },
+    }), 0);
+
+    // Recepción, dictamen y reporte siguen disponibles después de cancelar.
+    const o4 = await open(), m5 = await sample(o4.id);
+    await crm.guardar(o4.id, {
+      version: await version(o4.id), etapa: 'CANCELADA', nota: 'Cancelación comercial',
+    }, seller);
+    await finish(m5);
+    await report(o4.id);
+    const cerrada = (await crm.detalle(o4.id, seller)).data;
+    assert.equal(cerrada.etapa, 'CANCELADA');
+    assert.equal(cerrada.muestras[0].estado_Muestra, 'APROBADO');
+    assert.equal(await p.proceso_tramos.count({
+      where: { entidad: 'MUESTRA_ID', entidad_id: m5, fin: null },
+    }), 0);
+    await crm.anularReporte(o4.id, cerrada.reportes_id[0].id, {
+      version: cerrada.version, motivo: 'Corrección documental',
+    }, lab);
+    assert.equal((await crm.detalle(o4.id, seller)).data.etapa, 'CANCELADA');
+
+    // Muestras históricas sin oportunidad conservan sus ciclos y sus tiempos.
+    const o5 = await open(), m6 = await sample(o5.id);
+    await p.muestras.update({ where: { id_Muestra: m6 }, data: { oportunidad_id: null } });
+    await finish(m6);
+    const historialAntes = await p.id_ejecuciones.findMany({ where: { muestra_id: m6 } });
+    await id.planificar(m6, { procesos: [proc.id], nuevoCiclo: true }, lab);
+    await crm.asociar(o5.id, { version: await version(o5.id), muestra_id: m6 }, seller);
+    const procesoHistorico = (await id.detalle(m6, lab)).data.procesos_id.at(-1);
+    await id.proceso(m6, procesoHistorico.id, 'iniciar', {}, lab);
+    await id.proceso(m6, procesoHistorico.id, 'terminar', { resultado: 'Verificado' }, lab);
+    await id.finalizar(m6, { dictamen: 'APROBADO' }, lab);
+    await report(o5.id);
+    assert.deepEqual(await p.id_ejecuciones.findMany({ where: { muestra_id: m6, ciclo: 1 } }), historialAntes);
+    assert.equal((await crm.detalle(o5.id, seller)).data.etapa, 'COTIZACION');
     console.log('Flujo completo validado con Prisma y PostgreSQL en memoria');
   } finally {
     await p.$disconnect();

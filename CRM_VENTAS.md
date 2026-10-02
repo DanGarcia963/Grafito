@@ -15,6 +15,22 @@ No requiere ejecutar `db push`, reiniciar Supabase ni recrear tablas.
 8. **Órdenes de venta → Enviar a producción** crea una OP vinculada. El esquema de producción admite cantidades enteras; las comerciales conservan cuatro decimales. Se muestran estado de planeación y etapa de flujo de las OP.
 9. La siguiente necesidad de compra abre otra oportunidad para la misma persona. Repeticiones del análisis para la misma necesidad permanecen en su oportunidad original.
 
+## Continuidad del trabajo de ID
+
+El cierre comercial PERDIDA o CANCELADA no detiene recepción, planificación,
+ejecución, dictamen ni reanálisis de muestras ya registradas. ID puede publicar o
+anular el reporte pendiente; la oportunidad conserva su cierre y no habilita una
+cotización. Abrir un nuevo ciclo invalida el reporte anterior y las cotizaciones,
+sin borrar los tiempos ni los resultados de ciclos anteriores.
+
+Una oportunidad GANADA conserva el reporte que respalda la venta. Para una nueva
+necesidad se abre otra oportunidad con su muestra; no se modifica retroactivamente
+el análisis de una venta confirmada. Las muestras históricas sin oportunidad
+mantienen su flujo técnico completo y pueden vincularse durante el análisis.
+
+Las citas y próximos contactos se envían con la zona horaria del navegador,
+evitando interpretar la hora local del vendedor como UTC.
+
 ## Históricos
 
 Las muestras y bitácoras anteriores no se eliminan ni se convierten automáticamente en ventas confirmadas. Desde una oportunidad, **Vincular muestra anterior** permite asociar una muestra sin oportunidad de la misma cuenta y vendedor. Su historial técnico queda intacto. Los eventos antiguos de CRM en `proceso_eventos` permanecen conservados.
@@ -38,6 +54,11 @@ Ventas sólo consulta y modifica sus oportunidades/órdenes; ID accede al análi
 `POST /api/ventas/crear` ahora requiere `oportunidad_id`, `cotizacion_id`, `version` y `orden_cliente`, y confirma una orden comercial. La OP se crea mediante `/api/ventas/crm/ordenes/:id/produccion`. No se mantiene el atajo antiguo que podía crear clientes y producción sin aceptación comercial.
 
 ## Validación y despliegue
+
+Las pruebas incluyen oportunidades perdidas durante un reanálisis, canceladas
+antes de recepción y muestras históricas vinculadas a mitad del segundo ciclo.
+Comprueban que se puede terminar el trabajo, cerrar los tramos de tiempo y publicar
+el reporte sin reabrir la venta ni alterar los tiempos anteriores.
 
 Backend:
 

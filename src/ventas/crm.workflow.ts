@@ -71,7 +71,8 @@ export async function reiniciarTecnico(
   u: Usuario,
   nota: string,
 ) {
-  abierta(o);
+  if (o.etapa === 'GANADA')
+    throw new ConflictException('La venta ya fue confirmada. Registra una nueva oportunidad para otro análisis comercial');
   await tx.id_reportes_oportunidad.updateMany({
     where: { oportunidad_id: o.id, estado: 'PUBLICADO' },
     data: { estado: 'ANULADO', anulado_en: new Date(), motivo_anulacion: nota },
@@ -84,7 +85,7 @@ export async function reiniciarTecnico(
     data: { estado: 'CANCELADA' },
   });
   return eventoCrm(tx, o, u, 'MUESTRA_ASOCIADA', nota, {
-    etapa: 'EN_ANALISIS_ID',
+    ...(cerradas.includes(o.etapa) ? {} : { etapa: 'EN_ANALISIS_ID' as const }),
     estado_tecnico: 'EN_ANALISIS',
   });
 }
