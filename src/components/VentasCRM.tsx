@@ -1,676 +1,1072 @@
 "use client";
-
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowRight,
-  CalendarClock,
-  CheckCircle2,
-  FlaskConical,
-  LogOut,
-  Plus,
-  RefreshCw,
-  Search,
-  TrendingUp,
-  X,
-} from "lucide-react";
+import { Plus, RefreshCw, LogOut } from "lucide-react";
 import { API_URL, apiFetch, pedir, sesionActual } from "@/utils/api";
 import { useSocket } from "@/context/SocketContext";
 import MuestrasID from "./MuestrasID";
-import styles from "./VentasCRM.module.css";
-
-const etapas = [
-  { id: "RECOLECCION", nombre: "Recolección", tono: "blue" },
-  { id: "EN_ANALISIS", nombre: "En análisis", tono: "amber" },
-  { id: "COTIZACION", nombre: "Cotización", tono: "violet" },
-  { id: "VENTA_ASEGURADA", nombre: "Venta asegurada", tono: "green" },
-  { id: "VENTA_NO_ASEGURADA", nombre: "Venta no asegurada", tono: "rose" },
-] as const;
-type Etapa = (typeof etapas)[number]["id"];
-type Oportunidad = {
-  id: number;
-  folio: string | null;
-  cliente: string | null;
-  producto: string;
-  cantidad: string | null;
-  unidad: string | null;
-  estadoLaboratorio: string;
-  recoleccion: string | null;
-  ingresoLaboratorio: string | null;
-  etapa: Etapa;
-  version: number;
-  nota: string | null;
-  proximoContacto: string | null;
-  actualizado: string | null;
+import { descargarCrm } from "./CrmReportes";
+import s from "./VentasCRM.module.css";
+const base = "/api/ventas/crm",
+  etapas = [
+    "RECOLECCION_AGENDADA",
+    "EN_ANALISIS_ID",
+    "COTIZACION",
+    "SEGUIMIENTO_COTIZACION",
+    "GANADA",
+    "PERDIDA",
+    "CANCELADA",
+  ];
+const nombre = (x: string) => x.replaceAll("_", " "),
+  fecha = (x: string | null) => (x ? new Date(x).toLocaleString("es-MX") : "—");
+const dinero = (x: string, m: string) =>
+  new Intl.NumberFormat("es-MX", { style: "currency", currency: m }).format(
+    Number(x),
+  );
+type Field = {
+  name: string;
+  label: string;
+  type?: string;
+  required?: boolean;
+  options?: { value: string | number; label: string }[];
+  value?: string | number;
 };
-type Historial = {
-  id: number;
-  fecha: string;
-  etapa: Etapa;
-  etapaAnterior: Etapa;
-  nota: string;
-  usuario: string;
-  proximoContacto: string | null;
-};
-type Respuesta = {
-  data: Oportunidad[];
-  pagina: number;
-  tamanoPagina: number;
-  total: number;
-  resumen: {
-    total: number;
-    aseguradas: number;
-    noAseguradas: number;
-    abiertas: number;
-    conversion: number;
-    porEtapa: Partial<Record<Etapa, number>>;
-  };
-};
-const fecha = (value: string | null) =>
-  value ? new Date(value).toLocaleString("es-MX") : "Sin registrar";
-const nombreEtapa = (value: Etapa) =>
-  etapas.find((e) => e.id === value)?.nombre ?? value;
-const fechaInput = (value: string | null) => {
-  if (!value) return "";
-  const d = new Date(value);
-  return new Date(+d - d.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-};
-const ruta = "/api/ventas/crm/oportunidades";
-
+function Form({
+  title,
+  fields,
+  onSave,
+  busy,
+  onClose,
+}: {
+  title: string;
+  fields: Field[];
+  onSave: (d: FormData) => Promise<unknown>;
+  busy: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <section className={s.panel}>
+      <div className={s.actions}>
+        <h2>{title}</h2>
+        <button onClick={onClose}>Cerrar formulario</button>
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onSave(new FormData(e.currentTarget));
+        }}
+      >
+        <fieldset disabled={busy} className={s.formFields}>
+          {fields.map((f) => (
+            <label key={f.name}>
+              {f.label}
+              {f.options ? (
+                <select
+                  name={f.name}
+                  required={f.required}
+                  defaultValue={f.value ?? ""}
+                >
+                  {f.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : f.type === "textarea" ? (
+                <textarea
+                  name={f.name}
+                  required={f.required}
+                  defaultValue={f.value}
+                />
+              ) : (
+                <input
+                  name={f.name}
+                  type={f.type ?? "text"}
+                  required={f.required}
+                  defaultValue={f.value}
+                  step={f.type === "number" ? "any" : undefined}
+                  accept={f.type === "file" ? ".pdf,.doc,.docx" : undefined}
+                />
+              )}
+            </label>
+          ))}
+          <button className={s.primary} type="submit">
+            {busy ? "Guardando…" : "Guardar y confirmar"}
+          </button>
+        </fieldset>
+      </form>
+    </section>
+  );
+}
 export default function VentasCRM() {
   const router = useRouter(),
     socket = useSocket();
-  const [usuario, setUsuario] = useState<string | null>(null),
+  const [user, setUser] = useState<any>(null),
+    [vista, setVista] = useState("oportunidades"),
     [error, setError] = useState(""),
-    [mensaje, setMensaje] = useState("");
-  const [filtros, setFiltros] = useState({
-      q: "",
-      desde: "",
-      hasta: "",
-      etapa: "",
-    }),
-    [aplicados, setAplicados] = useState(filtros),
+    [mensaje, setMensaje] = useState(""),
+    [busy, setBusy] = useState(false);
+  const [lista, setLista] = useState<any[]>([]),
+    [total, setTotal] = useState(0),
     [pagina, setPagina] = useState(1),
-    [revision, setRevision] = useState(0);
-  const [respuesta, setRespuesta] = useState<Respuesta | null>(null),
-    [cargando, setCargando] = useState(true);
-  const [registro, setRegistro] = useState(false),
-    [seleccion, setSeleccion] = useState<number | null>(null),
-    [detalle, setDetalle] = useState<Oportunidad | null>(null),
-    [historial, setHistorial] = useState<Historial[]>([]);
-  const [etapa, setEtapa] = useState<Etapa>("RECOLECCION"),
-    [nota, setNota] = useState(""),
-    [contacto, setContacto] = useState(""),
-    [guardando, setGuardando] = useState(false),
-    [cargandoDetalle, setCargandoDetalle] = useState(false),
-    [revisionDetalle, setRevisionDetalle] = useState(0),
-    [tecnico, setTecnico] = useState(false);
-  const panel = useRef<HTMLElement>(null);
+    [cuentas, setCuentas] = useState<any[]>([]),
+    [ordenes, setOrdenes] = useState<any[]>([]),
+    [metricas, setMetricas] = useState<any>(null);
+  const [q, setQ] = useState(""),
+    [etapa, setEtapa] = useState(""),
+    [desde, setDesde] = useState(""),
+    [hasta, setHasta] = useState("");
+  const [detalle, setDetalle] = useState<any>(null),
+    [cuenta, setCuenta] = useState<any>(null),
+    [form, setForm] = useState(""),
+    [registro, setRegistro] = useState(false),
+    [muestra, setMuestra] = useState<number>(),
+    [cot, setCot] = useState<any>(null),
+    [ov, setOv] = useState<any>(null);
+  const [productos, setProductos] = useState<any[]>([]),
+    [productoQ, setProductoQ] = useState("");
   useEffect(() => {
-    const controller = new AbortController();
-    if (!sesionActual()?.token) {
+    const u = sesionActual();
+    if (u?.area !== "ventas" || !u.token) {
       router.replace("/");
       return;
     }
-    apiFetch(`${API_URL}/api/auth/sesion`, { signal: controller.signal })
-      .then(async (r) => {
-        if (!r.ok) throw new Error("No fue posible verificar tu sesión.");
-        const u = await r.json();
-        if (u.area !== "ventas") {
-          router.replace("/");
-          return;
-        }
-        setUsuario(u.usuario);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
-      });
-    return () => controller.abort();
+    setUser(u);
   }, [router]);
-  const refrescar = useCallback(() => setRevision((v) => v + 1), []);
-  useEffect(() => {
-    const eventos = [
-      "connect",
-      "ID_MUESTRA_ACTUALIZADA",
-      "CRM_OPORTUNIDAD_ACTUALIZADA",
-    ];
-    eventos.forEach((e) => socket?.on(e, refrescar));
-    return () => eventos.forEach((e) => socket?.off(e, refrescar));
-  }, [socket, refrescar]);
-  useEffect(() => {
-    if (!usuario) return;
-    const controller = new AbortController(),
-      q = new URLSearchParams({ pagina: String(pagina) });
-    Object.entries(aplicados).forEach(([k, v]) => {
-      if (v) q.set(k, v);
+  const cargar = useCallback(async () => {
+    const qs = new URLSearchParams({
+      q,
+      etapa,
+      desde,
+      hasta,
+      pagina: String(pagina),
     });
-    setCargando(true);
-    setError("");
-    apiFetch(`${API_URL}${ruta}?${q}`, { signal: controller.signal })
-      .then(async (r) => {
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.message || "No se pudo cargar el CRM.");
-        setRespuesta(d);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) {
-          setRespuesta(null);
-          setError(e.message);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setCargando(false);
-      });
-    return () => controller.abort();
-  }, [usuario, aplicados, pagina, revision]);
+    const [l, c, v, m] = await Promise.all([
+      pedir(`${base}/oportunidades?${qs}`, undefined, "GET"),
+      pedir(`${base}/cuentas?q=${encodeURIComponent(q)}`, undefined, "GET"),
+      pedir(`${base}/ordenes`, undefined, "GET"),
+      pedir(`${base}/metricas?desde=${desde}&hasta=${hasta}`, undefined, "GET"),
+    ]);
+    setLista(l.data);
+    setTotal(l.total);
+    setCuentas(c.data);
+    setOrdenes(v.data);
+    setMetricas(m.data);
+  }, [q, etapa, desde, hasta, pagina]);
   useEffect(() => {
-    if (!seleccion || !usuario) return;
-    const controller = new AbortController();
-    setCargandoDetalle(true);
-    setDetalle(null);
-    setError("");
-    apiFetch(`${API_URL}${ruta}/${seleccion}`, { signal: controller.signal })
-      .then(async (r) => {
-        const d = await r.json();
-        if (!r.ok)
-          throw new Error(d.message || "No se pudo cargar el detalle.");
-        setDetalle(d.data);
-        setHistorial(d.historial);
-        setEtapa(d.data.etapa);
-        setContacto(fechaInput(d.data.proximoContacto));
-        setNota("");
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setCargandoDetalle(false);
-      });
-    panel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    panel.current?.focus({ preventScroll: true });
-    return () => controller.abort();
-  }, [seleccion, usuario, revisionDetalle]);
-  const abrir = (id: number) => {
+    if (user) void cargar().catch((e) => setError(e.message));
+  }, [user, cargar]);
+  useEffect(() => {
+    const f = () => void cargar().catch((e) => setError(e.message));
+    socket?.on("CRM_OPORTUNIDAD_ACTUALIZADA", f);
+    socket?.on("ID_MUESTRA_ACTUALIZADA", f);
+    return () => {
+      socket?.off("CRM_OPORTUNIDAD_ACTUALIZADA", f);
+      socket?.off("ID_MUESTRA_ACTUALIZADA", f);
+    };
+  }, [socket, cargar]);
+  const abrir = async (id: number) => {
+    const r = await pedir(`${base}/oportunidades/${id}`, undefined, "GET");
+    setDetalle(r.data);
+    setForm("");
     setRegistro(false);
-    setTecnico(false);
-    setMensaje("");
-    setSeleccion(id);
-    setRevisionDetalle((v) => v + 1);
+    setMuestra(undefined);
   };
-  const guardar = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!detalle || guardando) return;
-    setGuardando(true);
+  const verCuenta = async (id: number) => {
+    const r = await pedir(`${base}/cuentas/${id}`, undefined, "GET");
+    setCuenta(r.data);
+  };
+  const ejecutar = async (
+    fn: () => Promise<unknown>,
+    msg = "Guardado correctamente",
+  ) => {
+    if (busy) return;
+    setBusy(true);
     setError("");
     setMensaje("");
     try {
-      await pedir(`${ruta}/${detalle.id}/seguimiento`, {
-        version: detalle.version,
-        etapaActual: detalle.etapa,
-        etapa,
-        nota,
-        proximoContacto: contacto ? new Date(contacto).toISOString() : null,
-      });
-      setMensaje("Seguimiento guardado.");
-      setRevisionDetalle((v) => v + 1);
-      refrescar();
+      await fn();
+      await cargar();
+      if (detalle) {
+        const r = await pedir(
+          `${base}/oportunidades/${detalle.id}`,
+          undefined,
+          "GET",
+        );
+        setDetalle((actual: any) =>
+          actual?.id === detalle.id ? r.data : actual,
+        );
+      }
+      setMensaje(msg);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No fue posible guardar.");
+      setError(e instanceof Error ? e.message : "Error de conexión");
     } finally {
-      setGuardando(false);
+      setBusy(false);
     }
   };
-  const salir = async () => {
-    try {
-      await pedir("/api/auth/salir", {});
-    } catch {
-    } finally {
-      localStorage.removeItem("sesion");
-      window.dispatchEvent(new Event("sesion-cambiada"));
-      router.replace("/");
-    }
-  };
-  if (!usuario)
-    return (
-      <main className={styles.app}>
-        <p role={error ? "alert" : "status"}>
-          {error || "Verificando sesión…"}
-        </p>
-        <button onClick={() => router.replace("/")}>Volver al inicio</button>
-      </main>
-    );
-  const resumen = respuesta?.resumen;
+  const field = (
+    name: string,
+    label: string,
+    type = "text",
+    required = false,
+    value?: string | number,
+  ): Field => ({ name, label, type, required, value });
+  const select = (
+    name: string,
+    label: string,
+    options: { value: string | number; label: string }[],
+    value?: string | number,
+  ): Field => ({ name, label, options, value, required: true });
+  const opts = (xs: string[]) =>
+    xs.map((x) => ({ value: x, label: nombre(x) }));
+  let fields: Field[] = [],
+    title = "";
+  if (form === "cuenta") {
+    title = "Perfil comercial permanente";
+    fields = [
+      field(
+        "nombre",
+        "Empresa / persona",
+        "text",
+        true,
+        cuenta?.persona.nombre,
+      ),
+      ...[
+        "nombre_contacto",
+        "puesto_contacto",
+        "correo",
+        "telefono",
+        "origen_prospecto",
+        "frecuencia_esperada_dias",
+        "frecuencia_esperada_descripcion",
+        "observaciones",
+      ].map((n) =>
+        field(
+          n,
+          nombre(n),
+          n === "correo"
+            ? "email"
+            : n === "frecuencia_esperada_dias"
+              ? "number"
+              : "text",
+          false,
+          cuenta?.persona.crm_perfil_comercial?.[n] ?? "",
+        ),
+      ),
+    ];
+  }
+  if (form === "oportunidad") {
+    title = "Nueva oportunidad · Recolección agendada";
+    fields = [
+      select(
+        "persona_id",
+        "Prospecto / cliente",
+        [
+          { value: "", label: "Seleccionar cuenta" },
+          ...cuentas.map((c) => ({ value: c.id_Persona, label: c.nombre })),
+        ],
+        cuenta?.persona.id_Persona,
+      ),
+      field("titulo", "Título / necesidad de compra", "text", true),
+      field("necesidad", "Descripción", "textarea"),
+      field(
+        "fecha_recoleccion_agendada",
+        "Recolección agendada",
+        "datetime-local",
+        true,
+      ),
+      field("proximo_contacto", "Próximo contacto", "datetime-local"),
+      field("cantidad_estimada", "Cantidad estimada", "number"),
+      field("unidad", "Unidad"),
+      {
+        name: "producto_id",
+        label: "Producto (opcional)",
+        options: [
+          { value: "", label: "Definir después" },
+          ...productos.map((p) => ({
+            value: p.id_Produc_Mater,
+            label: p.nombre_Producto,
+          })),
+        ],
+      },
+    ];
+  }
+  if (form === "seguimiento") {
+    title = "Seguimiento o cierre de oportunidad";
+    fields = [
+      select("etapa", "Acción", [
+        { value: detalle.etapa, label: "Registrar seguimiento" },
+        ...opts(["PERDIDA", "CANCELADA"]),
+      ]),
+      field("nota", "Nota / motivo de cierre", "textarea", true),
+      field("proximo_contacto", "Próximo contacto", "datetime-local"),
+      field(
+        "fecha_recoleccion_agendada",
+        "Reagendar recolección (opcional)",
+        "datetime-local",
+      ),
+    ];
+  }
+  if (form === "asociar") {
+    title = "Vincular muestra histórica de esta cuenta y vendedor";
+    fields = [
+      field("muestra_id", "ID de muestra sin oportunidad", "number", true),
+    ];
+  }
+  if (form === "cotizacion") {
+    title = "Nueva versión de cotización";
+    fields = [
+      select("moneda", "Moneda", opts(["MXN", "USD", "EUR"])),
+      field("subtotal", "Subtotal", "number"),
+      field("impuestos", "Impuestos", "number"),
+      field("total", "Total", "number", true),
+      field("vigencia_hasta", "Vigencia", "date", true),
+      field(
+        "condiciones_comerciales",
+        "Condiciones comerciales",
+        "textarea",
+        true,
+      ),
+      field("notas", "Notas", "textarea"),
+      field("documento", "Documento Word / PDF (hasta 10 MB)", "file"),
+    ];
+  }
+  if (form === "estadoCotizacion") {
+    title = `Registrar envío / respuesta · Cotización v${cot.version}`;
+    fields = [
+      select(
+        "estado",
+        "Estado",
+        opts(
+          cot.estado === "BORRADOR" ? ["ENVIADA"] : ["ACEPTADA", "RECHAZADA"],
+        ),
+      ),
+      field(
+        "nota",
+        "Evidencia / nota del envío o aceptación",
+        "textarea",
+        true,
+      ),
+      field("proximo_contacto", "Próximo contacto", "datetime-local"),
+    ];
+  }
+  if (form === "confirmar") {
+    title = `Confirmar compra: ${dinero(cot.total, cot.moneda)} · Cotización v${cot.version}`;
+    fields = [
+      field(
+        "orden_cliente",
+        "Orden de compra / referencia de aceptación",
+        "text",
+        true,
+      ),
+      field(
+        "cantidad",
+        "Cantidad",
+        "number",
+        false,
+        detalle.cantidad_estimada ?? "",
+      ),
+      field("unidad", "Unidad", "text", false, detalle.unidad ?? ""),
+      field("fecha_compromiso", "Fecha compromiso", "date"),
+      field("observaciones", "Observaciones", "textarea"),
+    ];
+  }
+  if (form === "produccion") {
+    title = `Enviar orden #${ov.id} a producción`;
+    fields = [
+      ...(!ov.producto_id
+        ? [field("producto_id", "ID del producto", "number", true)]
+        : []),
+      field(
+        "cantidad",
+        "Cantidad a producción (entera)",
+        "number",
+        true,
+        ov.cantidad ?? "",
+      ),
+      field("servicio", "Servicio", "text", true),
+      field("linea_Produccion", "Línea de producción"),
+    ];
+  }
+  if (form === "cancelarOrden") {
+    title = `Cancelar orden #${ov.id} (queda excluida de métricas de compra)`;
+    fields = [field("motivo", "Motivo de cancelación", "textarea", true)];
+  }
+  const guardar = (d: FormData) =>
+    ejecutar(async () => {
+      const b: any = Object.fromEntries(d.entries());
+      if (!b.fecha_recoleccion_agendada && form === "seguimiento")
+        delete b.fecha_recoleccion_agendada;
+      if (form === "cuenta") {
+        await pedir(`${base}/cuentas`, {
+          ...b,
+          persona_id: cuenta?.persona.id_Persona,
+        });
+        if (cuenta) await verCuenta(cuenta.persona.id_Persona);
+      }
+      if (form === "oportunidad") {
+        const r = await pedir(`${base}/oportunidades`, b);
+        await abrir(r.data.id);
+      }
+      if (form === "seguimiento" || form === "asociar")
+        await pedir(
+          `${base}/oportunidades/${detalle.id}/${form === "asociar" ? "muestras" : "seguimiento"}`,
+          { ...b, version: detalle.version },
+        );
+      if (form === "cotizacion") {
+        d.set("version", String(detalle.version));
+        const r = await apiFetch(
+          `${API_URL}${base}/oportunidades/${detalle.id}/cotizaciones`,
+          { method: "POST", body: d },
+        );
+        const result = await r.json();
+        if (!r.ok) throw new Error(result.message);
+      }
+      if (form === "estadoCotizacion")
+        await pedir(
+          `${base}/oportunidades/${detalle.id}/cotizaciones/${cot.id}/estado`,
+          { ...b, version: detalle.version },
+        );
+      if (form === "confirmar")
+        await pedir(`${base}/oportunidades/${detalle.id}/confirmar`, {
+          ...b,
+          version: detalle.version,
+          cotizacion_id: cot.id,
+        });
+      if (form === "produccion" || form === "cancelarOrden")
+        await pedir(
+          `${base}/ordenes/${ov.id}/${form === "produccion" ? "produccion" : "cancelar"}`,
+          b,
+        );
+      setForm("");
+    });
+  if (!user) return <p className="p-6">Verificando sesión…</p>;
+  const abierta =
+    detalle && !["GANADA", "PERDIDA", "CANCELADA"].includes(detalle.etapa);
   return (
-    <main className={styles.app}>
-      <header className={styles.header}>
+    <main className={s.app}>
+      <header className={s.header}>
         <div>
-          <p className={styles.eyebrow}>US Technologies · Ventas</p>
-          <h1>De muestra a venta</h1>
-          <p>Gestiona tus oportunidades y sigue su avance comercial.</p>
+          <span className={s.eyebrow}>US Technologies · Gestión comercial</span>
+          <h1>CRM de Ventas</h1>
+          <p>Prospectos, análisis de ID y compras recurrentes.</p>
         </div>
-        <div className={styles.actions}>
-          <span>{usuario}</span>
-          <button onClick={() => void salir()}>
-            <LogOut size={16} />
-            Cerrar sesión
+        <div className={s.actions}>
+          <span>{user.usuario}</span>
+          <button onClick={() => void ejecutar(cargar)}>
+            <RefreshCw size={16} /> Actualizar
+          </button>
+          <button
+            onClick={async () => {
+              await pedir("/api/auth/salir");
+              localStorage.removeItem("sesion");
+              router.push("/");
+            }}
+          >
+            <LogOut size={16} /> Salir
           </button>
         </div>
       </header>
-      <section className={styles.metrics} aria-label="Conversión comercial">
+      <nav className={s.actions}>
         {[
-          {
-            label: "Muestras / oportunidades",
-            value: resumen?.total,
-            icon: FlaskConical,
-          },
-          {
-            label: "Oportunidades abiertas",
-            value: resumen?.abiertas,
-            icon: CalendarClock,
-          },
-          {
-            label: "Ventas aseguradas",
-            value: resumen?.aseguradas,
-            icon: CheckCircle2,
-          },
-          {
-            label: "Conversión a venta",
-            value: resumen ? `${resumen.conversion}%` : undefined,
-            icon: TrendingUp,
-          },
-        ].map(({ label, value, icon: Icon }) => (
-          <div key={label}>
-            <Icon size={21} />
-            <span>{label}</span>
-            <strong>{cargando ? "…" : (value ?? "—")}</strong>
-          </div>
-        ))}
-      </section>
-      <p className={styles.help}>
-        Conversión = ventas aseguradas ÷ todas las muestras de la búsqueda y el
-        periodo. Incluye abiertas y no aseguradas; no depende de la página ni
-        del filtro de etapa.
-      </p>
-      <section className={styles.controls}>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setPagina(1);
-            setAplicados({ ...filtros });
-          }}
-        >
-          <label className={styles.search}>
-            <span>
-              <Search size={15} />
-              Buscar oportunidades
-            </span>
-            <input
-              maxLength={120}
-              placeholder="Cliente, producto o folio"
-              value={filtros.q}
-              onChange={(e) => setFiltros({ ...filtros, q: e.target.value })}
-            />
-          </label>
-          <label>
-            Recolección desde (UTC)
-            <input
-              type="date"
-              value={filtros.desde}
-              onChange={(e) =>
-                setFiltros({ ...filtros, desde: e.target.value })
-              }
-            />
-          </label>
-          <label>
-            Hasta (UTC)
-            <input
-              type="date"
-              min={filtros.desde}
-              value={filtros.hasta}
-              onChange={(e) =>
-                setFiltros({ ...filtros, hasta: e.target.value })
-              }
-            />
-          </label>
-          <label>
-            Etapa
-            <select
-              value={filtros.etapa}
-              onChange={(e) =>
-                setFiltros({ ...filtros, etapa: e.target.value })
-              }
-            >
-              <option value="">Todas las etapas</option>
-              {etapas.map((e) => (
-                <option value={e.id} key={e.id}>
-                  {e.nombre}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit">Aplicar filtros</button>
+          ["cuentas", "Prospectos y clientes"],
+          ["oportunidades", "Oportunidades"],
+          ["ordenes", "Órdenes de venta"],
+          ["muestras", "Muestras"],
+        ].map(([id, label]) => (
           <button
-            type="button"
+            key={id}
+            className={vista === id ? s.primary : ""}
             onClick={() => {
-              const f = { q: "", desde: "", hasta: "", etapa: "" };
-              setFiltros(f);
-              setAplicados(f);
-              setPagina(1);
-            }}
-          >
-            Limpiar
-          </button>
-        </form>
-        <div className={styles.actions}>
-          <button onClick={refrescar} disabled={cargando}>
-            <RefreshCw size={16} />
-            Actualizar
-          </button>
-          <button
-            className={styles.primary}
-            onClick={() => {
-              setSeleccion(null);
+              setVista(id);
               setDetalle(null);
-              setRegistro(!registro);
+              setForm("");
+              setCuenta(null);
             }}
           >
-            <Plus size={16} />
-            {registro ? "Cerrar registro" : "Nueva muestra / oportunidad"}
+            {label}
           </button>
-        </div>
-      </section>
+        ))}
+      </nav>
       {error && (
-        <p className={styles.error} role="alert">
+        <p className={s.error} role="alert">
           {error}
         </p>
       )}
       {mensaje && (
-        <p className={styles.success} role="status">
+        <p role="status" className={s.success}>
           {mensaje}
         </p>
       )}
-      {registro && (
-        <section className={styles.panel}>
-          <MuestrasID
-            area="ventas"
-            vista="registro"
-            onRegistrada={(id) => {
-              setRegistro(false);
-              refrescar();
-              abrir(id);
-              setMensaje("Muestra registrada como oportunidad.");
+      <section className={s.metrics}>
+        {metricas &&
+          [
+            [
+              "Conversión de prospectos",
+              metricas.conversion_prospectos == null
+                ? "—"
+                : `${metricas.conversion_prospectos.toFixed(1)}%`,
+              `${metricas.convertidos} de ${metricas.cohorte} en la cohorte`,
+            ],
+            [
+              "Efectividad comercial",
+              metricas.efectividad == null
+                ? "—"
+                : `${metricas.efectividad.toFixed(1)}%`,
+              `${metricas.ganadas} ganadas / ${metricas.perdidas} perdidas`,
+            ],
+            [
+              "Oportunidades abiertas",
+              metricas.abiertas,
+              `${metricas.canceladas} canceladas`,
+            ],
+            [
+              "Clientes con recompra",
+              metricas.clientes_recompra,
+              `${metricas.ordenes_periodo} órdenes válidas en el periodo`,
+            ],
+            [
+              "Duración comercial",
+              metricas.duracion_comercial_dias == null
+                ? "—"
+                : `${metricas.duracion_comercial_dias.toFixed(1)} días`,
+              "Promedio de oportunidades cerradas",
+            ],
+          ].map(([l, v, h]) => (
+            <article key={String(l)}>
+              <span>{l}</span>
+              <strong>{v}</strong>
+              <small>{h}</small>
+            </article>
+          ))}
+      </section>
+      <div className={s.filters}>
+        <label>
+          Buscar
+          <input
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPagina(1);
+            }}
+            placeholder="Empresa, título o folio"
+          />
+        </label>
+        <label>
+          Desde
+          <input
+            type="date"
+            value={desde}
+            onChange={(e) => {
+              setDesde(e.target.value);
+              setPagina(1);
             }}
           />
-        </section>
-      )}
-      {seleccion && (
-        <section
-          ref={panel}
-          tabIndex={-1}
-          className={styles.panel}
-          aria-label="Detalle de oportunidad"
-        >
-          <div className={styles.actions}>
-            <h2>Seguimiento comercial · #{seleccion}</h2>
-            <button
-              disabled={guardando}
-              onClick={() => setRevisionDetalle((v) => v + 1)}
-            >
-              <RefreshCw size={15} />
-              Recargar detalle
-            </button>
-            <button
-              disabled={guardando}
-              aria-label="Cerrar detalle"
-              onClick={() => {
-                setSeleccion(null);
-                setDetalle(null);
+        </label>
+        <label>
+          Hasta
+          <input
+            type="date"
+            value={hasta}
+            onChange={(e) => {
+              setHasta(e.target.value);
+              setPagina(1);
+            }}
+          />
+        </label>
+        {vista === "oportunidades" && (
+          <label>
+            Etapa
+            <select
+              value={etapa}
+              onChange={(e) => {
+                setEtapa(e.target.value);
+                setPagina(1);
               }}
             >
-              <X size={18} />
+              <option value="">Todas</option>
+              {etapas.map((e) => (
+                <option key={e}>{e}</option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      <p className={s.help}>
+        Conversión por cohorte de alta. Efectividad por fecha de cierre.
+        Recompra acumulada al corte. Los tiempos técnicos se consultan en ID.
+      </p>
+      {vista === "cuentas" && (
+        <>
+          <div className={s.actions}>
+            <h2>Cartera comercial</h2>
+            <button
+              className={s.primary}
+              onClick={() => {
+                setCuenta(null);
+                setForm("cuenta");
+              }}
+            >
+              <Plus size={16} /> Registrar prospecto
             </button>
           </div>
-          {cargandoDetalle && <p role="status">Cargando oportunidad…</p>}
-          {detalle && (
-            <>
-              <h3>
-                {detalle.cliente || "Cliente sin nombre"} · {detalle.producto}
-              </h3>
-              <p className={styles.help}>
-                Folio: {detalle.folio} · {detalle.cantidad} {detalle.unidad}
-              </p>
-              <div className={styles.facts}>
+          <div className={s.accountGrid}>
+            {cuentas.map((c) => (
+              <button
+                className={s.accountCard}
+                key={c.id_Persona}
+                onClick={() =>
+                  void ejecutar(
+                    () => verCuenta(c.id_Persona),
+                    "Cuenta consultada",
+                  )
+                }
+              >
+                <strong>{c.nombre}</strong>
                 <span>
-                  Etapa comercial: <b>{nombreEtapa(detalle.etapa)}</b>
+                  {c.crm_perfil_comercial?.estado_comercial ?? c.tipo_persona}
                 </span>
-                <span>
-                  Estado de ID:{" "}
-                  <b>{detalle.estadoLaboratorio.replaceAll("_", " ")}</b>
-                </span>
-                <span>Recolección: {fecha(detalle.recoleccion)}</span>
-                <span>
-                  Recepción en ID: {fecha(detalle.ingresoLaboratorio)}
-                </span>
-              </div>
-              <form onSubmit={guardar} className={styles.editor}>
-                <label>
-                  Etapa comercial
-                  <select
-                    value={etapa}
-                    disabled={guardando}
-                    onChange={(e) => setEtapa(e.target.value as Etapa)}
-                  >
-                    {etapas.map((e) => (
-                      <option
-                        value={e.id}
-                        key={e.id}
-                        disabled={
-                          e.id === "RECOLECCION"
-                            ? !!detalle.ingresoLaboratorio ||
-                              detalle.estadoLaboratorio !== "PENDIENTE"
-                            : e.id === "EN_ANALISIS"
-                              ? !detalle.ingresoLaboratorio &&
-                                detalle.estadoLaboratorio === "PENDIENTE"
-                              : false
-                        }
-                      >
-                        {e.nombre}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Próximo contacto (hora local)
-                  <input
-                    type="datetime-local"
-                    value={contacto}
-                    disabled={
-                      guardando ||
-                      etapa === "VENTA_ASEGURADA" ||
-                      etapa === "VENTA_NO_ASEGURADA"
-                    }
-                    onChange={(e) => setContacto(e.target.value)}
-                  />
-                </label>
-                <label className={styles.wide}>
-                  Nota de seguimiento / motivo del cambio
-                  <textarea
-                    required
-                    maxLength={4000}
-                    rows={3}
-                    value={nota}
-                    disabled={guardando}
-                    placeholder="Acuerdo con el cliente, cotización, motivo de cierre o siguiente paso…"
-                    onChange={(e) => setNota(e.target.value)}
-                  />
-                </label>
-                <p className={styles.help}>
-                  La recepción en ID mueve Recolección a En análisis. Cotización
-                  y cierre los confirma Ventas. Cada cambio conserva autor,
-                  fecha y nota; cerrar la venta cancela el próximo contacto.
-                  Puedes reabrirla registrando el motivo.
-                </p>
-                <button className={styles.primary} disabled={guardando}>
-                  {guardando ? "Guardando…" : "Guardar seguimiento"}
-                </button>
-              </form>
-              <details className={styles.history}>
-                <summary>
-                  Historial comercial · últimos {historial.length} movimientos
-                </summary>
-                {historial.length ? (
-                  historial.map((h) => (
-                    <article key={h.id}>
-                      <div>
-                        <b>{nombreEtapa(h.etapaAnterior)}</b>
-                        <ArrowRight size={14} />
-                        <b>{nombreEtapa(h.etapa)}</b>
-                      </div>
-                      <small>
-                        {fecha(h.fecha)} · {h.usuario}
-                      </small>
-                      <p>{h.nota}</p>
-                      {h.proximoContacto && (
-                        <small>Contacto: {fecha(h.proximoContacto)}</small>
-                      )}
-                    </article>
-                  ))
-                ) : (
-                  <p>
-                    Aún no hay seguimientos comerciales. La etapa inicial se
-                    obtiene de la recepción de la muestra.
-                  </p>
-                )}
-              </details>
-              <button onClick={() => setTecnico(!tecnico)}>
-                <FlaskConical size={16} />
-                {tecnico
-                  ? "Ocultar muestra y tiempos de ID"
-                  : "Ver muestra, ficha, etiqueta y tiempos de ID"}
+                <small>
+                  {c.crm_perfil_comercial?.nombre_contacto} ·{" "}
+                  {c.crm_perfil_comercial?.correo}
+                </small>
               </button>
-              {tecnico && (
-                <MuestrasID
-                  key={detalle.id}
-                  area="ventas"
-                  vista="detalle"
-                  muestraId={detalle.id}
-                  onCerrar={() => setTecnico(false)}
-                />
-              )}
-            </>
-          )}
+            ))}
+          </div>
+          <p className={s.help}>
+            Hasta 100 coincidencias; usa la búsqueda para localizar otra cuenta.
+          </p>
+        </>
+      )}
+      {cuenta && vista === "cuentas" && (
+        <section className={s.panel}>
+          <div className={s.actions}>
+            <h2>{cuenta.persona.nombre}</h2>
+            <button onClick={() => setForm("cuenta")}>Editar perfil</button>
+            <button
+              onClick={() => {
+                setVista("oportunidades");
+                setForm("oportunidad");
+              }}
+            >
+              Nueva oportunidad
+            </button>
+          </div>
+          <p>
+            Última compra: {fecha(cuenta.recurrencia.ultima_compra)} · Órdenes
+            válidas: {cuenta.recurrencia.ordenes} · Frecuencia observada:{" "}
+            {nombre(cuenta.recurrencia.frecuencia_observada)}
+          </p>
+          <p>
+            Intervalo medio:{" "}
+            {cuenta.recurrencia.intervalo_dias?.toFixed(1) ?? "—"} días ·
+            Próxima estimada:{" "}
+            {fecha(cuenta.recurrencia.proxima_compra_estimada)} · Frecuencia
+            acordada: {cuenta.recurrencia.frecuencia_esperada_dias ?? "—"} días
+          </p>
+          <h3>Oportunidades</h3>
+          {cuenta.oportunidades.map((o: any) => (
+            <button
+              key={o.id}
+              onClick={() => {
+                setVista("oportunidades");
+                void ejecutar(() => abrir(o.id));
+              }}
+            >
+              #{o.id} {o.titulo} · {nombre(o.etapa)}
+            </button>
+          ))}
+          <h3>Compras</h3>
+          {cuenta.ordenes.map((v: any) => (
+            <p key={v.id}>
+              #{v.id} · {fecha(v.fecha_confirmacion)} ·{" "}
+              {dinero(v.importe_total, v.moneda)} · {v.estado} · {v.tipo_compra}
+            </p>
+          ))}
         </section>
       )}
-      <div className={styles.boardHeading}>
-        <div>
-          <h2>Mis oportunidades</h2>
-          <p>
-            {respuesta?.total ?? 0} resultados · página {pagina}. Las columnas
-            muestran las oportunidades de esta página.
-          </p>
-        </div>
-        <span>Vista por vendedor</span>
-      </div>
-      {cargando ? (
-        <p role="status" className={styles.empty}>
-          Cargando oportunidades…
-        </p>
-      ) : (
-        respuesta && (
-          <>
-            <div className={styles.board}>
-              {etapas
-                .filter((e) => !aplicados.etapa || e.id === aplicados.etapa)
-                .map((e) => {
-                  const items = respuesta.data.filter((o) => o.etapa === e.id);
-                  return (
-                    <section
-                      key={e.id}
-                      className={styles.column}
-                      data-tone={e.tono}
-                    >
-                      <header>
-                        <h3>{e.nombre}</h3>
-                        <span title="Total de esta etapa en la búsqueda y periodo">
-                          {resumen?.porEtapa[e.id] ?? 0}
-                        </span>
-                      </header>
-                      {items.map((o) => (
-                        <button
-                          key={o.id}
-                          className={styles.card}
-                          onClick={() => abrir(o.id)}
-                        >
-                          <span className={styles.eyebrow}>
-                            Oportunidad #{o.id}
-                          </span>
-                          <h4>{o.cliente || "Sin cliente"}</h4>
-                          <p>{o.producto}</p>
-                          <span className={styles.amount}>
-                            {o.cantidad} {o.unidad}
-                          </span>
-                          <span className={styles.lab}>
-                            ID: {o.estadoLaboratorio.replaceAll("_", " ")}
-                          </span>
-                          {o.nota && <p className={styles.note}>{o.nota}</p>}
-                          {o.proximoContacto && (
-                            <span
-                              className={
-                                new Date(o.proximoContacto) < new Date()
-                                  ? styles.overdue
-                                  : styles.contact
-                              }
-                            >
-                              <CalendarClock size={14} />
-                              {new Date(o.proximoContacto) < new Date()
-                                ? "Contacto vencido: "
-                                : "Contacto: "}
-                              {fecha(o.proximoContacto)}
-                            </span>
-                          )}
-                          <span className={styles.cardAction}>
-                            Gestionar oportunidad
-                            <ArrowRight size={15} />
-                          </span>
-                        </button>
-                      ))}
-                      {!items.length && (
-                        <p className={styles.empty}>
-                          Sin oportunidades en esta página.
-                        </p>
-                      )}
-                    </section>
-                  );
-                })}
-            </div>
-            <nav
-              className={styles.pagination}
-              aria-label="Páginas de oportunidades"
+      {vista === "oportunidades" && (
+        <>
+          <div className={s.actions}>
+            <h2>Oportunidades comerciales</h2>
+            <button
+              className={s.primary}
+              onClick={() => {
+                setDetalle(null);
+                setForm("oportunidad");
+              }}
             >
-              <button
-                disabled={pagina === 1}
-                onClick={() => setPagina((p) => p - 1)}
-              >
-                Anterior
-              </button>
-              <span>
-                {pagina} /{" "}
-                {Math.max(
-                  1,
-                  Math.ceil(respuesta.total / respuesta.tamanoPagina),
+              <Plus size={16} /> Agendar recolección
+            </button>
+          </div>
+          <div className={s.pipeline}>
+            {etapas.map((e) => (
+              <section key={e} className={s.pipelineColumn}>
+                <h3>{nombre(e)}</h3>
+                {lista
+                  .filter((o) => o.etapa === e)
+                  .map((o) => (
+                    <button
+                      className={s.opCard}
+                      key={o.id}
+                      onClick={() =>
+                        void ejecutar(
+                          () => abrir(o.id),
+                          "Oportunidad consultada",
+                        )
+                      }
+                    >
+                      <small>
+                        #{o.id} · {o.cliente.nombre}
+                      </small>
+                      <strong>{o.titulo}</strong>
+                      <span>
+                        {o.producto?.nombre_Producto ?? "Producto pendiente"}
+                      </span>
+                      <span>
+                        {o._count.muestras} muestras ·{" "}
+                        {nombre(o.estado_tecnico)}
+                      </span>
+                      <small>
+                        Próximo contacto: {fecha(o.proximo_contacto)}
+                      </small>
+                    </button>
+                  ))}
+              </section>
+            ))}
+          </div>
+          <div className={s.actions}>
+            <button
+              disabled={pagina === 1}
+              onClick={() => setPagina((p) => p - 1)}
+            >
+              Anterior
+            </button>
+            <span>
+              Página {pagina} · {total} oportunidades
+            </span>
+            <button
+              disabled={pagina * 50 >= total}
+              onClick={() => setPagina((p) => p + 1)}
+            >
+              Siguiente
+            </button>
+          </div>
+        </>
+      )}
+      {form === "oportunidad" && (
+        <div className={s.actions}>
+          <input
+            placeholder="Buscar producto para la oportunidad"
+            value={productoQ}
+            onChange={(e) => setProductoQ(e.target.value)}
+          />
+          <button
+            onClick={() =>
+              void ejecutar(async () => {
+                const r = await pedir(
+                  `/api/investigacion/referencias?q=${encodeURIComponent(productoQ)}`,
+                  undefined,
+                  "GET",
+                );
+                setProductos(r.productos);
+              }, "Productos consultados")
+            }
+          >
+            Buscar producto
+          </button>
+        </div>
+      )}
+      {form && (
+        <Form
+          key={`${form}-${cuenta?.persona.id_Persona ?? ""}-${cot?.id ?? ""}`}
+          title={title}
+          fields={fields}
+          onSave={guardar}
+          busy={busy}
+          onClose={() => setForm("")}
+        />
+      )}
+      {detalle && vista === "oportunidades" && (
+        <section className={s.panel}>
+          <div className={s.actions}>
+            <h2>
+              #{detalle.id} · {detalle.titulo}
+            </h2>
+            <button
+              onClick={() => {
+                setDetalle(null);
+                setForm("");
+              }}
+            >
+              Cerrar detalle
+            </button>
+          </div>
+          <p>
+            {detalle.cliente.nombre} · {nombre(detalle.etapa)} ·{" "}
+            {nombre(detalle.estado_tecnico)}
+          </p>
+          <p>{detalle.necesidad}</p>
+          <p>
+            Apertura: {fecha(detalle.fecha_apertura)} · Recolección agendada:{" "}
+            {fecha(detalle.fecha_recoleccion_agendada)} · Cierre:{" "}
+            {fecha(detalle.fecha_cierre)}
+          </p>
+          <div className={s.actions}>
+            {abierta && (
+              <>
+                <button
+                  onClick={() => {
+                    setRegistro(true);
+                    setMuestra(undefined);
+                    setForm("");
+                  }}
+                >
+                  Registrar muestra recolectada
+                </button>
+                <button onClick={() => setForm("asociar")}>
+                  Vincular muestra anterior
+                </button>
+                <button onClick={() => setForm("seguimiento")}>
+                  Seguimiento / cierre
+                </button>
+                {detalle.estado_tecnico === "VIABLE" && (
+                  <button onClick={() => setForm("cotizacion")}>
+                    Nueva versión de cotización
+                  </button>
                 )}
-              </span>
+              </>
+            )}
+          </div>
+          <h3>Muestras y tiempos técnicos</h3>
+          <div className={s.actions}>
+            {detalle.muestras.map((m: any) => (
               <button
-                disabled={pagina * respuesta.tamanoPagina >= respuesta.total}
-                onClick={() => setPagina((p) => p + 1)}
+                key={m.id_Muestra}
+                onClick={() => {
+                  setMuestra(m.id_Muestra);
+                  setRegistro(false);
+                }}
               >
-                Siguiente
+                Muestra #{m.id_Muestra} · {m.estado_Muestra}
               </button>
-            </nav>
-          </>
-        )
+            ))}
+          </div>
+          {(registro || muestra) && (
+            <MuestrasID
+              key={registro ? `nuevo-${detalle.id}` : muestra}
+              area="ventas"
+              vista={registro ? "registro" : "detalle"}
+              muestraId={muestra}
+              oportunidad={{
+                id: detalle.id,
+                persona_id: detalle.persona_id,
+                nombre: detalle.cliente.nombre,
+              }}
+              onRegistrada={(id) => {
+                setRegistro(false);
+                setMuestra(id);
+                void ejecutar(async () => {
+                  const r = await pedir(
+                    `${base}/oportunidades/${detalle.id}`,
+                    undefined,
+                    "GET",
+                  );
+                  setDetalle(r.data);
+                });
+              }}
+              onCerrar={() => {
+                setRegistro(false);
+                setMuestra(undefined);
+              }}
+            />
+          )}
+          <h3>Reportes de ID</h3>
+          {detalle.reportes_id.map((r: any) => (
+            <article key={r.id} className={s.historyItem}>
+              <strong>
+                v{r.version} · {r.resultado} · {r.estado}
+              </strong>
+              <p>{r.resumen}</p>
+              <small>
+                {r.publicado_por} · {fecha(r.publicado_en)}
+              </small>
+              {r.nombre_archivo && (
+                <button
+                  onClick={() =>
+                    void ejecutar(
+                      () => descargarCrm("reporte", r.id, r.nombre_archivo),
+                      "Documento descargado",
+                    )
+                  }
+                >
+                  Descargar reporte
+                </button>
+              )}
+            </article>
+          ))}
+          <h3>Cotizaciones y revisiones</h3>
+          {detalle.cotizaciones.map((c: any) => (
+            <article key={c.id} className={s.historyItem}>
+              <strong>
+                v{c.version} · {dinero(c.total, c.moneda)} · {c.estado}
+              </strong>
+              <p>
+                {c.condiciones_comerciales} · Vigencia:{" "}
+                {fecha(c.vigencia_hasta)}
+              </p>
+              <div className={s.actions}>
+                {c.nombre_archivo && (
+                  <button
+                    onClick={() =>
+                      void ejecutar(
+                        () =>
+                          descargarCrm("cotizacion", c.id, c.nombre_archivo),
+                        "Documento descargado",
+                      )
+                    }
+                  >
+                    Documento
+                  </button>
+                )}
+                {abierta && ["BORRADOR", "ENVIADA"].includes(c.estado) && (
+                  <button
+                    onClick={() => {
+                      setCot(c);
+                      setForm("estadoCotizacion");
+                    }}
+                  >
+                    Registrar envío / respuesta
+                  </button>
+                )}
+                {abierta && c.estado === "ACEPTADA" && !detalle.orden_venta && (
+                  <button
+                    className={s.primary}
+                    onClick={() => {
+                      setCot(c);
+                      setForm("confirmar");
+                    }}
+                  >
+                    Confirmar orden de venta
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+          {detalle.orden_venta && (
+            <p className={s.success}>
+              Orden #{detalle.orden_venta.id} · {detalle.orden_venta.estado}
+            </p>
+          )}
+          <h3>Historial comercial</h3>
+          {detalle.historial.map((h: any) => (
+            <article key={h.id} className={s.historyItem}>
+              <strong>{nombre(h.accion)}</strong>
+              <p>{h.nota}</p>
+              <small>
+                {h.realizado_por} · {fecha(h.realizado_en)} ·{" "}
+                {nombre(h.etapa_anterior ?? "INICIO")} →{" "}
+                {nombre(h.etapa_nueva ?? "")}
+              </small>
+            </article>
+          ))}
+        </section>
+      )}
+      {vista === "ordenes" && (
+        <section className={s.panel}>
+          <h2>Órdenes comerciales</h2>
+          <div className={s.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  {[
+                    "Orden",
+                    "Cliente",
+                    "Confirmación",
+                    "Compra",
+                    "Importe",
+                    "Estado / producción",
+                    "Acciones",
+                  ].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ordenes
+                  .filter(
+                    (o) =>
+                      (!q ||
+                        o.cliente.nombre
+                          .toLowerCase()
+                          .includes(q.toLowerCase())) &&
+                      (!desde || o.fecha_confirmacion.slice(0, 10) >= desde) &&
+                      (!hasta || o.fecha_confirmacion.slice(0, 10) <= hasta),
+                  )
+                  .map((o) => (
+                    <tr key={o.id}>
+                      <td>#{o.id}</td>
+                      <td>{o.cliente.nombre}</td>
+                      <td>{fecha(o.fecha_confirmacion)}</td>
+                      <td>{o.tipo_compra}</td>
+                      <td>{dinero(o.importe_total, o.moneda)}</td>
+                      <td>
+                        {o.estado}
+                        {o.ordenes_produccion.map((p: any) => (
+                          <p key={p.id_Orden_Produc}>
+                            OP #{p.id_Orden_Produc} · {p.estado_Plan} ·{" "}
+                            {p.estatus_flujo}
+                          </p>
+                        ))}
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => {
+                            setVista("oportunidades");
+                            void ejecutar(() => abrir(o.oportunidad_id));
+                          }}
+                        >
+                          Oportunidad
+                        </button>
+                        {o.estado !== "CANCELADA" && (
+                          <>
+                            {!o.ordenes_produccion.length && (
+                              <button
+                                onClick={() => {
+                                  setOv(o);
+                                  setForm("produccion");
+                                }}
+                              >
+                                Enviar a producción
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setOv(o);
+                                setForm("cancelarOrden");
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {vista === "muestras" && (
+        <>
+          <p className={s.help}>
+            Registra muestras desde su oportunidad. Para muestras anteriores,
+            abre una oportunidad de la misma cuenta y usa “Vincular muestra
+            anterior”.
+          </p>
+          <MuestrasID area="ventas" />
+        </>
       )}
     </main>
   );

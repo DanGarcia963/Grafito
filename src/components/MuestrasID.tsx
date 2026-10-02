@@ -1,4 +1,5 @@
 'use client';
+import CrmReportes from './CrmReportes';
 import { useCallback,useEffect,useState } from 'react';
 import styles from './MuestrasID.module.css';
 import { FlaskConical, Search, RefreshCw, Plus, LogOut, ChevronRight, SlidersHorizontal, Clock3, CheckCircle2, XCircle, Layers3 } from 'lucide-react';
@@ -7,7 +8,7 @@ import { API_URL,apiFetch,pedir,sesionActual } from '@/utils/api';
 import { useSocket } from '@/context/SocketContext';
 const fecha=(v:string|null)=>v?new Date(v).toLocaleString('es-MX'):'Pendiente';
 const minutos=(v:number|null|undefined)=>v==null?'—':(v/60).toFixed(2);
-export default function MuestrasID({area,vista='completa',muestraId,onRegistrada,onCerrar}:{area:'id'|'ventas';vista?:'completa'|'registro'|'detalle';muestraId?:number;onRegistrada?:(id:number)=>void;onCerrar?:()=>void}){
+export default function MuestrasID({area,vista='completa',muestraId,oportunidad,onRegistrada,onCerrar}:{area:'id'|'ventas';vista?:'completa'|'registro'|'detalle';muestraId?:number;oportunidad?:{id:number;persona_id:number;nombre:string};onRegistrada?:(id:number)=>void;onCerrar?:()=>void}){
  const [filtro,setFiltro]=useState(''),[estado,setEstado]=useState('TODOS');
  const router=useRouter(),socket=useSocket();
  const [sesion,setSesion]=useState<any>(null),[lista,setLista]=useState<any[]>([]),[pagina,setPagina]=useState(1),[total,setTotal]=useState(0);
@@ -35,6 +36,7 @@ export default function MuestrasID({area,vista='completa',muestraId,onRegistrada
   e.preventDefault();
   const form = e.currentTarget;
   const data = new FormData(form);
+  if(oportunidad){data.set('oportunidad_id',String(oportunidad.id));data.set('cliente_id',String(oportunidad.persona_id));}
 
   // Validar y formatear la fecha solo si existe un valor válido
   const fechaRaw = data.get('fecha_recoleccion');
@@ -81,9 +83,9 @@ export default function MuestrasID({area,vista='completa',muestraId,onRegistrada
  <p className={styles.scope}>{visibles.length} resultados en esta página · Los filtros se aplican a las muestras cargadas.</p>
 </>}
  {crear&&area==='ventas'&&<section className="bg-white border rounded-xl p-4 space-y-4"><h2 className="font-bold">Registrar nueva muestra</h2><p className={styles.scope}>Completa los datos del cliente, el producto y la recolección. Adjunta su ficha técnica para iniciar el seguimiento.</p><div className="flex flex-wrap gap-2"><input aria-label="Buscar producto o cliente" className="border p-2" value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar producto o cliente"/><button type="button" className="border p-2" onClick={()=>void referencias()}>Buscar en catálogos</button></div>
- <form onSubmit={registrar} className="grid sm:grid-cols-2 gap-4">
+ <form onSubmit={registrar} className="grid sm:grid-cols-2 gap-4">{!oportunidad&&<label>ID de oportunidad comercial<input type="number" min="1" name="oportunidad_id" required className="block border p-2 w-full"/></label>}
  <label>Producto<select required name="producto_id" className="block border p-2 w-full"><option value="">Seleccionar</option>{refs.productos.map((p:any)=><option key={p.id_Produc_Mater} value={p.id_Produc_Mater}>{p.nombre_Producto}</option>)}</select></label>
- <label>Cliente<select required name="cliente_id" className="block border p-2 w-full"><option value="">Seleccionar</option>{refs.clientes.map((p:any)=><option key={p.id_Persona} value={p.id_Persona}>{p.nombre}</option>)}</select></label>
+ <label>Prospecto / cliente<select disabled={!!oportunidad} defaultValue={oportunidad?.persona_id??''} required name="cliente_id" className="block border p-2 w-full"><option value="">Seleccionar</option>{oportunidad&&<option value={oportunidad.persona_id}>{oportunidad.nombre}</option>}{refs.clientes.filter((p:any)=>p.id_Persona!==oportunidad?.persona_id).map((p:any)=><option key={p.id_Persona} value={p.id_Persona}>{p.nombre}</option>)}</select></label>
  <label>Caracterización<select name="caracterizacion" className="block border p-2 w-full"><option value="FILTRACION">Filtración</option><option value="REGENERACION">Regeneración</option></select></label>
  <label>Viabilidad<select required name="viabilidad_id" className="block border p-2 w-full"><option value="">Seleccionar</option>{catalogos.viabilidades.filter((v:any)=>v.activo).map((v:any)=><option key={v.id} value={v.id}>{v.nombre}</option>)}</select>{!catalogos.viabilidades.some((v:any)=>v.activo)&&<small>I+D debe configurar las opciones primero.</small>}</label>
  <label>Cantidad por proyecto<input name="cantidad_proyecto" required type="number" min="0.0001" step="0.0001" className="block border p-2 w-full"/></label><label>Unidad<input name="unidad_proyecto" required maxLength={30} placeholder="Ej. L, kg" className="block border p-2 w-full"/></label>
@@ -98,6 +100,7 @@ export default function MuestrasID({area,vista='completa',muestraId,onRegistrada
 </>}
  {detalle&&<section className="bg-white border rounded-xl p-4 space-y-4"><header className="flex flex-wrap justify-between gap-3"><h2 className="font-bold text-lg">{detalle.no_Muestra}</h2><div className="flex flex-wrap gap-2"><button onClick={()=>setEtiqueta(!etiqueta)} className="border p-2">Etiqueta</button><button onClick={()=>void descargarFicha()} className="border p-2">Ficha técnica</button><button onClick={()=>{setDetalle(null);setEtiqueta(false);onCerrar?.();}} className="border p-2">Cerrar</button></div></header>
  <p>{detalle.productos_materiales.nombre_Producto} · {detalle.personas_muestras_cliente_idTopersonas?.nombre} · {detalle.cantidad_proyecto} {detalle.unidad_proyecto}</p><p>Recolección: {fecha(detalle.fecha_recoleccion)} · Ingreso: {fecha(detalle.fecha_ingreso_laboratorio)} · Viabilidad: {detalle.viabilidad_nombre}</p>
+ {area==='id'&&detalle.oportunidad_id&&<CrmReportes key={`${detalle.oportunidad_id}-${detalle.estado_Muestra}`} oportunidadId={detalle.oportunidad_id}/>}
  {area==='id'&&<><div className="flex flex-wrap gap-2">{!detalle.fecha_ingreso_laboratorio&&<button disabled={ocupado} onClick={()=>void ejecutar(()=>pedir(`/api/investigacion/muestras/${detalleId}/recibir`))} className="bg-blue-700 text-white p-2 rounded">Recibir en laboratorio</button>}</div>
  {(!ejecuciones.some((p:any)=>p.inicio)||finalizada)&&<div className="border rounded p-3 space-y-2"><h3 className="font-bold">{finalizada?'Plan de nuevo ciclo':'Plan de procesos en orden de ejecución'}</h3><div className="flex flex-wrap gap-2"><select value={proceso} onChange={e=>setProceso(e.target.value)} className="border p-2"><option value="">Seleccionar proceso</option>{catalogos.procesos.filter((p:any)=>p.activo).map((p:any)=><option key={p.id} value={p.id}>{p.nombre} · {minutos(p.estandar_segundos)} min</option>)}</select><button onClick={()=>{if(proceso)setPlan(p=>[...p,Number(proceso)]);}} className="border p-2">Agregar al final</button><button onClick={()=>setPlan([])} className="border p-2">Limpiar selección</button></div><ol className="list-decimal pl-5">{plan.map((pid,i)=><li key={i}>{catalogos.procesos.find((p:any)=>p.id===pid)?.nombre} <button onClick={()=>setPlan(p=>p.filter((_,j)=>i!==j))} className="text-red-700">Quitar</button></li>)}</ol><button disabled={ocupado||!plan.length} onClick={()=>void ejecutar(()=>pedir(`/api/investigacion/muestras/${detalleId}/plan`,{procesos:plan,nuevoCiclo:finalizada}))} className="border p-2 rounded">{finalizada?'Abrir nuevo ciclo con este plan':'Guardar plan y estándares'}</button></div>}
  </>}
