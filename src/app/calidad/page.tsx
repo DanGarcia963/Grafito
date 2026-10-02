@@ -55,7 +55,7 @@ interface ContenedorState {
   observaciones: string;
 }
 
-export const CalidadMuestrasScreen: React.FC = () => {
+const CalidadMuestrasScreen: React.FC = () => {
   const socket = useSocket();
   const router = useRouter();
   const [sesionLista, setSesionLista] = useState(false);
