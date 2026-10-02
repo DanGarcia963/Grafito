@@ -53,7 +53,13 @@ function Form({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void onSave(new FormData(e.currentTarget));
+          const data = new FormData(e.currentTarget);
+          for (const field of fields) {
+            const value = data.get(field.name);
+            if (field.type === "datetime-local" && typeof value === "string" && value)
+              data.set(field.name, new Date(value).toISOString());
+          }
+          void onSave(data);
         }}
       >
         <fieldset disabled={busy} className={s.formFields}>
