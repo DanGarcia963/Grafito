@@ -1,266 +1,387 @@
-// npm run build && node --test test/crm.integration.cjs
-// PostgreSQL local en memoria; no usa DATABASE_URL ni toca Supabase.
+// npm run test:crm — PostgreSQL en memoria; nunca usa la base productiva.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const { PGlite } = require('@electric-sql/pglite');
-const { Prisma } = require('@prisma/client');
+const { PrismaPGlite } = require('pglite-prisma-adapter');
+const { PrismaClient } = require('@prisma/client');
 const { CrmService } = require('../dist/ventas/crm.service');
-const { filtrosCrm } = require('../dist/ventas/crm.logic');
-const { Test } = require('@nestjs/testing');
-const request = require('supertest');
-const { scryptSync } = require('node:crypto');
-const usuario = { usuario: 'vendedor', personaId: 10, area: 'ventas' };
-
-async function fixture() {
+const { InvestigacionService } = require('../dist/investigacion/id.service');
+const {
+  TrazabilidadService,
+} = require('../dist/trazabilidad/trazabilidad.service');
+const { recurrencia } = require('../dist/ventas/crm.workflow');
+const seller = { usuario: 'vendedor', personaId: 1, area: 'ventas' },
+  lab = { usuario: 'laboratorio', personaId: 2, area: 'id' };
+const pdf = {
+  buffer: Buffer.from('%PDF-1.4\nprueba'),
+  size: 14,
+  originalname: 'ficha.pdf',
+};
+const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
+test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, recompra, cancelación y aislamiento', async () => {
+  const sql = process.env.CRM_TEST_SCHEMA
+    ? require('fs').readFileSync(process.env.CRM_TEST_SCHEMA, 'utf8')
+    : execFileSync(
+        process.execPath,
+        [
+          'node_modules/prisma/build/index.js',
+          'migrate',
+          'diff',
+          '--from-empty',
+          '--to-schema-datamodel',
+          'prisma/schema.prisma',
+          '--script',
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            DIRECT_URL: 'postgresql://test:test@localhost/test',
+            DATABASE_URL: 'postgresql://test:test@localhost/test',
+          },
+          maxBuffer: 5 * 1024 * 1024,
+        },
+      );
   const pg = new PGlite();
-  await pg.exec(`CREATE TABLE productos_materiales ("id_Produc_Mater" int PRIMARY KEY,"nombre_Producto" text);
- CREATE TABLE personas ("id_Persona" int PRIMARY KEY,nombre text);
- CREATE TABLE muestras ("id_Muestra" int PRIMARY KEY,"no_Muestra" text,"area_Muestra" text,vendedor_id int,producto_id int,cliente_id int,cantidad_proyecto numeric,unidad_proyecto text,"estado_Muestra" text,fecha_recoleccion timestamp,fecha_ingreso_laboratorio timestamp);
- CREATE TABLE proceso_eventos (id serial PRIMARY KEY,entidad text,entidad_id int,accion text,ciclo int,fecha timestamp,detalle text);
- CREATE TABLE proceso_tramos (id int PRIMARY KEY,etapa text,inicio timestamp,fin timestamp);
- CREATE TABLE id_ejecuciones (id int PRIMARY KEY,inicio timestamp,fin timestamp,estandar_segundos int);
- INSERT INTO productos_materiales VALUES(1,'Aceite'); INSERT INTO personas VALUES(1,'Cliente 100%_real');
- INSERT INTO muestras SELECT n,'ID-'||n,'INVESTIGACION_DESARROLLO',10,1,1,100,'L','PENDIENTE','2026-09-10 12:00',null FROM generate_series(1,61) n;
- INSERT INTO muestras VALUES(62,'OTRO','INVESTIGACION_DESARROLLO',20,1,1,100,'L','PENDIENTE','2026-09-10',null),(63,'CALIDAD','CALIDAD',10,1,1,100,'L','PENDIENTE','2026-09-10',null);
- UPDATE muestras SET fecha_ingreso_laboratorio='2026-09-11',"estado_Muestra"='APROBADO' WHERE "id_Muestra"=1;
- INSERT INTO proceso_tramos VALUES(1,'PROCESO_ID_1','2026-09-11','2026-09-12');
- INSERT INTO id_ejecuciones VALUES(1,'2026-09-11','2026-09-12',100);`);
-  const adapter = (db) => ({
-    $queryRaw: async (first, ...values) => {
-      const sql = Array.isArray(first) ? Prisma.sql(first, ...values) : first;
-      return (await db.query(sql.text, sql.values)).rows;
-    },
-    proceso_eventos: {
-      create: async ({ data: d }) =>
-        (
-          await db.query(
-            'INSERT INTO proceso_eventos(entidad,entidad_id,accion,ciclo,fecha,detalle) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-            [d.entidad, d.entidad_id, d.accion, d.ciclo, d.fecha, d.detalle],
-          )
-        ).rows[0],
-      findMany: async ({ where: w, take }) =>
-        (
-          await db.query(
-            'SELECT * FROM proceso_eventos WHERE entidad=$1 AND entidad_id=$2 AND accion=$3 ORDER BY id DESC LIMIT $4',
-            [w.entidad, w.entidad_id, w.accion, take],
-          )
-        ).rows,
-    },
-  });
-  const prisma = {
-    ...adapter(pg),
-    $transaction: (fn) => pg.transaction((tx) => fn(adapter(tx))),
+  await pg.exec(sql);
+  // Adapter 0.6 does not serialize Prisma DateTime values for PostgreSQL TIME.
+  // Normalize only the TIME input at the driver boundary (production uses native Prisma).
+  const factory = new PrismaPGlite(pg),
+    connect = factory.connect.bind(factory);
+  const wrap = (a) => {
+    const original = a.queryRaw.bind(a);
+    a.queryRaw = (q) => {
+      const match = q.sql.match(
+        /INSERT INTO "public"\."muestras" \((.*?)\) VALUES/,
+      );
+      if (match) {
+        const index = match[1]
+          .split(',')
+          .findIndex((c) => c.trim() === '"Hora_Toma"');
+        if (index >= 0 && q.args[index])
+          q = {
+            ...q,
+            args: q.args.map((v, i) =>
+              i === index ? String(v).slice(11, 23) : v,
+            ),
+          };
+      }
+      return original(q);
+    };
+    if (a.startTransaction) {
+      const start = a.startTransaction.bind(a);
+      a.startTransaction = async (...args) => wrap(await start(...args));
+    }
+    return a;
   };
-  const eventos = [];
-  const crm = new CrmService(prisma, { notificar: (...v) => eventos.push(v) });
-  return { pg, prisma, crm, eventos };
-}
-const guardar = (crm, id, actual, etapa, nota = 'Seguimiento de prueba') =>
-  crm.guardar(
-    id,
-    {
-      version: actual.version,
-      etapaActual: actual.etapa,
-      etapa,
-      nota,
-      proximoContacto: '2026-10-10T12:00:00Z',
-    },
-    usuario,
-  );
-
-test('CRM PostgreSQL: conversión global, aislamiento, historial, reapertura y tiempos intactos', async () => {
-  const { pg, crm, eventos } = await fixture();
+  factory.connect = async () => wrap(await connect());
+  const p = new PrismaClient({ adapter: factory });
+  const ev = { notificar: () => {} };
+  const crm = new CrmService(p, ev),
+    id = new InvestigacionService(p, ev, new TrazabilidadService(p));
   try {
-    const tiemposAntes = await pg.query('SELECT * FROM id_ejecuciones');
-    const tramosAntes = await pg.query('SELECT * FROM proceso_tramos');
-    const primera = await crm.listar(usuario, {});
-    assert.equal(primera.total, 61);
-    assert.equal(primera.data.length, 50);
-    assert.equal(primera.resumen.conversion, 0);
-    assert.equal(
-      primera.resumen.porEtapa.EN_ANALISIS,
-      1,
-      'Aprobada en ID no equivale a venta',
-    );
-    assert.equal((await crm.listar(usuario, { pagina: '2' })).data.length, 11);
-    assert.equal((await crm.listar(usuario, { q: '100%_real' })).total, 61);
-    assert.equal((await crm.listar(usuario, { q: "' OR 1=1 --" })).total, 0);
-    assert.equal((await crm.listar(usuario, { desde: '2026-09-11' })).total, 0);
-    assert.equal(
-      (await crm.listar(usuario, { desde: '2026-09-10', hasta: '2026-09-10' }))
-        .total,
-      61,
-    );
-    await assert.rejects(crm.detalle(62, usuario), (e) => e.status === 404);
+    await p.personas.createMany({
+      data: [
+        { nombre: 'Vendedor', tipo_persona: 'VENDEDOR' },
+        { nombre: 'Laboratorio', tipo_persona: 'EMPLEADO' },
+      ],
+    });
+    const prod = await p.productos_materiales.create({
+      data: { nombre_Producto: 'Aceite prueba', UM: 'Litros' },
+    });
+    const v = await p.id_viabilidades.create({ data: { nombre: 'Evaluar' } }),
+      proc = await p.id_procesos.create({
+        data: { nombre: 'Filtración', estandar_segundos: 60 },
+      });
+    const account = (
+      await crm.guardarCuenta(
+        {
+          nombre: 'Alfa',
+          nombre_contacto: 'Contacto',
+          frecuencia_esperada_dias: '30',
+        },
+        seller,
+      )
+    ).data;
+    const same = (await crm.guardarCuenta({ nombre: 'ALFA' }, seller)).data;
+    assert.equal(same.persona_id, account.persona_id);
+    const open = async () =>
+      (
+        await crm.crear(
+          {
+            persona_id: account.persona_id,
+            titulo: 'Purificación',
+            producto_id: prod.id_Produc_Mater,
+            cantidad_estimada: '100',
+            unidad: 'L',
+            fecha_recoleccion_agendada: new Date().toISOString(),
+          },
+          seller,
+        )
+      ).data;
+    const version = async (oid) =>
+      (await crm.detalle(oid, seller)).data.version;
+    const sample = async (oid) =>
+      (
+        await id.crear(
+          {
+            oportunidad_id: oid,
+            producto_id: prod.id_Produc_Mater,
+            cliente_id: account.persona_id,
+            viabilidad_id: v.id,
+            caracterizacion: 'FILTRACION',
+            cantidad_proyecto: '100',
+            unidad_proyecto: 'L',
+            fecha_recoleccion: new Date(Date.now() - 1000).toISOString(),
+          },
+          pdf,
+          seller,
+        )
+      ).data.id_Muestra;
+    const finish = async (mid) => {
+      await id.planificar(mid, { procesos: [proc.id] }, lab);
+      await id.recibir(mid, lab);
+      const m = (await id.detalle(mid, lab)).data;
+      const eid = m.procesos_id.at(-1).id;
+      await id.proceso(mid, eid, 'iniciar', {}, lab);
+      await id.proceso(mid, eid, 'terminar', { resultado: 'Conforme' }, lab);
+      await id.finalizar(mid, { dictamen: 'APROBADO' }, lab);
+    };
+    const report = async (oid) =>
+      crm.reporte(
+        oid,
+        {
+          version: await version(oid),
+          resultado: 'VIABLE',
+          resumen: 'Apto para purificación',
+        },
+        pdf,
+        lab,
+      );
+    const quote = async (oid) =>
+      (
+        await crm.cotizar(
+          oid,
+          {
+            version: await version(oid),
+            moneda: 'MXN',
+            total: '1160',
+            subtotal: '1000',
+            impuestos: '160',
+            vigencia_hasta: future,
+            condiciones_comerciales: 'Pago 30 días',
+          },
+          pdf,
+          seller,
+        )
+      ).data;
+    const accept = async (oid, cid) => {
+      for (const estado of ['ENVIADA', 'ACEPTADA'])
+        await crm.estadoCotizacion(
+          oid,
+          cid,
+          {
+            version: await version(oid),
+            estado,
+            nota: 'Confirmación documentada',
+          },
+          seller,
+        );
+    };
+    const o = await open();
+    assert.equal(o.etapa, 'RECOLECCION_AGENDADA');
+    assert.equal(await p.muestras.count(), 0);
     await assert.rejects(
-      guardar(crm, 62, { version: 0, etapa: 'RECOLECCION' }, 'VENTA_ASEGURADA'),
+      crm.detalle(o.id, { ...seller, personaId: 999 }),
       (e) => e.status === 404,
     );
-    await assert.rejects(crm.detalle(63, usuario), (e) => e.status === 404);
-    let d = (await crm.detalle(2, usuario)).data;
-    await guardar(crm, 2, d, 'COTIZACION');
-    await assert.rejects(
-      guardar(crm, 2, d, 'VENTA_ASEGURADA'),
-      (e) => e.status === 409,
-    );
-    d = (await crm.detalle(2, usuario)).data;
-    await guardar(crm, 2, d, 'VENTA_ASEGURADA', 'Cliente confirmó compra');
-    const ganada = await crm.detalle(2, usuario);
-    assert.equal(ganada.data.proximoContacto, null);
-    assert.equal(ganada.historial.length, 2);
-    const filtrada = await crm.listar(usuario, {
-      etapa: 'RECOLECCION',
-      pagina: '2',
-    });
-    assert.equal(filtrada.resumen.total, 61);
-    assert.equal(filtrada.resumen.aseguradas, 1);
-    assert.equal(filtrada.resumen.conversion, 1.64);
-    await guardar(
-      crm,
-      2,
-      ganada.data,
-      'COTIZACION',
-      'Cliente reabre negociación',
-    );
-    assert.equal((await crm.listar(usuario, {})).resumen.aseguradas, 0);
-    d = (await crm.detalle(3, usuario)).data;
-    await guardar(crm, 3, d, 'RECOLECCION', 'Se entregará al laboratorio');
-    d = (await crm.detalle(3, usuario)).data;
-    await pg.exec(
-      `UPDATE muestras SET fecha_ingreso_laboratorio='2026-09-12' WHERE "id_Muestra"=3`,
+    await assert.rejects(quote(o.id), (e) => e.status === 400);
+    const m1 = await sample(o.id),
+      m2 = await sample(o.id);
+    assert.equal(
+      (await crm.detalle(o.id, seller)).data.etapa,
+      'EN_ANALISIS_ID',
     );
     assert.equal(
-      (await crm.detalle(3, usuario)).data.etapa,
-      'EN_ANALISIS',
-      'Recibir en ID actualiza incluso si ya hay notas',
+      (await p.muestras.findUnique({ where: { id_Muestra: m1 } }))
+        .fecha_ingreso_laboratorio,
+      null,
+    );
+    assert.equal(await p.id_ejecuciones.count(), 0);
+    assert.equal(
+      (
+        await p.personas.findUnique({
+          where: { id_Persona: account.persona_id },
+        })
+      ).tipo_persona,
+      'PROSPECTO',
+    );
+    await finish(m1);
+    await assert.rejects(report(o.id), (e) => e.status === 400);
+    await finish(m2);
+    await report(o.id);
+    assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'COTIZACION');
+    const c1 = await quote(o.id),
+      c2 = await quote(o.id);
+    assert.equal(c2.version, 2);
+    assert.equal(
+      (await p.crm_cotizaciones.findUnique({ where: { id: c1.id } })).estado,
+      'CANCELADA',
+    );
+    await accept(o.id, c2.id);
+    const body = {
+      version: await version(o.id),
+      cotizacion_id: c2.id,
+      orden_cliente: 'OC-001',
+    };
+    const venta = (await crm.confirmar(o.id, body, seller)).data;
+    assert.equal(venta.tipo_compra, 'PRIMERA_COMPRA');
+    assert.equal((await crm.confirmar(o.id, body, seller)).data.id, venta.id);
+    assert.equal(await p.crm_ordenes_venta.count(), 1);
+    assert.equal(
+      (
+        await p.personas.findUnique({
+          where: { id_Persona: account.persona_id },
+        })
+      ).tipo_persona,
+      'CLIENTE',
+    );
+    assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'GANADA');
+    const times = await p.id_ejecuciones.findMany();
+    const op = (
+      await crm.produccion(venta.id, { servicio: 'Purificación' }, seller)
+    ).data;
+    assert.equal(op.orden_venta_id, venta.id);
+    assert.equal(
+      (await crm.produccion(venta.id, { servicio: 'Purificación' }, seller))
+        .data.id_Orden_Produc,
+      op.id_Orden_Produc,
     );
     await assert.rejects(
-      guardar(crm, 3, d, 'COTIZACION'),
+      crm.cancelarOrden(venta.id, { motivo: 'Prueba' }, seller),
       (e) => e.status === 409,
     );
     await assert.rejects(
-      guardar(crm, 4, { version: 0, etapa: 'RECOLECCION' }, 'EN_ANALISIS'),
-      (e) => e.status === 400,
+      id.planificar(m1, { procesos: [proc.id], nuevoCiclo: true }, lab),
+      (e) => e.status === 409,
+    );
+    const o2 = await open(),
+      m3 = await sample(o2.id);
+    await finish(m3);
+    await report(o2.id);
+    const c3 = await quote(o2.id);
+    await accept(o2.id, c3.id);
+    const venta2 = (
+      await crm.confirmar(
+        o2.id,
+        {
+          version: await version(o2.id),
+          cotizacion_id: c3.id,
+          orden_cliente: 'OC-002',
+        },
+        seller,
+      )
+    ).data;
+    assert.equal(venta2.tipo_compra, 'RECOMPRA');
+    let metrics = (await crm.metricas(seller, {})).data;
+    assert.equal(metrics.convertidos, 1);
+    assert.equal(metrics.clientes_recompra, 1);
+    assert.equal(metrics.ganadas, 2);
+    await crm.cancelarOrden(venta2.id, { motivo: 'Compra cancelada' }, seller);
+    metrics = (await crm.metricas(seller, {})).data;
+    assert.equal(metrics.clientes_recompra, 0);
+    assert.equal(metrics.ordenes_periodo, 1);
+    assert.equal(metrics.ganadas, 1);
+    assert.equal(
+      (
+        await p.personas.findUnique({
+          where: { id_Persona: account.persona_id },
+        })
+      ).tipo_persona,
+      'CLIENTE',
+    );
+    const o3 = await open(),
+      m4 = await sample(o3.id);
+    await finish(m4);
+    await report(o3.id);
+    await quote(o3.id);
+    await id.planificar(m4, { procesos: [proc.id], nuevoCiclo: true }, lab);
+    assert.equal(
+      (await crm.detalle(o3.id, seller)).data.etapa,
+      'EN_ANALISIS_ID',
+    );
+    await assert.rejects(quote(o3.id), (e) => e.status === 400);
+    assert.equal(
+      await p.id_reportes_oportunidad.count({
+        where: { oportunidad_id: o3.id, estado: 'PUBLICADO' },
+      }),
+      0,
+    );
+    assert.deepEqual(
+      (await p.id_ejecuciones.findMany()).filter((x) =>
+        times.some((y) => y.id === x.id),
+      ),
+      times,
+    );
+    const stale = await version(o3.id);
+    await crm.guardar(
+      o3.id,
+      { version: stale, nota: 'Pendiente nueva evaluación' },
+      seller,
     );
     await assert.rejects(
-      guardar(
-        crm,
-        4,
-        { version: 0, etapa: 'RECOLECCION' },
-        'VENTA_NO_ASEGURADA',
-        '',
+      crm.guardar(
+        o3.id,
+        { version: stale, nota: 'Cambio desactualizado' },
+        seller,
+      ),
+      (e) => e.status === 409,
+    );
+    await assert.rejects(
+      crm.guardar(
+        o3.id,
+        {
+          version: await version(o3.id),
+          etapa: 'GANADA',
+          nota: 'Intento de omitir orden',
+        },
+        seller,
       ),
       (e) => e.status === 400,
     );
-    const actual = (await crm.detalle(4, usuario)).data;
-    const simultaneas = await Promise.allSettled([
-      guardar(crm, 4, actual, 'VENTA_NO_ASEGURADA'),
-      guardar(crm, 4, actual, 'COTIZACION'),
-    ]);
-    assert.equal(simultaneas.filter((r) => r.status === 'fulfilled').length, 1);
-    assert.equal(
-      simultaneas.find((r) => r.status === 'rejected').reason.status,
-      409,
+    await crm.guardar(
+      o3.id,
+      {
+        version: await version(o3.id),
+        etapa: 'PERDIDA',
+        nota: 'Cliente no acepta',
+      },
+      seller,
     );
-    assert.deepEqual(
-      await pg.query('SELECT * FROM id_ejecuciones'),
-      tiemposAntes,
-    );
-    assert.deepEqual(
-      await pg.query('SELECT * FROM proceso_tramos'),
-      tramosAntes,
-    );
-    assert.equal(
-      (
-        await pg.query(
-          'SELECT "estado_Muestra" FROM muestras WHERE "id_Muestra"=2',
-        )
-      ).rows[0].estado_Muestra,
-      'PENDIENTE',
-    );
-    assert.equal(
-      eventos.length,
-      5,
-      'Solo se notifica después de guardar correctamente',
-    );
-    assert.throws(() => filtrosCrm({ desde: '2026-02-30' }));
-    assert.throws(() => filtrosCrm({ pagina: '0' }));
-    assert.throws(() => filtrosCrm({ etapa: 'APROBADO' }));
+    assert.equal((await crm.metricas(seller, {})).data.efectividad, 50);
+    console.log('Flujo completo validado con Prisma y PostgreSQL en memoria');
   } finally {
+    await p.$disconnect();
     await pg.close();
   }
 });
-
-test('CRM HTTP: Bearer, área Ventas y propiedad de la muestra', async () => {
-  process.env.REDIS_ENABLED = 'false';
-  const password = 'prueba-local',
-    salt = 'test';
-  process.env.UST_USUARIOS_JSON = JSON.stringify([
-    {
-      usuario: 'prueba',
-      personaId: 10,
-      areas: ['ventas', 'id', 'seguridad'],
-      salt,
-      hash: scryptSync(password, salt, 64).toString('hex'),
-    },
-  ]);
-  const { AppModule } = require('../dist/app.module');
-  const { PrismaService } = require('../dist/prisma.service');
-  const { pg, prisma } = await fixture();
-  const module = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(PrismaService)
-    .useValue(prisma)
-    .compile();
-  const app = module.createNestApplication();
-  await app.init();
-  const api = request(app.getHttpServer());
-  try {
-    const login = async (area) =>
-      (
-        await api
-          .post('/api/auth/login')
-          .send({ usuario: 'prueba', password, area })
-          .expect(201)
-      ).body.token;
-    const ventas = await login('ventas'),
-      id = await login('id');
-    await api.get('/api/ventas/crm/oportunidades').expect(401);
-    await api
-      .get('/api/ventas/crm/oportunidades')
-      .set('Authorization', `Bearer ${id}`)
-      .expect(403);
-    await api
-      .post('/api/ventas/crm/oportunidades/2/seguimiento')
-      .set('Authorization', `Bearer ${id}`)
-      .send({})
-      .expect(403);
-    const result = await api
-      .get('/api/ventas/crm/oportunidades')
-      .set('Authorization', `Bearer ${ventas}`)
-      .expect(200);
-    assert.equal(result.body.resumen.total, 61);
-    await api
-      .get('/api/ventas/crm/oportunidades/62')
-      .set('Authorization', `Bearer ${ventas}`)
-      .expect(404);
-    await api
-      .post('/api/ventas/crm/oportunidades/2/seguimiento')
-      .set('Authorization', `Bearer ${ventas}`)
-      .send({
-        version: 0,
-        etapaActual: 'RECOLECCION',
-        etapa: 'VENTA_ASEGURADA',
-        nota: 'Compra confirmada',
-      })
-      .expect(201);
-    const updated = await api
-      .get('/api/ventas/crm/oportunidades?etapa=VENTA_ASEGURADA')
-      .set('Authorization', `Bearer ${ventas}`)
-      .expect(200);
-    assert.equal(updated.body.total, 1);
-    assert.equal(updated.body.resumen.aseguradas, 1);
-  } finally {
-    await app.close();
-    await pg.close();
-  }
+test('recurrencia exige tres compras y detecta irregularidad', () => {
+  const d = (n) => new Date(n * 86400000);
+  assert.equal(
+    recurrencia([d(0), d(30)], null).frecuencia_observada,
+    'DATOS_INSUFICIENTES',
+  );
+  assert.equal(
+    recurrencia([d(0), d(30), d(60)], null).frecuencia_observada,
+    'MENSUAL',
+  );
+  assert.equal(
+    recurrencia([d(0), d(10), d(150)], null).frecuencia_observada,
+    'IRREGULAR',
+  );
+  assert.equal(
+    recurrencia([d(0), d(10), d(150)], null).proxima_compra_estimada,
+    null,
+  );
 });
