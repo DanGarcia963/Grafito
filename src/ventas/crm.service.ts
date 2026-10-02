@@ -199,6 +199,7 @@ export class CrmService {
         throw new BadRequestException(
           'Selecciona un prospecto o cliente; no se puede convertir un empleado o proveedor desde CRM',
         );
+      await tx.$queryRaw`SELECT "id_Persona" FROM personas WHERE "id_Persona"=${p.id_Persona} FOR UPDATE`;
       if (body.persona_id && p.nombre !== nombre) {
         const duplicada = await tx.personas.findFirst({
           where: {
@@ -440,7 +441,8 @@ export class CrmService {
   async reporte(id: number, b: any, f: Archivo, u: Usuario) {
     const data = await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
-      abierta(o);
+      if (o.etapa === 'GANADA')
+        throw new ConflictException('El reporte respalda una venta confirmada y no puede modificarse');
       versionValida(o, b.version);
       if (!Object.values(id_reporte_resultado).includes(b.resultado))
         throw new BadRequestException('Resultado inválido');
@@ -511,7 +513,9 @@ export class CrmService {
         `Reporte v${r.version}: ${r.resultado}`,
         {
           estado_tecnico: r.resultado,
-          etapa: r.resultado === 'VIABLE' ? 'COTIZACION' : 'EN_ANALISIS_ID',
+          ...(cerradas.includes(o.etapa) ? {} : {
+            etapa: r.resultado === 'VIABLE' ? 'COTIZACION' as const : 'EN_ANALISIS_ID' as const,
+          }),
         },
       );
       return r;
@@ -522,7 +526,8 @@ export class CrmService {
   async anularReporte(id: number, rid: number, b: any, u: Usuario) {
     await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
-      abierta(o);
+      if (o.etapa === 'GANADA')
+        throw new ConflictException('El reporte respalda una venta confirmada y no puede modificarse');
       versionValida(o, b.version);
       const motivo = texto(b.motivo, 4000);
       const r = await tx.id_reportes_oportunidad.findFirst({
@@ -546,7 +551,7 @@ export class CrmService {
       });
       await eventoCrm(tx, o, u, 'REPORTE_ID_ANULADO', motivo, {
         estado_tecnico: 'PENDIENTE',
-        etapa: 'EN_ANALISIS_ID',
+        ...(cerradas.includes(o.etapa) ? {} : { etapa: 'EN_ANALISIS_ID' as const }),
       });
     });
     this.avisar(id);
