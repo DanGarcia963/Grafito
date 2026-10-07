@@ -1,6 +1,6 @@
 // GRAFITO — MODELO OBJETIVO LIMPIO (2026-10-06)
-// No es compatible con las consultas actuales hasta adaptar backend/frontend.
-// NO aplicado a Supabase ni al repositorio. No usar reset/db push sobre la base compartida.
+// Backend/frontend adaptados al inventario y reproceso; aplicar SQL incremental antes del despliegue.
+// No usar reset/db push sobre la base compartida. Ver prisma/actualizaciones/.
 // Legal y KPI se conservan íntegros; no borrar toda la base para aplicar este rediseño.
 // Una venta = un producto y un servicio. OP opcionalmente ligada a una sola venta.
 // Existencia = movimientos físicos; reserva != consumo; recepción != producción.
@@ -339,6 +339,10 @@ model no_conformidades {
 }
 
 model ordenes_produccion {
+  es_reproceso Boolean @default(false)
+  motivo_reproceso String? @db.Text
+  propietario_id Int?
+  propietario personas? @relation("op_propietario", fields: [propietario_id], references: [id_Persona], onDelete: Restrict)
   id_Orden_Produc         Int                            @id @default(autoincrement())
   no_Orden_Produc         String                         @unique @db.VarChar(50)
   orden_venta_id          Int?
@@ -383,6 +387,7 @@ model parametros_laboratorio {
 }
 
 model personas {
+  ordenes_produccion_propietario ordenes_produccion[] @relation("op_propietario")
   id_Persona                                                             Int                        @id @default(autoincrement())
   codigo                                                                 String?                    @db.VarChar(50)
   nombre                                                                 String                     @db.VarChar(150)
@@ -427,6 +432,8 @@ model personas {
 }
 
 model productos_materiales {
+  /// Configuración por producto: campos permitidos y límites de peso de contenedores.
+  configuracion_operativa Json? @db.JsonB
   id_Produc_Mater           Int                             @id @default(autoincrement())
   codigo_Producto           String?                         @db.VarChar(50)
   nombre_Producto           String                          @db.VarChar(150)
@@ -917,6 +924,8 @@ model crm_cotizaciones {
 }
 
 model crm_ordenes_venta {
+  /// Presentación acordada; los pesos reales se registran en el lote de inventario.
+  especificaciones Json? @db.JsonB
   id                   Int                     @id @default(autoincrement())
   folio                String                  @unique(map: "uq_crm_orden_venta_folio") @db.VarChar(60)
   oportunidad_id       Int                     @unique(map: "uq_crm_orden_venta_oportunidad")
@@ -1334,6 +1343,8 @@ enum kpi_configuraciones_agregacion {
 
 // ===== RECEPCIÓN E INVENTARIO POR LOTE =====
 model lotes_inventario {
+  /// Identificación de la recepción/descarga; el saldo vigente se calcula en movimientos.
+  especificaciones Json? @db.JsonB
   id                       Int                        @id @default(autoincrement())
   folio                    String                     @unique @db.VarChar(100)
   producto_id              Int
@@ -1437,6 +1448,8 @@ enum inventario_propiedad {
 }
 
 enum inventario_condicion {
+  REZAGADO
+  FUERA_DE_ESPECIFICACION
   SUCIO
   INTERMEDIO
   REGENERADO

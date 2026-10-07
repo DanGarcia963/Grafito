@@ -518,6 +518,8 @@ export class CalidadService {
     } else if (m.lote_inventario_id) {
       await tx.$queryRaw`SELECT id FROM lotes_inventario WHERE id=${m.lote_inventario_id} FOR UPDATE`;
     }
+    if (m.lote_id && await tx.lotes_produccion.count({where: {id_Lote_Produccion: m.lote_id, estado_Calida: 'FUERA_DE_ESPECIFICACION'}}))
+      throw new BadRequestException('El lote fue descargado como F.E.; analiza el nuevo lote de reproceso');
     if (m.lote_id || m.lote_inventario_id) {
       const posterior = await tx.muestras.count({
         where: {

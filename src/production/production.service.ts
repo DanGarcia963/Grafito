@@ -1,3 +1,7 @@
+import {
+  aptitudMaterial,
+  especificacionesValidas,
+} from '../inventario/especificaciones.logic';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { Usuario } from '../auth/auth.service';
@@ -37,6 +41,7 @@ export class ProductionService {
     const result = await this.prisma.ordenes_produccion.findMany({
       where: { linea_Produccion: { equals: 'GRAFITO', mode: 'insensitive' } },
       include: {
+        propietario: { select: { nombre: true } },
         productos_materiales: true,
         responsable: { select: { nombre: true } },
         crm_ordenes_venta: {
@@ -249,6 +254,10 @@ export class ProductionService {
         where: { id_Lote_Produccion: id },
       });
       if (!lote) throw new NotFoundException('Lote no encontrado');
+      if (lote.estado_Calida === 'FUERA_DE_ESPECIFICACION')
+        throw new BadRequestException(
+          'F.E. descargado requiere una nueva OP de reproceso',
+        );
       await tx.$queryRaw`SELECT id FROM lotes_inventario WHERE lote_produccion_id=${id} ORDER BY id FOR UPDATE`;
       const ultima = await tx.muestras.findFirst({
         where: { lote_id: id, area_Muestra: 'CALIDAD' },
@@ -355,7 +364,9 @@ export class ProductionService {
       const lote = await tx.lotes_produccion.findFirst({
         where: { tanque_id: id },
         include: {
-          ordenes_produccion: { include: { crm_ordenes_venta: true } },
+          ordenes_produccion: {
+            include: { crm_ordenes_venta: true, productos_materiales: true },
+          },
         },
       });
       if (lote)
@@ -449,7 +460,12 @@ export class ProductionService {
   async catalogos() {
     const [productos, personas, ubicaciones] = await Promise.all([
       this.prisma.productos_materiales.findMany({
-        select: { id_Produc_Mater: true, nombre_Producto: true, UM: true },
+        select: {
+          id_Produc_Mater: true,
+          nombre_Producto: true,
+          UM: true,
+          configuracion_operativa: true,
+        },
       }),
       this.prisma.personas.findMany({
         select: { id_Persona: true, nombre: true },
@@ -551,15 +567,11 @@ export class ProductionService {
           r.cantidad.sub(consumido(r.movimientos)).lt(c.cantidad)
         )
           throw new BadRequestException('Reserva insuficiente');
-        const liberado =
-          r.lote.origen === 'PRODUCCION'
-            ? r.lote.lote_produccion?.estado_Calida === 'LIBERADO'
-            : r.lote.estado_calidad_recepcion === 'LIBERADO';
-        if (
-          !liberado ||
-          (r.lote.fecha_caducidad && r.lote.fecha_caducidad < new Date())
-        )
-          throw new BadRequestException('Material bloqueado o caducado');
+        const aptitud = aptitudMaterial(r.lote);
+        if (!(op.es_reproceso ? aptitud.reprocesable : aptitud.venta))
+          throw new BadRequestException(
+            'Material bloqueado o caducado para esta operación',
+          );
         if (r.lote.unidad !== tanque.unidad_capacidad)
           throw new BadRequestException(
             'Unidad incompatible con capacidad del tanque',
@@ -645,7 +657,9 @@ export class ProductionService {
       const lote = await tx.lotes_produccion.findUnique({
         where: { id_Lote_Produccion: id },
         include: {
-          ordenes_produccion: { include: { crm_ordenes_venta: true } },
+          ordenes_produccion: {
+            include: { crm_ordenes_venta: true, productos_materiales: true },
+          },
         },
       });
       if (!lote) throw new NotFoundException('Lote no encontrado');
@@ -664,9 +678,48 @@ export class ProductionService {
           'Selecciona una ubicación de destino activa',
         );
       const op = lote.ordenes_produccion,
-        ov = op.crm_ordenes_venta,
-        cliente =
-          ov?.tipo_venta === 'SERVICIO_REGENERACION' ? ov.persona_id : null;
+        ov = op.crm_ordenes_venta;
+      const cliente =
+        op.propietario_id ??
+        (ov?.tipo_venta === 'SERVICIO_REGENERACION' ? ov.persona_id : null);
+      const fe = b.destino_calidad === 'FE';
+      if (fe) {
+        const ultima = await tx.muestras.findFirst({
+          where: { lote_id: id, area_Muestra: 'CALIDAD' },
+          orderBy: { id_Muestra: 'desc' },
+        });
+        if (
+          lote.estado_Calida !== 'RECHAZADO' ||
+          !ultima ||
+          ultima.categoria_Muestra !== 'MUESTRA_AJUSTADO' ||
+          ultima.estado_Muestra !== 'RECHAZADO'
+        )
+          throw new BadRequestException(
+            'F.E. requiere la última muestra ajustada rechazada',
+          );
+        const abierto = await tx.proceso_tramos.count({
+          where: {
+            entidad: 'MUESTRA',
+            entidad_id: ultima.id_Muestra,
+            fin: null,
+          },
+        });
+        if (abierto)
+          throw new BadRequestException('Hay una revisión de Calidad abierta');
+      } else if (
+        ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(lote.estado_Calida) ||
+        (b.destino_calidad === 'LIBERADO' && lote.estado_Calida !== 'LIBERADO')
+      ) {
+        throw new BadRequestException(
+          'Libera el lote o descarga explícitamente como F.E. tras el rechazo final',
+        );
+      }
+      const especificaciones = especificacionesValidas(
+        b.especificaciones,
+        op.productos_materiales.configuracion_operativa,
+        op.unidad,
+        cantidad,
+      );
       const material = await tx.lotes_inventario.create({
         data: {
           folio: `PT-${lote.no_Lote}`,
@@ -674,7 +727,12 @@ export class ProductionService {
           unidad: op.unidad,
           propiedad: cliente ? 'DE_CLIENTE' : 'PROPIO',
           propietario_id: cliente,
-          condicion: cliente ? 'REGENERADO' : 'TERMINADO',
+          condicion: fe
+            ? 'FUERA_DE_ESPECIFICACION'
+            : cliente
+              ? 'REGENERADO'
+              : 'TERMINADO',
+          especificaciones,
           origen: 'PRODUCCION',
           lote_produccion_id: id,
         },
@@ -693,7 +751,12 @@ export class ProductionService {
       });
       await tx.lotes_produccion.update({
         where: { id_Lote_Produccion: id },
-        data: { estado: 'FINALIZADO', fecha_fin: new Date(), tanque_id: null },
+        data: {
+          estado: 'FINALIZADO',
+          fecha_fin: new Date(),
+          tanque_id: null,
+          ...(fe ? { estado_Calida: 'FUERA_DE_ESPECIFICACION' } : {}),
+        },
       });
       const ctx = {
         entidad: 'TANQUE' as const,
@@ -704,6 +767,7 @@ export class ProductionService {
       const tramo = await this.tiempos.transicion(tx, ctx, null);
       await this.tiempos.evento(tx, ctx, tramo?.ciclo ?? 1, 'DESCARGA_LOTE', {
         cantidad: cantidad.toString(),
+        destino_calidad: fe ? 'FE' : lote.estado_Calida,
         ubicacion,
         realizado_por: u.usuario,
       });
@@ -767,6 +831,14 @@ export class ProductionService {
         }))
       )
         throw new BadRequestException('Ubicación inválida');
+      const especificaciones = especificacionesValidas(
+        b.especificaciones,
+        producto.configuracion_operativa,
+        producto.UM,
+        cantidad,
+      );
+      if (b.condicion && !['SUCIO', 'INSUMO', 'REZAGADO'].includes(b.condicion))
+        throw new BadRequestException('Condición de recepción inválida');
       const recepcion = await tx.lotes_llegada.create({
         data: {
           no_lote: folio,
@@ -784,7 +856,9 @@ export class ProductionService {
           unidad: producto.UM,
           propiedad: b.propiedad,
           propietario_id: b.propiedad === 'DE_CLIENTE' ? remitente : null,
-          condicion: b.propiedad === 'DE_CLIENTE' ? 'SUCIO' : 'INSUMO',
+          condicion:
+            b.condicion || (b.propiedad === 'DE_CLIENTE' ? 'SUCIO' : 'INSUMO'),
+          especificaciones,
           origen: 'RECEPCION',
           recepcion_id: recepcion.id,
           orden_venta_id: ov?.id,
@@ -823,6 +897,117 @@ export class ProductionService {
     this.eventos.notificar('MUESTRA_CREADA', {});
     return { success: true, data };
   }
+  async vincularVenta(id: number, b: any, u: Usuario) {
+    const ventaId = idValido(b.orden_venta_id);
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${ventaId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Orden_Produc" FROM ordenes_produccion WHERE "id_Orden_Produc"=${id} FOR UPDATE`;
+      const [ov, op] = await Promise.all([
+        tx.crm_ordenes_venta.findUnique({ where: { id: ventaId } }),
+        tx.ordenes_produccion.findUnique({
+          where: { id_Orden_Produc: id },
+          include: {
+            reservas_material: { include: { lote: true } },
+            lotes_produccion: { include: { inventario_obtenido: true } },
+          },
+        }),
+      ]);
+      if (!ov || !op) throw new NotFoundException('Orden no encontrada');
+      if (ov.estado !== 'CONFIRMADA' || op.estado_Plan === 'CANCELADA')
+        throw new BadRequestException('Orden cancelada');
+      if (op.orden_venta_id === ventaId) return op;
+      if (op.orden_venta_id)
+        throw new BadRequestException('La OP ya tiene venta');
+      if (op.producto_id !== ov.producto_id || op.unidad !== ov.unidad)
+        throw new BadRequestException('Producto o unidad incompatible');
+      const insumos = op.reservas_material.map((r) => r.lote);
+      const salidas = op.lotes_produccion.flatMap((l) => l.inventario_obtenido);
+      await bloquearMaterial(
+        tx,
+        [...insumos, ...salidas].map((l) => l.id),
+      );
+      const propietario = op.propietario_id;
+      if (
+        (ov.tipo_venta === 'SERVICIO_REGENERACION' &&
+          propietario !== ov.persona_id) ||
+        (ov.tipo_venta !== 'SERVICIO_REGENERACION' && propietario != null) ||
+        insumos.some(
+          (l) =>
+            (l.propiedad === 'DE_CLIENTE' &&
+              l.propietario_id !== propietario) ||
+            (l.orden_venta_id && l.orden_venta_id !== ventaId),
+        ) ||
+        salidas.some((l) => l.propietario_id !== propietario)
+      )
+        throw new BadRequestException(
+          'La venta no corresponde al propietario del material',
+        );
+      const plan = await tx.ordenes_produccion.aggregate({
+        where: { orden_venta_id: ventaId, estado_Plan: { not: 'CANCELADA' } },
+        _sum: { cantidad_Planificada: true },
+      });
+      if (
+        op.cantidad_Planificada
+          .add(plan._sum.cantidad_Planificada ?? 0)
+          .gt(ov.cantidad)
+      )
+        throw new BadRequestException(
+          'La OP excede la cantidad pendiente de planificar',
+        );
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'OP',
+          entidad_id: id,
+          ciclo: 1,
+          fecha: new Date(),
+          accion: 'VINCULAR_VENTA',
+          detalle: JSON.stringify({
+            orden_venta_id: ventaId,
+            realizado_por: u.usuario,
+          }),
+        },
+      });
+      return tx.ordenes_produccion.update({
+        where: { id_Orden_Produc: id },
+        data: { orden_venta_id: ventaId },
+      });
+    });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', {});
+    return { success: true, data };
+  }
+
+  async marcarRezagado(id: number, b: any, u: Usuario) {
+    const motivo = texto(b.motivo, 4000);
+    return this.prisma.$transaction(async (tx) => {
+      await bloquearMaterial(tx, [id]);
+      const lote = await tx.lotes_inventario.findUnique({ where: { id } });
+      if (!lote) throw new NotFoundException('Material no encontrado');
+      if (['FUERA_DE_ESPECIFICACION', 'RESIDUO'].includes(lote.condicion))
+        throw new BadRequestException('F.E. y residuos conservan su condición');
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'INVENTARIO',
+          entidad_id: id,
+          ciclo: 1,
+          fecha: new Date(),
+          accion: 'MARCAR_REZAGADO',
+          detalle: JSON.stringify({
+            motivo,
+            anterior: lote.condicion,
+            realizado_por: u.usuario,
+          }),
+        },
+      });
+      return {
+        success: true,
+        data: await tx.lotes_inventario.update({
+          where: { id },
+          data: { condicion: 'REZAGADO' },
+        }),
+      };
+    });
+  }
+
   async cerrarOrden(id: number, b: any, u: Usuario) {
     const estado = b.estado;
     if (!['FINALIZADA', 'CANCELADA'].includes(estado))
