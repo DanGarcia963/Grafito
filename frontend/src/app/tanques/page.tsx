@@ -507,6 +507,12 @@ export default function TanquesPage() {
               <div className="flex gap-2 mb-4">
                 <button
                   className={boton}
+                  onClick={() => setForm({ tipo: "apertura", dato: null })}
+                >
+                  Registrar inventario inicial
+                </button>
+                <button
+                  className={boton}
                   onClick={() => setForm({ tipo: "recepcion", dato: null })}
                 >
                   Recibir material
@@ -640,6 +646,7 @@ export default function TanquesPage() {
               {
                 (
                   {
+                    apertura: "Registrar inventario existente",
                     recepcion: "Recibir material en inventario",
                     ubicacion: "Nueva ubicación de almacén",
                     cerrar: "Cerrar orden de producción",
@@ -664,6 +671,8 @@ export default function TanquesPage() {
                   b.especificaciones = JSON.parse(b.especificaciones);
                 void ejecutar(async () => {
                   const d = form.dato;
+                  if (form.tipo === "apertura")
+                    await pedir("/api/produccion/inventario/apertura", b);
                   if (form.tipo === "recepcion")
                     await pedir("/api/produccion/recepciones", b);
                   if (form.tipo === "ubicacion")
@@ -755,6 +764,91 @@ export default function TanquesPage() {
                       Motivo
                       <textarea required name="motivo" className={input} />
                     </label>
+                  </>
+                )}
+                {form.tipo === "apertura" && (
+                  <>
+                    <p>
+                      Captura existencias físicas anteriores al sistema. Esto crea
+                      un lote y un movimiento de apertura; no inventa recepción ni
+                      muestra. Registra el estado real de Calidad.
+                    </p>
+                    <label>
+                      Folio del lote de apertura
+                      <input required name="folio" maxLength={100} className={input} />
+                    </label>
+                    <label>
+                      Producto
+                      <select required name="producto_id" className={input}
+                        value={productoEspec} onChange={(e) => setProductoEspec(e.target.value)}>
+                        <option value="">Selecciona</option>
+                        {cat.productos?.map((p: any) => (
+                          <option key={p.id_Produc_Mater} value={p.id_Produc_Mater}>
+                            {p.nombre_Producto} · {p.UM}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Cantidad en la unidad del producto
+                      <input required name="cantidad" type="number" min="0.0001" step="0.0001" className={input} />
+                    </label>
+                    <label>
+                      Propiedad
+                      <select required name="propiedad" className={input}>
+                        <option value="PROPIO">Propio</option>
+                        <option value="DE_CLIENTE">Propiedad de un cliente</option>
+                      </select>
+                    </label>
+                    <label>
+                      Cliente propietario (solo si es material de cliente)
+                      <select name="propietario_id" className={input} defaultValue="">
+                        <option value="">Sin propietario / propio</option>
+                        {cat.personas?.map((p: any) => (
+                          <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Condición física
+                      <select required name="condicion" className={input} defaultValue="SUCIO">
+                        <option value="NUEVO">Nuevo</option>
+                        <option value="SUCIO">Sucio para regenerar</option>
+                        <option value="REZAGADO">Rezagado: producto que quedó</option>
+                        <option value="FUERA_DE_ESPECIFICACION">F.E.: rechazado por Calidad</option>
+                        <option value="INTERMEDIO">Intermedio</option>
+                        <option value="REGENERADO">Regenerado</option>
+                        <option value="TERMINADO">Terminado</option>
+                        <option value="INSUMO">Insumo</option>
+                      </select>
+                    </label>
+                    <label>
+                      Estado actual de Calidad
+                      <select required name="estado_calidad_recepcion" className={input} defaultValue="CUARENTENA">
+                        <option value="CUARENTENA">Cuarentena</option>
+                        <option value="LIBERADO">Liberado</option>
+                        <option value="BLOQUEADO">Bloqueado</option>
+                        <option value="RECHAZADO">Rechazado (solo F.E.)</option>
+                      </select>
+                    </label>
+                    <label>
+                      Ubicación inicial
+                      <select required name="ubicacion_id" className={input}>
+                        <option value="">Selecciona</option>
+                        {cat.ubicaciones.map((u: any) => (
+                          <option key={u.id} value={u.id}>{u.nombre}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Observaciones y referencia del inventario físico
+                      <textarea required name="observaciones" maxLength={4000} className={input} />
+                    </label>
+                    <EspecificacionesMaterial
+                      key={productoEspec}
+                      config={cat.productos.find((p: any) => String(p.id_Produc_Mater) === productoEspec)?.configuracion_operativa}
+                      unidad={cat.productos.find((p: any) => String(p.id_Produc_Mater) === productoEspec)?.UM}
+                    />
                   </>
                 )}
                 {form.tipo === "recepcion" && (

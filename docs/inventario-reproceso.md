@@ -81,3 +81,8 @@ Esta implementación y sus pruebas no ejecutan cambios en Supabase. Se verificó
 `npm run test:inventario`: sumas y rangos de pesos, prensas válidas, cuarentena, OP de cliente sin venta, rechazo final y descarga F.E., bloqueo de liberación histórica, reserva/consumo de reproceso, propiedad, vinculación posterior, rezagado y SQL incremental.
 
 `npm run test:crm`: regresión del flujo comercial y de producción existente. El frontend se comprueba con `npx tsc --noEmit`.
+
+
+## Inventario inicial ya existente
+
+Usa **Registrar inventario inicial** para capturar stock físico anterior a la digitalización. Crea un lote de inventario y un movimiento `APERTURA`, sin registrar una recepción nueva ni crear una muestra ficticia. Captura propietario, condición, estado actual de Calidad, ubicación, cantidad y especificaciones verificadas. Un F.E. debe conservar estado `RECHAZADO`; el sistema lo reserva únicamente para una OP de reproceso.

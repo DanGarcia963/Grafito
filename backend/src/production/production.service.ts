@@ -18,6 +18,7 @@ import { EventsGateway } from '../events.gateway';
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
@@ -456,6 +457,101 @@ export class ProductionService {
         id_Muestra: result.muestraId,
       });
     return result;
+  }
+  /**
+   * Inventario de apertura: captura una existencia física previa a la
+   * digitalización, sin fingir recepción reciente ni generar una muestra nueva.
+   */
+  async registrarApertura(b: any, u: Usuario) {
+    const folio = texto(b.folio, 100);
+    const cantidad = decimalCrm(b.cantidad, 4);
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`apertura:${folio}`}))::text`;
+      const previo = await tx.lotes_inventario.findUnique({ where: { folio } });
+      if (previo) {
+        if (previo.origen !== 'APERTURA')
+          throw new ConflictException('El folio ya pertenece a otro movimiento');
+        return previo;
+      }
+      const producto = await tx.productos_materiales.findUnique({
+        where: { id_Produc_Mater: idValido(b.producto_id) },
+      });
+      if (!producto) throw new BadRequestException('Producto inválido');
+      const propiedad = b.propiedad;
+      if (!['PROPIO', 'DE_CLIENTE'].includes(propiedad))
+        throw new BadRequestException('Propiedad inválida');
+      const propietarioId =
+        propiedad === 'DE_CLIENTE' ? idValido(b.propietario_id) : null;
+      if (propiedad === 'DE_CLIENTE' && !propietarioId)
+        throw new BadRequestException('Selecciona el propietario del material');
+      if (propiedad === 'PROPIO' && b.propietario_id)
+        throw new BadRequestException('El inventario propio no lleva cliente propietario');
+      const condicion = b.condicion;
+      const condiciones = [
+        'NUEVO', 'SUCIO', 'REZAGADO', 'FUERA_DE_ESPECIFICACION',
+        'INTERMEDIO', 'REGENERADO', 'TERMINADO', 'INSUMO',
+      ];
+      if (!condiciones.includes(condicion))
+        throw new BadRequestException('Condición de apertura inválida');
+      const estadoCalidad = b.estado_calidad_recepcion;
+      if (!['CUARENTENA', 'LIBERADO', 'BLOQUEADO', 'RECHAZADO'].includes(estadoCalidad))
+        throw new BadRequestException('Estado de Calidad inválido');
+      if (
+        condicion === 'FUERA_DE_ESPECIFICACION'
+          ? estadoCalidad !== 'RECHAZADO'
+          : estadoCalidad === 'RECHAZADO'
+      )
+        throw new BadRequestException(
+          'F.E. debe conservarse como rechazado; usa esa condición solo para producto rechazado por Calidad',
+        );
+      const ubicacionId = idValido(b.ubicacion_id);
+      if (
+        !(await tx.inventario_ubicaciones.count({
+          where: { id: ubicacionId, activo: true, tipo: { not: 'TANQUE' } },
+        }))
+      )
+        throw new BadRequestException('Ubicación inválida');
+      const especificaciones = especificacionesValidas(
+        b.especificaciones,
+        producto.configuracion_operativa,
+        producto.UM,
+        cantidad,
+      );
+      const observaciones = texto(b.observaciones, 4000);
+      if (!observaciones)
+        throw new BadRequestException('Describe el origen o corte del inventario inicial');
+      const lote = await tx.lotes_inventario.create({
+        data: {
+          folio,
+          producto_id: producto.id_Produc_Mater,
+          unidad: producto.UM,
+          propiedad,
+          propietario_id: propietarioId,
+          condicion,
+          estado_calidad_recepcion: estadoCalidad,
+          origen: 'APERTURA',
+          especificaciones,
+          observaciones,
+          liberado_en: estadoCalidad === 'LIBERADO' ? new Date() : null,
+          liberado_por: estadoCalidad === 'LIBERADO' ? u.usuario : null,
+        },
+      });
+      await tx.movimientos_inventario.create({
+        data: {
+          folio_Movi: `INI-${randomUUID()}`,
+          clave_evento: `apertura:${folio}`,
+          tipo: 'APERTURA',
+          cantidad,
+          lote_inventario_id: lote.id,
+          ubicacion_destino_id: ubicacionId,
+          realizado_por: u.usuario,
+          motivo: observaciones,
+        },
+      });
+      return lote;
+    });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', {});
+    return { success: true, data };
   }
   async catalogos() {
     const [productos, personas, ubicaciones] = await Promise.all([
