@@ -277,15 +277,15 @@ const cargarLotesLlegada = async () => {
     );
 
     const payload = {
-      no_lote: loteSeleccionado.no_Orden_Produc ? String(loteSeleccionado.no_Orden_Produc) : `ORD-${loteSeleccionado.id_Orden_Produc}`,
-      orden_produccion_id: loteSeleccionado.id_Orden_Produc,
+      no_lote: loteSeleccionado.no_lote ? String(loteSeleccionado.no_lote) : `ORD-${loteSeleccionado.id}`,
+      recepcion_id: loteSeleccionado.id,
       reviso_nombre: revisoNombre.trim(),
       estado_checklist: tieneIncidencias ? 'CON_INCIDENCIAS' : 'COMPLETADO',
-      fecha_llegada: loteSeleccionado.fecha_Llegada,
+      fecha_llegada: loteSeleccionado.fecha_llegada,
       fecha_Revision: new Date().toISOString(),
       observaciones: {
         observaciones_orden: loteSeleccionado.observaciones || null,
-        cantidad_venta: loteSeleccionado.cantidad_Venta,
+
       },
       contenedores: contenedores,
     };
@@ -939,7 +939,7 @@ return (
             <div className="p-4 border-b border-slate-800 flex items-center justify-between">
               <h3 className="font-semibold text-white text-sm flex items-center gap-2">
                 <Truck className="w-4 h-4 text-cyan-400" />
-                Lotes de Grafito Arribados a Planta Pendientes de Checklist
+                Recepciones de materiales pendientes de checklist
               </h3>
             </div>
 
@@ -947,10 +947,10 @@ return (
               <table className="w-full text-left text-sm text-slate-300">
                 <thead className="bg-slate-950 text-slate-400 text-xs uppercase border-b border-slate-800">
                   <tr>
-                    <th className="p-3.5">No. Orden / Lote</th>
-                    <th className="p-3.5">Línea / Observación</th>
+                    <th className="p-3.5">Recepción</th>
+                    <th className="p-3.5">Remitente / Observación</th>
                     <th className="p-3.5">Fecha Llegada</th>
-                    <th className="p-3.5">Cantidad Venta</th>
+                    <th className="p-3.5">Materiales</th>
                     <th className="p-3.5">Estatus Checklist</th>
                     <th className="p-3.5 text-right">Acción</th>
                   </tr>
@@ -965,25 +965,25 @@ return (
                   ) : lotesLlegada.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center p-6 text-slate-500">
-                        No hay órdenes pendientes de llegada para revisión.
+                        No hay recepciones pendientes de revisión.
                       </td>
                     </tr>
                   ) : (
                     lotesLlegada.map((orden) => (
-                      <tr key={orden.id_Orden_Produc} className="hover:bg-slate-800/30 transition-colors">
+                      <tr key={orden.id} className="hover:bg-slate-800/30 transition-colors">
                         <td className="p-3.5 font-bold text-cyan-400">
-                          {orden.no_Orden_Produc || `ORD-${orden.id_Orden_Produc}`}
+                          {orden.no_lote || `ORD-${orden.id}`}
                         </td>
                         <td className="p-3.5 text-xs text-slate-300">
-                          <span className="block font-semibold text-slate-200">{orden.linea_Produccion}</span>
+                          <span className="block font-semibold text-slate-200">{orden.remitente?.nombre}</span>
                           <span className="text-slate-400">{orden.observaciones || 'N/A'}</span>
                         </td>
                         <td className="p-3.5">
-                          {orden.fecha_Llegada
-                            ? new Date(orden.fecha_Llegada).toLocaleDateString('es-MX', { timeZone: 'UTC' })
+                          {orden.fecha_llegada
+                            ? new Date(orden.fecha_llegada).toLocaleDateString('es-MX', { timeZone: 'UTC' })
                             : 'S/N'}
                         </td>
-                        <td className="p-3.5 font-medium">{orden.cantidad_Venta ?? 'N/A'}</td>
+                        <td className="p-3.5 font-medium">{orden.materiales?.map((m: any) => m.producto.nombre_Producto).join(', ') || 'Sin materiales'}</td>
                         <td className="p-3.5">
                           <span className="px-2.5 py-1 text-xs rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
                             PENDIENTE
@@ -1015,15 +1015,15 @@ return (
             <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  Checklist de Recepción - Orden{' '}
+                  Checklist de recepción{' '}
                   <span className="text-cyan-400">
-                    {loteSeleccionado.no_Orden_Produc || `ORD-${loteSeleccionado.id_Orden_Produc}`}
+                    {loteSeleccionado.no_lote || `ORD-${loteSeleccionado.id}`}
                   </span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Línea: {loteSeleccionado.linea_Produccion} • Fecha Llegada:{' '}
-                  {loteSeleccionado.fecha_Llegada
-                    ? new Date(loteSeleccionado.fecha_Llegada).toLocaleDateString('es-MX', { timeZone: 'UTC' })
+                  Línea: {loteSeleccionado.remitente?.nombre} • Fecha Llegada:{' '}
+                  {loteSeleccionado.fecha_llegada
+                    ? new Date(loteSeleccionado.fecha_llegada).toLocaleDateString('es-MX', { timeZone: 'UTC' })
                     : 'N/A'}
                 </p>
               </div>
@@ -1267,7 +1267,7 @@ return (
                                     <span className="block text-xs text-slate-500">Ciclo {spec.ciclo_analisis ?? 'histórico sin ciclo'} · {spec.fecha_Resultado ? new Date(spec.fecha_Resultado).toLocaleString('es-MX') : ''}</span>
                                   </td>
                                   <td className="p-3 font-mono text-cyan-400">
-                                    {spec.valor_Obtenido_Num ?? 'N/A'}
+                                    {spec.valor_Obtenido_Num ?? spec.valor_Obtenido_Texto ?? 'N/A'}
                                   </td>
                                   <td className="p-3">
                                     {spec.cumple_Especificacion ? (
