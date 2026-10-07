@@ -1,4 +1,5 @@
 "use client";
+import EspecificacionesMaterial from "./EspecificacionesMaterial";
 import PlanProduccion from "./PlanProduccion";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -37,12 +38,14 @@ type Field = {
 function Form({
   title,
   fields,
+  children,
   onSave,
   busy,
   onClose,
 }: {
   title: string;
   fields: Field[];
+  children?: React.ReactNode;
   onSave: (d: FormData) => Promise<unknown>;
   busy: boolean;
   onClose: () => void;
@@ -103,6 +106,7 @@ function Form({
               )}
             </label>
           ))}
+          {children}
           <button className={s.primary} type="submit">
             {busy ? "Guardando…" : "Guardar y confirmar"}
           </button>
@@ -441,6 +445,9 @@ export default function VentasCRM() {
           ...b,
           version: detalle.version,
           cotizacion_id: cot.id,
+          especificaciones: b.especificaciones
+            ? JSON.parse(String(b.especificaciones))
+            : undefined,
         });
       if (form === "produccion" || form === "cancelarOrden")
         await pedir(
@@ -804,7 +811,19 @@ export default function VentasCRM() {
           onSave={guardar}
           busy={busy}
           onClose={() => setForm("")}
-        />
+        >
+          {form === "confirmar" && (
+            <>
+              <p>
+                Presentación acordada. La recepción registrará los pesos reales.
+              </p>
+              <EspecificacionesMaterial
+                config={cot?.producto?.configuracion_operativa}
+                unidad={cot?.unidad}
+              />
+            </>
+          )}
+        </Form>
       )}
       {detalle && vista === "oportunidades" && (
         <section className={s.panel}>

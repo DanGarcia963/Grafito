@@ -199,37 +199,14 @@ const cargarLotesLlegada = async () => {
     setLoteSeleccionado(orden);
     setRevisoNombre('');
 
-    // Expresión regular para extraer tipo de prensa y número de contenedores
-    const regexObservaciones = /PRENSA\s+([A-Z0-9_-]+)\s*-\s*(\d+)\s+CONTENEDORES/i;
-    
-    let cantidadContenedores = 3; // Valor por defecto si no se especifica
-    let tipoPrensa = '';
-
-    if (orden.observaciones) {
-      const match = orden.observaciones.match(regexObservaciones);
-      if (match) {
-        tipoPrensa = match[1]; // Ej: "FAGOR"
-        const numExtraido = parseInt(match[2], 10);
-        if (!isNaN(numExtraido) && numExtraido > 0) {
-          cantidadContenedores = numExtraido;
-        }
-      }
-    }
-
-    // Rellenar dinámicamente los contenedores según la información extraída
-    const contenedoresGenerados: ContenedorState[] = Array.from(
-      { length: cantidadContenedores },
-      (_, index) => ({
-        no_consecutivo: index + 1,
-        numero_contenedor: 'S/R',
-        tapa_valvula: false,
-        rejilla_danada: false,
-        base_danada: false,
-        derrame: false,
-        observaciones: tipoPrensa ? `PRENSA ${tipoPrensa}` : '',
-      })
-    );
-
+    // El detalle pertenece a la recepción, no al texto libre de la venta.
+    const detalle = (orden.materiales ?? []).flatMap((m: any) =>
+      (m.especificaciones?.contenedores ?? []).map((c: any) => ({...c, prensa: m.especificaciones?.atributos?.tipo_prensa ?? ''})));
+    const contenedoresGenerados: ContenedorState[] = detalle.map((c: any, index: number) => ({
+      no_consecutivo: index + 1, numero_contenedor: c.codigo,
+      observaciones: c.prensa ? `Prensa: ${c.prensa}` : '', tapa_valvula: false, rejilla_danada: false,
+      base_danada: false, derrame: false,
+    }));
     setContenedores(contenedoresGenerados);
   };
 

@@ -1,3 +1,4 @@
+import { aptitudMaterial } from './especificaciones.logic';
 import {
   BadRequestException,
   ConflictException,
@@ -58,10 +59,7 @@ export async function existencias(
             (a, r) => a.add(r.cantidad.sub(consumido(r.movimientos))),
             new Prisma.Decimal(0),
           );
-        const liberado =
-          l.origen === 'PRODUCCION'
-            ? l.lote_produccion?.estado_Calida === 'LIBERADO'
-            : l.estado_calidad_recepcion === 'LIBERADO';
+        const aptitud = aptitudMaterial(l);
         return {
           lote_inventario_id: l.id,
           folio: l.folio,
@@ -71,15 +69,19 @@ export async function existencias(
           propiedad: l.propiedad,
           propietario_id: l.propietario_id,
           condicion: l.condicion,
+          especificaciones: l.especificaciones,
+          orden_venta_id: l.orden_venta_id,
           ubicacion_id: u.id,
           ubicacion: u.nombre,
           fisico,
           reservado,
-          disponible:
-            liberado && (!l.fecha_caducidad || l.fecha_caducidad >= new Date())
-              ? fisico.sub(reservado)
-              : new Prisma.Decimal(0),
-          liberado,
+          disponible: aptitud.venta
+            ? fisico.sub(reservado)
+            : new Prisma.Decimal(0),
+          disponible_reproceso: aptitud.reprocesable
+            ? fisico.sub(reservado)
+            : new Prisma.Decimal(0),
+          liberado: aptitud.liberado,
         };
       }),
     )
@@ -173,19 +175,34 @@ export async function crearOrdenProduccion(
     materiales.map((m) => m.lote),
   );
   const stocks = await existencias(tx, ov ?? undefined);
+  const reproceso = b.es_reproceso === true;
+  const motivo = reproceso ? texto(b.motivo_reproceso, 4000) : null;
+  const propietarios = new Set<number>();
   for (const m of materiales) {
     const stock = stocks.find(
       (s) => s.lote_inventario_id === m.lote && s.ubicacion_id === m.ubicacion,
     );
-    if (!stock || stock.disponible.lt(m.cantidad))
+    if (
+      !stock ||
+      (reproceso ? stock.disponible_reproceso : stock.disponible).lt(m.cantidad)
+    )
       throw new ConflictException(
         'Existencia liberada insuficiente; actualiza los materiales',
       );
-    if (!ov && stock.propiedad !== 'PROPIO')
-      throw new BadRequestException(
-        'Material de cliente requiere su orden de venta',
-      );
+    if (stock.orden_venta_id && stock.orden_venta_id !== ov?.id)
+      throw new BadRequestException('Material comprometido con otra venta');
+    if (stock.propiedad === 'DE_CLIENTE')
+      propietarios.add(stock.propietario_id!);
   }
+  if (propietarios.size > 1)
+    throw new BadRequestException('No mezcles material de distintos clientes');
+  const propietario = [...propietarios][0] ?? null;
+  if (
+    ov &&
+    propietario &&
+    (ov.tipo_venta !== 'SERVICIO_REGENERACION' || ov.persona_id !== propietario)
+  )
+    throw new BadRequestException('Venta incompatible con el propietario');
   if (ov) {
     const plan = await tx.ordenes_produccion.aggregate({
       where: { orden_venta_id: ov.id, estado_Plan: { not: 'CANCELADA' } },
@@ -213,6 +230,9 @@ export async function crearOrdenProduccion(
   return tx.ordenes_produccion.create({
     data: {
       no_Orden_Produc: folio,
+      es_reproceso: reproceso,
+      motivo_reproceso: motivo,
+      propietario_id: propietario,
       orden_venta_id: ov?.id,
       producto_id: producto.id_Produc_Mater,
       cantidad_Planificada: cantidad,

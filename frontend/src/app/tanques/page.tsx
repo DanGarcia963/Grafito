@@ -1,4 +1,5 @@
 "use client";
+import EspecificacionesMaterial from "@/components/EspecificacionesMaterial";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { pedir, sesionActual } from "@/utils/api";
@@ -26,6 +27,7 @@ const cantidad = (v: unknown) =>
   Number(v ?? 0).toLocaleString("es-MX", { maximumFractionDigits: 4 });
 export default function TanquesPage() {
   const socket = useSocket();
+  const [productoEspec, setProductoEspec] = useState("");
   const [ordenes, setOrdenes] = useState<any[]>([]),
     [tanques, setTanques] = useState<any[]>([]),
     [muestras, setMuestras] = useState<any[]>([]),
@@ -204,6 +206,7 @@ export default function TanquesPage() {
                         <p>{l.orden.productos_materiales.nombre_Producto}</p>
                         <p className="text-slate-400">
                           {l.orden.crm_ordenes_venta?.cliente.nombre ??
+                            l.orden.propietario?.nombre ??
                             "Producción propia"}{" "}
                           ·{" "}
                           {l.orden.crm_ordenes_venta?.folio ??
@@ -303,9 +306,20 @@ export default function TanquesPage() {
                       <p>
                         {o.crm_ordenes_venta?.folio ?? "Sin OV"} ·{" "}
                         {o.crm_ordenes_venta?.cliente.nombre ??
+                          o.propietario?.nombre ??
                           "Producción propia"}
                       </p>
                     </div>
+                    {produccion &&
+                      !o.orden_venta_id &&
+                      o.estado_Plan !== "CANCELADA" && (
+                        <button
+                          className={boton}
+                          onClick={() => setForm({ tipo: "vincular", dato: o })}
+                        >
+                          Vincular con venta
+                        </button>
+                      )}
                     {produccion &&
                       ["PLANIFICADA", "EN_PROCESO", "PAUSADA"].includes(
                         o.estado_Plan,
@@ -505,8 +519,8 @@ export default function TanquesPage() {
                 </button>
               </div>
               <p className="mb-3">
-                Saldos por lote y ubicación. Material no liberado permanece
-                bloqueado para producción.
+                Saldos por lote y ubicación. F.E. solo puede reservarse para
+                reproceso; nunca para entrega.
               </p>
               <div className="overflow-auto">
                 <table className="w-full text-left">
@@ -534,7 +548,48 @@ export default function TanquesPage() {
                       >
                         <td className="p-3">
                           {s.folio}
-                          <p>{s.producto}</p>
+                          <p>
+                            {s.producto} · {s.condicion}
+                          </p>
+                          <p>
+                            {Object.entries(s.especificaciones?.atributos ?? {})
+                              .map(([k, v]) => `${k}: ${v}`)
+                              .join(" · ")}
+                          </p>
+                          <details>
+                            <summary>
+                              Contenedores al ingreso:{" "}
+                              {s.especificaciones?.contenedores?.length ??
+                                "Sin detalle"}
+                            </summary>
+                            {s.especificaciones?.contenedores?.map((c: any) => (
+                              <p key={c.codigo}>
+                                {c.codigo}: {c.peso_kg} kg
+                              </p>
+                            ))}
+                            <p>
+                              El detalle original no representa los contenedores
+                              restantes tras consumos parciales.
+                            </p>
+                          </details>
+                          <p>
+                            Disponible reproceso:{" "}
+                            {cantidad(s.disponible_reproceso)} {s.unidad}
+                          </p>
+                          {![
+                            "FUERA_DE_ESPECIFICACION",
+                            "RESIDUO",
+                            "REZAGADO",
+                          ].includes(s.condicion) && (
+                            <button
+                              className={boton}
+                              onClick={() =>
+                                setForm({ tipo: "rezagado", dato: s })
+                              }
+                            >
+                              Marcar rezagado
+                            </button>
+                          )}
                         </td>
                         <td>{s.ubicacion}</td>
                         <td>{s.propiedad}</td>
@@ -591,6 +646,8 @@ export default function TanquesPage() {
                     iniciar: "Iniciar lote de producción",
                     mover: "Trasladar lote completo",
                     descargar: "Registrar producto obtenido",
+                    vincular: "Vincular OP con orden de venta",
+                    rezagado: "Marcar material rezagado",
                     estado: "Cambiar proceso del tanque",
                     nota: "Añadir nota a la bitácora",
                   } as Record<string, string>
@@ -600,7 +657,11 @@ export default function TanquesPage() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const b = Object.fromEntries(new FormData(e.currentTarget));
+                const b: Record<string, any> = Object.fromEntries(
+                  new FormData(e.currentTarget),
+                );
+                if (b.especificaciones)
+                  b.especificaciones = JSON.parse(b.especificaciones);
                 void ejecutar(async () => {
                   const d = form.dato;
                   if (form.tipo === "recepcion")
@@ -629,6 +690,16 @@ export default function TanquesPage() {
                         tanqueId: Number(b.tanque_id),
                       },
                       "PUT",
+                    );
+                  if (form.tipo === "vincular")
+                    await pedir(
+                      `/api/produccion/ordenes/${d.id_Orden_Produc}/vincular-venta`,
+                      b,
+                    );
+                  if (form.tipo === "rezagado")
+                    await pedir(
+                      `/api/produccion/inventario/${d.lote_inventario_id}/rezagado`,
+                      b,
                     );
                   if (form.tipo === "descargar")
                     await pedir(
@@ -714,7 +785,13 @@ export default function TanquesPage() {
                     </label>
                     <label>
                       Producto
-                      <select required name="producto_id" className={input}>
+                      <select
+                        required
+                        name="producto_id"
+                        className={input}
+                        value={productoEspec}
+                        onChange={(e) => setProductoEspec(e.target.value)}
+                      >
                         <option value="">Selecciona</option>
                         {cat.productos?.map((p: any) => (
                           <option
@@ -767,6 +844,54 @@ export default function TanquesPage() {
                       </select>
                     </label>
                   </>
+                )}
+                {form.tipo === "recepcion" && (
+                  <>
+                    <label>
+                      Condición
+                      <select name="condicion" className={input}>
+                        <option value="SUCIO">Sucio para regenerar</option>
+                        <option value="INSUMO">Insumo</option>
+                        <option value="REZAGADO">
+                          Rezagado: material que quedó
+                        </option>
+                      </select>
+                    </label>
+                    <EspecificacionesMaterial
+                      key={productoEspec}
+                      config={
+                        cat.productos.find(
+                          (p: any) =>
+                            String(p.id_Produc_Mater) === productoEspec,
+                        )?.configuracion_operativa
+                      }
+                      unidad={
+                        cat.productos.find(
+                          (p: any) =>
+                            String(p.id_Produc_Mater) === productoEspec,
+                        )?.UM
+                      }
+                    />
+                  </>
+                )}
+                {form.tipo === "vincular" && (
+                  <label>
+                    ID de la orden de venta
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      name="orden_venta_id"
+                      className={input}
+                    />
+                  </label>
+                )}
+                {form.tipo === "rezagado" && (
+                  <label>
+                    Motivo
+                    <textarea required name="motivo" className={input} />
+                    <p>Conserva su dictamen de Calidad.</p>
+                  </label>
                 )}
                 {form.tipo === "estado" && (
                   <label>
@@ -865,6 +990,28 @@ export default function TanquesPage() {
                         ))}
                       </select>
                     </label>
+                  </>
+                )}
+                {form.tipo === "descargar" && (
+                  <>
+                    <label>
+                      Destino del material
+                      <select required name="destino_calidad" className={input}>
+                        <option value="CONSERVAR">
+                          Conservar dictamen actual (sin liberar)
+                        </option>
+                        <option value="FE">
+                          F.E.: última muestra ajustada rechazada
+                        </option>
+                      </select>
+                    </label>
+                    <EspecificacionesMaterial
+                      config={
+                        form.dato.orden.productos_materiales
+                          ?.configuracion_operativa
+                      }
+                      unidad={form.dato.orden.unidad}
+                    />
                   </>
                 )}
                 {form.tipo === "nota" && (

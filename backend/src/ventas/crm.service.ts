@@ -1,3 +1,4 @@
+import { especificacionesValidas } from '../inventario/especificaciones.logic';
 import {
   crearOrdenProduccion,
   existencias,
@@ -132,7 +133,11 @@ export class CrmService {
             id_ejecuciones: true,
           },
         },
-        cotizaciones: { omit: sinArchivo, orderBy: { version: 'desc' } },
+        cotizaciones: {
+          omit: sinArchivo,
+          include: { producto: true },
+          orderBy: { version: 'desc' },
+        },
         reportes_id: { omit: sinArchivo, orderBy: { version: 'desc' } },
       },
     });
@@ -770,9 +775,22 @@ export class CrmService {
       const perfil = await tx.crm_perfiles_comerciales.findUnique({
         where: { persona_id: o.persona_id },
       });
+      const productoOrden = await tx.productos_materiales.findUniqueOrThrow({
+        where: { id_Produc_Mater: c.producto_id },
+      });
+      const especificaciones =
+        b.especificaciones == null
+          ? undefined
+          : especificacionesValidas(
+              b.especificaciones,
+              productoOrden.configuracion_operativa,
+              c.unidad,
+              c.cantidad,
+            );
       const orden = await tx.crm_ordenes_venta.create({
         data: {
           folio: `OV-${randomUUID()}`,
+          especificaciones,
           oportunidad_id: id,
           cotizacion_id: c.id,
           persona_id: o.persona_id,

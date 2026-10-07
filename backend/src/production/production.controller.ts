@@ -51,6 +51,20 @@ export class ProductionController {
   ) {
     return this.productionService.recibirMaterial(b, r.usuario);
   }
+  @Areas('produccion') @Post('ordenes/:id/vincular-venta') vincular(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() b: any,
+    @Req() r: any,
+  ) {
+    return this.productionService.vincularVenta(id, b, r.usuario);
+  }
+  @Areas('produccion') @Post('inventario/:id/rezagado') rezagado(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() b: any,
+    @Req() r: any,
+  ) {
+    return this.productionService.marcarRezagado(id, b, r.usuario);
+  }
   @Areas('produccion') @Post('ordenes/:id/cerrar') cerrar(
     @Param('id', ParseIntPipe) id: number,
     @Body() b: any,

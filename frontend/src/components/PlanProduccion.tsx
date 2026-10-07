@@ -10,6 +10,7 @@ export default function PlanProduccion({
   onDone: () => void;
   onClose: () => void;
 }) {
+  const [reproceso, setReproceso] = useState(false);
   const [stock, setStock] = useState<any[]>([]),
     [cat, setCat] = useState<any>({ productos: [], personas: [] }),
     [error, setError] = useState(""),
@@ -26,7 +27,7 @@ export default function PlanProduccion({
       pedir("/api/produccion/catalogos", undefined, "GET"),
     ])
       .then(([s, c]) => {
-        setStock(s.data.filter((x: any) => Number(x.disponible) > 0));
+        setStock(s.data);
         setCat(c);
       })
       .catch((e) => setError(e.message));
@@ -60,6 +61,7 @@ export default function PlanProduccion({
               {
                 ...Object.fromEntries(f),
                 materiales_completos: true,
+                es_reproceso: reproceso,
                 materiales: stock
                   .map((s, i) => ({ ...s, cantidad: f.get(`material-${i}`) }))
                   .filter((s) => Number(s.cantidad) > 0),
@@ -136,23 +138,52 @@ export default function PlanProduccion({
               ))}
             </select>
           </label>
-          <h3 className="font-bold">Materiales liberados disponibles</h3>
-          {stock.map((s, i) => (
-            <label key={`${s.lote_inventario_id}:${s.ubicacion_id}`}>
-              {s.folio} · {s.producto} · {s.ubicacion} · {s.propiedad} ·
-              disponible {s.disponible} {s.unidad}
-              <input
-                aria-label={`Reservar ${s.folio}`}
-                name={`material-${i}`}
-                type="number"
-                min="0"
-                max={s.disponible}
-                step="0.0001"
-                defaultValue="0"
-                className="border p-2 ml-2"
+          <label>
+            <input
+              type="checkbox"
+              checked={reproceso}
+              onChange={(e) => setReproceso(e.target.checked)}
+            />{" "}
+            Regeneración / reproceso de material (permite F.E. sin liberarlo
+            para entrega)
+          </label>
+          {reproceso && (
+            <label>
+              Motivo del reproceso
+              <textarea
+                required
+                name="motivo_reproceso"
+                className="border p-2"
               />
             </label>
-          ))}
+          )}
+          <p>
+            La OP puede iniciar sin venta. El propietario se conserva desde los
+            materiales; no se permiten mezclas de clientes.
+          </p>
+          <h3 className="font-bold">
+            Materiales disponibles para esta operación
+          </h3>
+          {stock.map(
+            (s, i) =>
+              Number(reproceso ? s.disponible_reproceso : s.disponible) > 0 && (
+                <label key={`${s.lote_inventario_id}:${s.ubicacion_id}`}>
+                  {s.folio} · {s.producto} · {s.ubicacion} · {s.propiedad} ·
+                  {s.condicion} · disponible{" "}
+                  {reproceso ? s.disponible_reproceso : s.disponible} {s.unidad}
+                  <input
+                    aria-label={`Reservar ${s.folio}`}
+                    name={`material-${i}`}
+                    type="number"
+                    min="0"
+                    max={reproceso ? s.disponible_reproceso : s.disponible}
+                    step="0.0001"
+                    defaultValue="0"
+                    className="border p-2 ml-2"
+                  />
+                </label>
+              ),
+          )}
           {!stock.length && (
             <p>
               No hay materiales liberados disponibles. Registra su recepción y
