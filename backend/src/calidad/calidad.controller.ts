@@ -70,7 +70,7 @@ export class CalidadController {
   }
 
   // Cambio exclusivo del estado de una muestra.
-  @Put('actualizarEstatusMuestra')
+  @Areas('calidad') @Put('actualizarEstatusMuestra')
   async actualizarEstatusMuestra(@Body() body: unknown) {
     return this.calidadService.actualizarEstatusMuestra(body);
   }

@@ -115,6 +115,12 @@ export class CrmController {
   @Get('ordenes') ordenes(@Req() r: any) {
     return this.crm.ordenes(r.usuario);
   }
+  @Get('ordenes/:id/materiales') materiales(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+  ) {
+    return this.crm.materiales(id, r.usuario);
+  }
   @Post('ordenes/:id/produccion') produccion(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,

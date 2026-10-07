@@ -44,7 +44,11 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
         },
       );
   const pg = new PGlite();
+  await pg.exec("SET TIME ZONE 'UTC'");
   await pg.exec(sql);
+  await pg.exec(
+    require('fs').readFileSync('prisma/restricciones_modelo.sql', 'utf8'),
+  );
   // Adapter 0.6 does not serialize Prisma DateTime values for PostgreSQL TIME.
   // Normalize only the TIME input at the driver boundary (production uses native Prisma).
   const factory = new PrismaPGlite(pg),
@@ -165,6 +169,11 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
           oid,
           {
             version: await version(oid),
+            tipo_venta: 'PRODUCTO_NUEVO',
+            producto_id: prod.id_Produc_Mater,
+            servicio: 'Fabricación',
+            cantidad: '100',
+            unidad: 'Litros',
             moneda: 'MXN',
             total: '1160',
             subtotal: '1000',
@@ -236,7 +245,11 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       orden_cliente: 'OC-001',
     };
     const venta = (await crm.confirmar(o.id, body, seller)).data;
-    assert.equal(venta.tipo_compra, 'PRIMERA_COMPRA');
+    assert.equal(
+      (await crm.ordenes(seller)).data.find((o) => o.id === venta.id)
+        .tipo_compra,
+      'PRIMERA_COMPRA',
+    );
     assert.equal((await crm.confirmar(o.id, body, seller)).data.id, venta.id);
     assert.equal(await p.crm_ordenes_venta.count(), 1);
     assert.equal(
@@ -249,14 +262,306 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     );
     assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'GANADA');
     const times = await p.id_ejecuciones.findMany();
-    const op = (
-      await crm.produccion(venta.id, { servicio: 'Purificación' }, seller)
-    ).data;
+    const ubicacion = await p.inventario_ubicaciones.create({
+      data: { codigo: 'ALM', nombre: 'Almacén', tipo: 'ALMACEN' },
+    });
+    const material = await p.lotes_inventario.create({
+      data: {
+        folio: 'BASE',
+        producto_id: prod.id_Produc_Mater,
+        unidad: 'Litros',
+        propiedad: 'PROPIO',
+        condicion: 'INSUMO',
+        origen: 'APERTURA',
+        estado_calidad_recepcion: 'LIBERADO',
+      },
+    });
+    await p.movimientos_inventario.create({
+      data: {
+        folio_Movi: 'AP1',
+        clave_evento: 'ap1',
+        lote_inventario_id: material.id,
+        tipo: 'APERTURA',
+        cantidad: '100',
+        ubicacion_destino_id: ubicacion.id,
+        realizado_por: 'test',
+        motivo: 'Saldo inicial',
+      },
+    });
+    const plan = {
+      no_Orden_Produc: 'OP-1',
+      cantidad: '100',
+      tipo_Operacion: 'Fabricación',
+      linea_Produccion: 'GRAFITO',
+      responsable_id: seller.personaId,
+      materiales_completos: true,
+      materiales: [
+        {
+          lote_inventario_id: material.id,
+          ubicacion_id: ubicacion.id,
+          cantidad: '100',
+        },
+      ],
+    };
+    const op = (await crm.produccion(venta.id, plan, seller)).data;
     assert.equal(op.orden_venta_id, venta.id);
     assert.equal(
-      (await crm.produccion(venta.id, { servicio: 'Purificación' }, seller))
-        .data.id_Orden_Produc,
+      (await crm.produccion(venta.id, plan, seller)).data.id_Orden_Produc,
       op.id_Orden_Produc,
+    );
+    const {
+      ProductionService,
+    } = require('../dist/production/production.service');
+    const { CalidadService } = require('../dist/calidad/calidad.service');
+    const tiempos = new TrazabilidadService(p),
+      produccion = new ProductionService(p, tiempos, ev),
+      calidad = new CalidadService(p, tiempos, ev);
+    const operario = { ...seller, area: 'produccion' };
+    const tanque = await p.equipos_tanques.create({
+      data: {
+        codigo_Equipo: 'T1',
+        nombre_Equipo: 'Tanque 1',
+        tipo: 'GRAFITO',
+        estatus_proceso: 'VACIO',
+        capacidad: '60',
+        unidad_capacidad: 'Litros',
+      },
+    });
+    const reserva = await p.inventario_reservas.findFirst({
+      where: { orden_produccion_id: op.id_Orden_Produc },
+    });
+    await assert.rejects(
+      crm.produccion(
+        venta.id,
+        { ...plan, no_Orden_Produc: 'OP-exceso' },
+        seller,
+      ),
+    );
+    await assert.rejects(
+      produccion.iniciarLote(
+        {
+          orden_produccion_id: op.id_Orden_Produc,
+          tanque_id: tanque.id_Equipos_Tanques,
+          no_Lote: 'EXCESO',
+          consumos: [{ reserva_id: reserva.id, cantidad: '61' }],
+        },
+        operario,
+      ),
+    );
+    assert.equal(await p.lotes_produccion.count(), 0);
+    const inicio = {
+      orden_produccion_id: op.id_Orden_Produc,
+      tanque_id: tanque.id_Equipos_Tanques,
+      no_Lote: 'L-1',
+      consumos: [{ reserva_id: reserva.id, cantidad: '40' }],
+    };
+    const lote1 = (await produccion.iniciarLote(inicio, operario)).data;
+    assert.equal(
+      (await produccion.iniciarLote(inicio, operario)).data.id_Lote_Produccion,
+      lote1.id_Lote_Produccion,
+    );
+    assert.equal(
+      await p.movimientos_inventario.count({
+        where: { tipo: 'SALIDA_CONSUMO' },
+      }),
+      1,
+    );
+    await produccion.actualizarEstatusTanque({
+      tanqueId: tanque.id_Equipos_Tanques,
+      estatus_proceso: 'MUESTREO',
+    });
+    await produccion.actualizarEstatusTanque({
+      tanqueId: tanque.id_Equipos_Tanques,
+      estatus_proceso: 'MUESTREO',
+    });
+    const muestra = await p.muestras.findFirst({
+      where: { lote_id: lote1.id_Lote_Produccion },
+    });
+    assert.equal(
+      await p.muestras.count({ where: { lote_id: lote1.id_Lote_Produccion } }),
+      1,
+    );
+    assert.equal(muestra.producto_id, prod.id_Produc_Mater);
+    assert.equal(muestra.cliente_id, account.persona_id);
+    await assert.rejects(
+      produccion.actualizarEstatusCalidad({
+        idLoteProduccion: lote1.id_Lote_Produccion,
+        estadoCalidad: 'LIBERADO',
+      }),
+    );
+    const parametro = await p.parametros_laboratorio.create({
+      data: { nombre_Parametro: 'Densidad', tipo_Dato: 'NUMERICO' },
+    });
+    await calidad.cambiarEtapaMuestra(muestra.id_Muestra, 'RECIBIR');
+    await calidad.cambiarEtapaMuestra(muestra.id_Muestra, 'INICIAR');
+    await calidad.finalizarAnalisis({
+      idMuestra: muestra.id_Muestra,
+      tipoMuestra: 'MUESTRA_AJUSTADO',
+      dictamen: 'APROBADO',
+      analistaNombre: 'Laboratorio',
+      mediciones: [{ id_Parametro: parametro.id_Parametro, valor: '1.1' }],
+    });
+    await produccion.actualizarEstatusCalidad({
+      idLoteProduccion: lote1.id_Lote_Produccion,
+      estadoCalidad: 'LIBERADO',
+    });
+    const salida = (
+      await produccion.descargar(
+        lote1.id_Lote_Produccion,
+        { cantidad: '39.5', ubicacion_id: ubicacion.id },
+        operario,
+      )
+    ).data;
+    await produccion.descargar(
+      lote1.id_Lote_Produccion,
+      { cantidad: '39.5', ubicacion_id: ubicacion.id },
+      operario,
+    );
+    assert.equal(
+      await p.movimientos_inventario.count({
+        where: { tipo: 'ENTRADA_PRODUCCION' },
+      }),
+      1,
+    );
+    assert.equal(
+      (await produccion.stock()).data
+        .find((x) => x.lote_inventario_id === salida.id)
+        .disponible.toString(),
+      '39.5',
+    );
+    const lote2 = (
+      await produccion.iniciarLote(
+        {
+          ...inicio,
+          no_Lote: 'L-2',
+          consumos: [{ reserva_id: reserva.id, cantidad: '60' }],
+        },
+        operario,
+      )
+    ).data;
+    await produccion.descargar(
+      lote2.id_Lote_Produccion,
+      { cantidad: '58', ubicacion_id: ubicacion.id },
+      operario,
+    );
+    const material2 = await p.lotes_inventario.findFirst({
+      where: { lote_produccion_id: lote2.id_Lote_Produccion },
+    });
+    assert.equal(
+      (await produccion.stock()).data
+        .find((x) => x.lote_inventario_id === material2.id)
+        .disponible.toString(),
+      '0',
+    );
+    const recepcionBody = {
+      folio: 'REC-1',
+      remitente_id: account.persona_id,
+      producto_id: prod.id_Produc_Mater,
+      propiedad: 'PROPIO',
+      cantidad: '50',
+      ubicacion_id: ubicacion.id,
+    };
+    const recepcion = (
+      await produccion.recibirMaterial(recepcionBody, operario)
+    ).data;
+    await produccion.recibirMaterial(recepcionBody, operario);
+    assert.equal(await p.lotes_llegada.count(), 1);
+    const entrada = await p.lotes_inventario.findFirst({
+      where: { recepcion_id: recepcion.id },
+    });
+    assert.equal(
+      (await produccion.stock()).data
+        .find((x) => x.lote_inventario_id === entrada.id)
+        .disponible.toString(),
+      '0',
+    );
+    await calidad.crearLoteConChecklist({
+      recepcion_id: recepcion.id,
+      reviso_nombre: 'Laboratorio',
+      estado_checklist: 'COMPLETADO',
+      contenedores: [
+        {
+          no_consecutivo: 1,
+          numero_contenedor: 'C1',
+          tapa_valvula: false,
+          rejilla_danada: false,
+          base_danada: false,
+          derrame: false,
+        },
+      ],
+    });
+    const mp = await p.muestras.findFirst({
+      where: { lote_inventario_id: entrada.id },
+    });
+    await calidad.cambiarEtapaMuestra(mp.id_Muestra, 'RECIBIR');
+    await calidad.cambiarEtapaMuestra(mp.id_Muestra, 'INICIAR');
+    await calidad.finalizarAnalisis({
+      idMuestra: mp.id_Muestra,
+      tipoMuestra: 'MUESTRA_AJUSTADO',
+      dictamen: 'APROBADO',
+      analistaNombre: 'Laboratorio',
+      mediciones: [{ id_Parametro: parametro.id_Parametro, valor: '1.1' }],
+    });
+    assert.equal(
+      (await produccion.stock()).data
+        .find((x) => x.lote_inventario_id === entrada.id)
+        .disponible.toString(),
+      '50',
+    );
+    const propia = (
+      await produccion.crearOrden(
+        {
+          ...plan,
+          no_Orden_Produc: 'OP-PROPIA',
+          producto_id: prod.id_Produc_Mater,
+          cantidad: '50',
+          materiales: [
+            {
+              lote_inventario_id: entrada.id,
+              ubicacion_id: ubicacion.id,
+              cantidad: '50',
+            },
+          ],
+        },
+        operario,
+      )
+    ).data;
+    assert.equal(propia.orden_venta_id, null);
+    await produccion.cerrarOrden(
+      propia.id_Orden_Produc,
+      { estado: 'CANCELADA', motivo: 'Liberar reserva de prueba' },
+      operario,
+    );
+    assert.equal(
+      (await produccion.stock()).data
+        .find((x) => x.lote_inventario_id === entrada.id)
+        .disponible.toString(),
+      '50',
+    );
+    const grafito = await produccion.obtenerTodasLasOrdenesGrafito();
+    assert.equal(
+      grafito.result.find((x) => x.id_Orden_Produc === op.id_Orden_Produc)
+        .lotes_produccion.length,
+      2,
+    );
+    assert.equal(
+      grafito.result
+        .find((x) => x.id_Orden_Produc === op.id_Orden_Produc)
+        .lotes_produccion[0].cantidad_producida.toString(),
+      '39.5',
+    );
+    await produccion.cerrarOrden(
+      op.id_Orden_Produc,
+      { estado: 'FINALIZADA', motivo: 'Dos lotes terminados' },
+      operario,
+    );
+    assert.equal(
+      (
+        await p.ordenes_produccion.findUnique({
+          where: { id_Orden_Produc: op.id_Orden_Produc },
+        })
+      ).estado_Plan,
+      'FINALIZADA',
     );
     await assert.rejects(
       crm.cancelarOrden(venta.id, { motivo: 'Prueba' }, seller),
@@ -283,7 +588,11 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
         seller,
       )
     ).data;
-    assert.equal(venta2.tipo_compra, 'RECOMPRA');
+    assert.equal(
+      (await crm.ordenes(seller)).data.find((o) => o.id === venta2.id)
+        .tipo_compra,
+      'RECOMPRA',
+    );
     let metrics = (await crm.metricas(seller, {})).data;
     assert.equal(metrics.convertidos, 1);
     assert.equal(metrics.clientes_recompra, 1);
@@ -363,48 +672,94 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     // El cierre comercial no interrumpe un ciclo técnico pendiente.
     const enCurso = (await id.detalle(m4, lab)).data.procesos_id.at(-1);
     await id.proceso(m4, enCurso.id, 'iniciar', {}, lab);
-    await id.proceso(m4, enCurso.id, 'terminar', { resultado: 'Conforme' }, lab);
+    await id.proceso(
+      m4,
+      enCurso.id,
+      'terminar',
+      { resultado: 'Conforme' },
+      lab,
+    );
     await id.finalizar(m4, { dictamen: 'APROBADO' }, lab);
     await report(o3.id);
     assert.equal((await crm.detalle(o3.id, seller)).data.etapa, 'PERDIDA');
     await assert.rejects(quote(o3.id), (e) => e.status === 409);
     await id.planificar(m4, { procesos: [proc.id], nuevoCiclo: true }, lab);
     assert.equal((await crm.detalle(o3.id, seller)).data.etapa, 'PERDIDA');
-    assert.equal(await p.id_reportes_oportunidad.count({
-      where: { oportunidad_id: o3.id, estado: 'PUBLICADO' },
-    }), 0);
+    assert.equal(
+      await p.id_reportes_oportunidad.count({
+        where: { oportunidad_id: o3.id, estado: 'PUBLICADO' },
+      }),
+      0,
+    );
 
     // Recepción, dictamen y reporte siguen disponibles después de cancelar.
-    const o4 = await open(), m5 = await sample(o4.id);
-    await crm.guardar(o4.id, {
-      version: await version(o4.id), etapa: 'CANCELADA', nota: 'Cancelación comercial',
-    }, seller);
+    const o4 = await open(),
+      m5 = await sample(o4.id);
+    await crm.guardar(
+      o4.id,
+      {
+        version: await version(o4.id),
+        etapa: 'CANCELADA',
+        nota: 'Cancelación comercial',
+      },
+      seller,
+    );
     await finish(m5);
     await report(o4.id);
     const cerrada = (await crm.detalle(o4.id, seller)).data;
     assert.equal(cerrada.etapa, 'CANCELADA');
     assert.equal(cerrada.muestras[0].estado_Muestra, 'APROBADO');
-    assert.equal(await p.proceso_tramos.count({
-      where: { entidad: 'MUESTRA_ID', entidad_id: m5, fin: null },
-    }), 0);
-    await crm.anularReporte(o4.id, cerrada.reportes_id[0].id, {
-      version: cerrada.version, motivo: 'Corrección documental',
-    }, lab);
+    assert.equal(
+      await p.proceso_tramos.count({
+        where: { entidad: 'MUESTRA_ID', entidad_id: m5, fin: null },
+      }),
+      0,
+    );
+    await crm.anularReporte(
+      o4.id,
+      cerrada.reportes_id[0].id,
+      {
+        version: cerrada.version,
+        motivo: 'Corrección documental',
+      },
+      lab,
+    );
     assert.equal((await crm.detalle(o4.id, seller)).data.etapa, 'CANCELADA');
 
     // Muestras históricas sin oportunidad conservan sus ciclos y sus tiempos.
-    const o5 = await open(), m6 = await sample(o5.id);
-    await p.muestras.update({ where: { id_Muestra: m6 }, data: { oportunidad_id: null } });
+    const o5 = await open(),
+      m6 = await sample(o5.id);
+    await p.muestras.update({
+      where: { id_Muestra: m6 },
+      data: { oportunidad_id: null },
+    });
     await finish(m6);
-    const historialAntes = await p.id_ejecuciones.findMany({ where: { muestra_id: m6 } });
+    const historialAntes = await p.id_ejecuciones.findMany({
+      where: { muestra_id: m6 },
+    });
     await id.planificar(m6, { procesos: [proc.id], nuevoCiclo: true }, lab);
-    await crm.asociar(o5.id, { version: await version(o5.id), muestra_id: m6 }, seller);
-    const procesoHistorico = (await id.detalle(m6, lab)).data.procesos_id.at(-1);
+    await crm.asociar(
+      o5.id,
+      { version: await version(o5.id), muestra_id: m6 },
+      seller,
+    );
+    const procesoHistorico = (await id.detalle(m6, lab)).data.procesos_id.at(
+      -1,
+    );
     await id.proceso(m6, procesoHistorico.id, 'iniciar', {}, lab);
-    await id.proceso(m6, procesoHistorico.id, 'terminar', { resultado: 'Verificado' }, lab);
+    await id.proceso(
+      m6,
+      procesoHistorico.id,
+      'terminar',
+      { resultado: 'Verificado' },
+      lab,
+    );
     await id.finalizar(m6, { dictamen: 'APROBADO' }, lab);
     await report(o5.id);
-    assert.deepEqual(await p.id_ejecuciones.findMany({ where: { muestra_id: m6, ciclo: 1 } }), historialAntes);
+    assert.deepEqual(
+      await p.id_ejecuciones.findMany({ where: { muestra_id: m6, ciclo: 1 } }),
+      historialAntes,
+    );
     assert.equal((await crm.detalle(o5.id, seller)).data.etapa, 'COTIZACION');
     console.log('Flujo completo validado con Prisma y PostgreSQL en memoria');
   } finally {

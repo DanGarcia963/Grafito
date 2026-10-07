@@ -1,4 +1,5 @@
 "use client";
+import PlanProduccion from "./PlanProduccion";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, RefreshCw, LogOut } from "lucide-react";
@@ -9,6 +10,8 @@ import { descargarCrm } from "./CrmReportes";
 import s from "./VentasCRM.module.css";
 const base = "/api/ventas/crm",
   etapas = [
+    "REGISTRADA",
+    "MUESTRA_RECOLECTADA",
     "RECOLECCION_AGENDADA",
     "EN_ANALISIS_ID",
     "COTIZACION",
@@ -56,7 +59,11 @@ function Form({
           const data = new FormData(e.currentTarget);
           for (const field of fields) {
             const value = data.get(field.name);
-            if (field.type === "datetime-local" && typeof value === "string" && value)
+            if (
+              field.type === "datetime-local" &&
+              typeof value === "string" &&
+              value
+            )
               data.set(field.name, new Date(value).toISOString());
           }
           void onSave(data);
@@ -323,8 +330,29 @@ export default function VentasCRM() {
     title = "Nueva versión de cotización";
     fields = [
       select("moneda", "Moneda", opts(["MXN", "USD", "EUR"])),
-      field("subtotal", "Subtotal", "number"),
-      field("impuestos", "Impuestos", "number"),
+      select(
+        "tipo_venta",
+        "Tipo de venta",
+        opts(["PRODUCTO_NUEVO", "SERVICIO_REGENERACION"]),
+      ),
+      field(
+        "producto_id",
+        "ID del producto",
+        "number",
+        true,
+        detalle.producto_id ?? "",
+      ),
+      field("servicio", "Servicio", "text", true),
+      field(
+        "cantidad",
+        "Cantidad",
+        "number",
+        true,
+        detalle.cantidad_estimada ?? "",
+      ),
+      select("unidad", "Unidad", opts(["Litros", "Kilogramos", "Piezas"])),
+      field("subtotal", "Subtotal", "number", true),
+      field("impuestos", "Impuestos", "number", true),
       field("total", "Total", "number", true),
       field("vigencia_hasta", "Vigencia", "date", true),
       field(
@@ -365,33 +393,8 @@ export default function VentasCRM() {
         "text",
         true,
       ),
-      field(
-        "cantidad",
-        "Cantidad",
-        "number",
-        false,
-        detalle.cantidad_estimada ?? "",
-      ),
-      field("unidad", "Unidad", "text", false, detalle.unidad ?? ""),
       field("fecha_compromiso", "Fecha compromiso", "date"),
       field("observaciones", "Observaciones", "textarea"),
-    ];
-  }
-  if (form === "produccion") {
-    title = `Enviar orden #${ov.id} a producción`;
-    fields = [
-      ...(!ov.producto_id
-        ? [field("producto_id", "ID del producto", "number", true)]
-        : []),
-      field(
-        "cantidad",
-        "Cantidad a producción (entera)",
-        "number",
-        true,
-        ov.cantidad ?? "",
-      ),
-      field("servicio", "Servicio", "text", true),
-      field("linea_Produccion", "Línea de producción"),
     ];
   }
   if (form === "cancelarOrden") {
@@ -783,7 +786,17 @@ export default function VentasCRM() {
           </button>
         </div>
       )}
-      {form && (
+      {form === "produccion" && (
+        <PlanProduccion
+          venta={ov}
+          onClose={() => setForm("")}
+          onDone={() => {
+            setForm("");
+            void cargar();
+          }}
+        />
+      )}
+      {form && form !== "produccion" && (
         <Form
           key={`${form}-${cuenta?.persona.id_Persona ?? ""}-${cot?.id ?? ""}`}
           title={title}
@@ -1021,7 +1034,7 @@ export default function VentasCRM() {
                         {o.ordenes_produccion.map((p: any) => (
                           <p key={p.id_Orden_Produc}>
                             OP #{p.id_Orden_Produc} · {p.estado_Plan} ·{" "}
-                            {p.estatus_flujo}
+                            {p.cantidad_Planificada} {p.unidad}
                           </p>
                         ))}
                       </td>
@@ -1036,14 +1049,14 @@ export default function VentasCRM() {
                         </button>
                         {o.estado !== "CANCELADA" && (
                           <>
-                            {!o.ordenes_produccion.length && (
+                            {o.estado !== "CANCELADA" && (
                               <button
                                 onClick={() => {
                                   setOv(o);
                                   setForm("produccion");
                                 }}
                               >
-                                Enviar a producción
+                                Crear otra OP / reservar materiales
                               </button>
                             )}
                             <button
