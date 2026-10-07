@@ -170,6 +170,37 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
         estatus_proceso: 'VACIO',
       },
     });
+    const apertura = (
+      await prod.registrarApertura(
+        {
+          folio: 'AP0',
+          cantidad: '900',
+          producto_id: producto.id_Produc_Mater,
+          propiedad: 'PROPIO',
+          condicion: 'NUEVO',
+          estado_calidad_recepcion: 'LIBERADO',
+          ubicacion_id: ubicacion.id,
+          observaciones: 'Inventario de apertura verificado físicamente',
+          especificaciones: {
+            version: 1,
+            atributos: { tipo_prensa: 'Fagor' },
+            contenedores: [{ codigo: 'AP-C1', peso_kg: '900' }],
+          },
+        },
+        user,
+      )
+    ).data;
+    assert.equal(apertura.origen, 'APERTURA');
+    assert.equal(
+      await p.muestras.count({ where: { lote_inventario_id: apertura.id } }),
+      0,
+    );
+    assert.equal(
+      await p.movimientos_inventario.count({
+        where: { lote_inventario_id: apertura.id, tipo: 'APERTURA' },
+      }),
+      1,
+    );
     await prod.recibirMaterial(
       {
         folio: 'R1',

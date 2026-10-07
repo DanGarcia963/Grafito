@@ -1,6 +1,7 @@
 -- Incremental sobre schema.prisma de main 8d3f6f9. No borra tablas ni datos.
 -- Ejecutar completo con psql -v ON_ERROR_STOP=1 -f este_archivo.
 -- No ejecutar dentro de una transacción exterior: PostgreSQL necesita confirmar enums.
+ALTER TYPE inventario_condicion ADD VALUE IF NOT EXISTS 'NUEVO';
 ALTER TYPE inventario_condicion ADD VALUE IF NOT EXISTS 'REZAGADO';
 ALTER TYPE inventario_condicion ADD VALUE IF NOT EXISTS 'FUERA_DE_ESPECIFICACION';
 BEGIN;

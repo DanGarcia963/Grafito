@@ -45,6 +45,12 @@ export class ProductionController {
   @Areas('produccion') @Post('ubicaciones') ubicacion(@Body() b: any) {
     return this.productionService.ubicacion(b);
   }
+  @Areas('produccion') @Post('inventario/apertura') apertura(
+    @Body() b: any,
+    @Req() r: any,
+  ) {
+    return this.productionService.registrarApertura(b, r.usuario);
+  }
   @Areas('produccion') @Post('recepciones') recibirMaterial(
     @Body() b: any,
     @Req() r: any,

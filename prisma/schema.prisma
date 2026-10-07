@@ -1448,6 +1448,7 @@ enum inventario_propiedad {
 }
 
 enum inventario_condicion {
+  NUEVO
   REZAGADO
   FUERA_DE_ESPECIFICACION
   SUCIO
