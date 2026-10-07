@@ -21,7 +21,7 @@ export class VentasController {
   }
 
   @Get('test')
-  async test() {
-    return this.ventasService.obtenerTodasLasOrdenes();
+  async test(@Req() req: any) {
+    return this.ventasService.obtenerTodasLasOrdenes(req.usuario);
   }
 }

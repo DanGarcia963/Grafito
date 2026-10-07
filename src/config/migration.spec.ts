@@ -36,16 +36,13 @@ describe('Compatibilidad PostgreSQL', () => {
     expect(rows[1].valor_Obtenido_Num).toBeNull();
     expect(rows[1].valor_Obtenido_Texto).toBe('Ámbar');
   });
-  it('lote y checklist utilizan el mismo cliente transaccional y el ID generado', async () => {
-    const createMany = jest.fn().mockResolvedValue({ count: 1 });
-    const tx = { lotes_llegada: { create: jest.fn().mockResolvedValue({ id: 42 }) }, checklist_contenedor: { createMany } };
-    const db = { $transaction: jest.fn(async callback => callback(tx)) };
-    const service = new CalidadService(db as any, {} as any, {} as any);
-    const result = await service.crearLoteConChecklist({ no_lote: 'L1', orden_produccion_id: 1,
-      reviso_nombre: 'Ana', estado_checklist: 'COMPLETADO', fecha_llegada: new Date(), fecha_Revision: new Date(),
-      contenedores: [{ no_consecutivo: 1, numero_contenedor: 'C1', tapa_valvula: false, rejilla_danada: false, base_danada: false, derrame: false }] });
+  it('actualiza el checklist de una recepción independiente de producción', async () => {
+    const createMany = jest.fn().mockResolvedValue({count:1});
+    const tx = { $queryRaw: jest.fn(), lotes_llegada: { findUnique: async()=>({id:42,estado_recepcion:'CONFIRMADA',estado_checklist:'PENDIENTE'}), update: async()=>({id:42}) }, checklist_contenedor: {createMany} };
+    const db = { $transaction: jest.fn(async callback=>callback(tx)) };
+    const service = new CalidadService(db as any, {id:(v:unknown)=>Number(v)} as any, {} as any);
+    const result = await service.crearLoteConChecklist({recepcion_id:42,reviso_nombre:'Ana',estado_checklist:'COMPLETADO',contenedores:[{no_consecutivo:1,numero_contenedor:'C1',tapa_valvula:false,rejilla_danada:false,base_danada:false,derrame:false}]});
     expect(result.success).toBe(true);
-    expect(db.$transaction).toHaveBeenCalledTimes(1);
     expect(createMany.mock.calls[0][0].data[0].lote_llegada_id).toBe(42);
   });
 });

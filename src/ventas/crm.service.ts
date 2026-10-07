@@ -1,4 +1,9 @@
 import {
+  crearOrdenProduccion,
+  existencias,
+} from '../inventario/inventario.logic';
+import { productos_materiales_UM, crm_tipo_venta } from '@prisma/client';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -279,11 +284,11 @@ export class CrmService {
       success: true,
       data: {
         persona,
-        ordenes,
+        ordenes: await this.clasificarCompras(ordenes),
         oportunidades,
         recurrencia: recurrencia(
           ordenes
-            .filter((x) => !['CANCELADA', 'BORRADOR'].includes(x.estado))
+            .filter((x) => !['CANCELADA'].includes(x.estado))
             .map((x) => x.fecha_confirmacion),
           persona.crm_perfil_comercial?.frecuencia_esperada_dias ?? null,
         ),
@@ -330,10 +335,10 @@ export class CrmService {
             ? decimalCrm(body.cantidad_estimada, 4)
             : null,
           unidad: opc(body.unidad, 30),
-          fecha_recoleccion_agendada: fechaCrm(
-            body.fecha_recoleccion_agendada,
-            true,
-          ),
+          etapa: body.fecha_recoleccion_agendada
+            ? 'RECOLECCION_AGENDADA'
+            : 'REGISTRADA',
+          fecha_recoleccion_agendada: fechaCrm(body.fecha_recoleccion_agendada),
           proximo_contacto: fechaCrm(body.proximo_contacto),
           creado_por: u.usuario,
         },
@@ -442,7 +447,9 @@ export class CrmService {
     const data = await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
       if (o.etapa === 'GANADA')
-        throw new ConflictException('El reporte respalda una venta confirmada y no puede modificarse');
+        throw new ConflictException(
+          'El reporte respalda una venta confirmada y no puede modificarse',
+        );
       versionValida(o, b.version);
       if (!Object.values(id_reporte_resultado).includes(b.resultado))
         throw new BadRequestException('Resultado inválido');
@@ -498,6 +505,11 @@ export class CrmService {
           resultado: b.resultado,
           resumen: texto(b.resumen, 8000),
           observaciones: opc(b.observaciones),
+          muestras_ciclos: muestras.map((m) => ({
+            muestra_id: m.id_Muestra,
+            ciclo: Math.max(...m.id_ejecuciones.map((e) => e.ciclo)),
+            dictamen: m.estado_Muestra,
+          })),
           ...this.archivo(f),
           creado_por: u.usuario,
           publicado_por: u.usuario,
@@ -513,9 +525,14 @@ export class CrmService {
         `Reporte v${r.version}: ${r.resultado}`,
         {
           estado_tecnico: r.resultado,
-          ...(cerradas.includes(o.etapa) ? {} : {
-            etapa: r.resultado === 'VIABLE' ? 'COTIZACION' as const : 'EN_ANALISIS_ID' as const,
-          }),
+          ...(cerradas.includes(o.etapa)
+            ? {}
+            : {
+                etapa:
+                  r.resultado === 'VIABLE'
+                    ? ('COTIZACION' as const)
+                    : ('EN_ANALISIS_ID' as const),
+              }),
         },
       );
       return r;
@@ -527,7 +544,9 @@ export class CrmService {
     await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
       if (o.etapa === 'GANADA')
-        throw new ConflictException('El reporte respalda una venta confirmada y no puede modificarse');
+        throw new ConflictException(
+          'El reporte respalda una venta confirmada y no puede modificarse',
+        );
       versionValida(o, b.version);
       const motivo = texto(b.motivo, 4000);
       const r = await tx.id_reportes_oportunidad.findFirst({
@@ -551,7 +570,9 @@ export class CrmService {
       });
       await eventoCrm(tx, o, u, 'REPORTE_ID_ANULADO', motivo, {
         estado_tecnico: 'PENDIENTE',
-        ...(cerradas.includes(o.etapa) ? {} : { etapa: 'EN_ANALISIS_ID' as const }),
+        ...(cerradas.includes(o.etapa)
+          ? {}
+          : { etapa: 'EN_ANALISIS_ID' as const }),
       });
     });
     this.avisar(id);
@@ -584,13 +605,27 @@ export class CrmService {
       if (!Object.values(crm_moneda).includes(b.moneda))
         throw new BadRequestException('Moneda inválida');
       const total = decimalCrm(b.total),
-        subtotal = b.subtotal ? decimalCrm(b.subtotal, 2, true) : null,
-        impuestos = b.impuestos ? decimalCrm(b.impuestos, 2, true) : null;
+        subtotal = decimalCrm(b.subtotal, 2, true),
+        impuestos = decimalCrm(b.impuestos, 2, true);
       if (subtotal && impuestos && !subtotal.add(impuestos).eq(total))
         throw new BadRequestException(
           'Subtotal más impuestos debe coincidir con total',
         );
-      const vigencia = fechaCrm(b.vigencia_hasta, true);
+      const vigencia = fechaCrm(b.vigencia_hasta, true)!;
+      if (
+        !Object.values(crm_tipo_venta).includes(b.tipo_venta) ||
+        !Object.values(productos_materiales_UM).includes(b.unidad)
+      )
+        throw new BadRequestException('Tipo de venta o unidad inválidos');
+      const reporte = await tx.id_reportes_oportunidad.findFirstOrThrow({
+        where: { oportunidad_id: id, estado: 'PUBLICADO', resultado: 'VIABLE' },
+        orderBy: { version: 'desc' },
+      });
+      const producto = await tx.productos_materiales.findUnique({
+        where: { id_Produc_Mater: idValido(b.producto_id) },
+      });
+      if (!producto || producto.UM !== b.unidad)
+        throw new BadRequestException('Producto o unidad incompatible');
       if (
         vigencia!.toISOString().slice(0, 10) <
         new Date().toISOString().slice(0, 10)
@@ -612,6 +647,12 @@ export class CrmService {
           oportunidad_id: id,
           version: (last?.version ?? 0) + 1,
           folio: `COT-${randomUUID()}`,
+          reporte_id: reporte.id,
+          tipo_venta: b.tipo_venta,
+          producto_id: producto.id_Produc_Mater,
+          servicio: texto(b.servicio, 100),
+          cantidad: decimalCrm(b.cantidad, 4),
+          unidad: b.unidad,
           moneda: b.moneda,
           total,
           subtotal,
@@ -726,12 +767,6 @@ export class CrmService {
         throw new BadRequestException('Cotización vencida');
       // Bloqueo por persona evita dos primeras compras simultáneas en oportunidades distintas.
       await tx.$queryRaw`SELECT "id_Persona" FROM personas WHERE "id_Persona"=${o.persona_id} FOR UPDATE`;
-      const anteriores = await tx.crm_ordenes_venta.count({
-        where: {
-          persona_id: o.persona_id,
-          estado: { notIn: ['BORRADOR', 'CANCELADA'] },
-        },
-      });
       const perfil = await tx.crm_perfiles_comerciales.findUnique({
         where: { persona_id: o.persona_id },
       });
@@ -742,20 +777,16 @@ export class CrmService {
           cotizacion_id: c.id,
           persona_id: o.persona_id,
           vendedor_id: o.vendedor_id,
-          producto_id: o.producto_id,
+          producto_id: c.producto_id,
+          tipo_venta: c.tipo_venta,
+          servicio: c.servicio,
           orden_cliente: texto(b.orden_cliente, 100),
-          cantidad: b.cantidad
-            ? decimalCrm(b.cantidad, 4)
-            : o.cantidad_estimada,
-          unidad: opc(b.unidad, 30) ?? o.unidad,
+          cantidad: c.cantidad,
+          unidad: c.unidad,
           moneda: c.moneda,
+          subtotal: c.subtotal,
+          impuestos: c.impuestos,
           importe_total: c.total,
-          tipo_compra:
-            anteriores ||
-            (perfil?.estado_comercial === 'CLIENTE' &&
-              !perfil.fecha_primera_conversion)
-              ? 'RECOMPRA'
-              : 'PRIMERA_COMPRA',
           fecha_compromiso: fechaCrm(b.fecha_compromiso),
           observaciones: opc(b.observaciones),
           creado_por: u.usuario,
@@ -791,61 +822,74 @@ export class CrmService {
     this.avisar(id);
     return { success: true, data };
   }
+  private async clasificarCompras<
+    T extends {
+      id: number;
+      persona_id: number;
+      estado: string;
+      fecha_confirmacion: Date;
+    },
+  >(ordenes: T[]) {
+    const primeras = await this.prisma.crm_ordenes_venta.findMany({
+      where: {
+        persona_id: { in: [...new Set(ordenes.map((o) => o.persona_id))] },
+        estado: 'CONFIRMADA',
+      },
+      select: { id: true, persona_id: true },
+      orderBy: [{ fecha_confirmacion: 'asc' }, { id: 'asc' }],
+    });
+    const ids = new Map<number, number>();
+    for (const o of primeras)
+      if (!ids.has(o.persona_id)) ids.set(o.persona_id, o.id);
+    return ordenes.map((o) => ({
+      ...o,
+      tipo_compra:
+        o.estado === 'CANCELADA'
+          ? null
+          : ids.get(o.persona_id) === o.id
+            ? 'PRIMERA_COMPRA'
+            : 'RECOMPRA',
+    }));
+  }
   async ordenes(u: Usuario) {
+    const ordenes = await this.prisma.crm_ordenes_venta.findMany({
+      where: this.scope(u),
+      include: {
+        cliente: { select: { nombre: true } },
+        ordenes_produccion: true,
+        entregas: { include: { detalles: true } },
+      },
+      orderBy: { id: 'desc' },
+    });
     return {
       success: true,
-      data: await this.prisma.crm_ordenes_venta.findMany({
-        where: this.scope(u),
-        include: {
-          cliente: { select: { nombre: true } },
-          ordenes_produccion: true,
-        },
-        orderBy: { id: 'desc' },
-      }),
+      data: await this.clasificarCompras(
+        ordenes.map((o) => ({
+          ...o,
+          cantidad_entregada: o.entregas
+            .filter((e) => e.estado_entrega === 'ENTREGADA')
+            .flatMap((e) => e.detalles)
+            .reduce(
+              (a, d) => a.add(d.cantidad_recibida ?? 0),
+              new Prisma.Decimal(0),
+            ),
+        })),
+      ),
     };
   }
   async produccion(id: number, b: any, u: Usuario) {
-    const data = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${id} FOR UPDATE`;
-      const ov = await tx.crm_ordenes_venta.findFirst({
-        where: { id, ...this.scope(u) },
-        include: { ordenes_produccion: true },
-      });
-      if (!ov) throw new NotFoundException('Orden no encontrada');
-      if (ov.estado === 'CANCELADA')
-        throw new BadRequestException('Orden cancelada');
-      if (ov.ordenes_produccion.length) return ov.ordenes_produccion[0];
-      const cantidad = decimalCrm(b.cantidad ?? ov.cantidad?.toString(), 4);
-      if (!cantidad.isInteger() || cantidad.gt(2147483647))
-        throw new BadRequestException(
-          'Producción requiere cantidad entera por el modelo actual',
-        );
-      const producto = ov.producto_id ?? idValido(b.producto_id);
-      const op = await tx.ordenes_produccion.create({
-        data: {
-          orden_venta_id: ov.id,
-          id_Venta_Origen: ov.id,
-          vendedor_id: ov.vendedor_id,
-          cliente_id: ov.persona_id,
-          producto_id: producto,
-          servicio: texto(b.servicio, 50),
-          linea_Produccion: opc(b.linea_Produccion, 50),
-          cantidad_Venta: cantidad.toNumber(),
-          cantidad_Producida: 0,
-          status_Produccion: 'PENDIENTE',
-          fecha_Confirmacion: ov.fecha_confirmacion,
-          fecha_Compromiso: ov.fecha_compromiso,
-          observaciones: ov.observaciones,
-        },
-      });
-      await tx.crm_ordenes_venta.update({
-        where: { id },
-        data: { estado: 'EN_PRODUCCION', producto_id: producto },
-      });
-      return op;
-    });
+    const data = await this.prisma.$transaction((tx) =>
+      crearOrdenProduccion(tx, b, u, id),
+    );
     this.avisar();
     return { success: true, data };
+  }
+  async materiales(id: number, u: Usuario) {
+    const ov = await this.prisma.crm_ordenes_venta.findFirst({
+      where: { id, ...this.scope(u) },
+    });
+    if (!ov) throw new NotFoundException('Orden no encontrada');
+    return { success: true, data: await existencias(this.prisma, ov) };
   }
   async cancelarOrden(id: number, b: any, u: Usuario) {
     await this.prisma.$transaction(async (tx) => {
@@ -857,12 +901,25 @@ export class CrmService {
       await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${id} FOR UPDATE`;
       const orden = await tx.crm_ordenes_venta.findUniqueOrThrow({
         where: { id },
-        include: { ordenes_produccion: true },
+        include: {
+          ordenes_produccion: true,
+          entregas: true,
+          pagos: true,
+          facturas: true,
+        },
       });
       if (orden.estado === 'CANCELADA') return;
       if (orden.ordenes_produccion.some((x) => x.estado_Plan !== 'CANCELADA'))
         throw new ConflictException(
           'Cancela las órdenes de producción antes de cancelar la venta',
+        );
+      if (
+        orden.entregas.some((e) => e.estado_entrega !== 'CANCELADA') ||
+        orden.pagos.some((p) => p.estado !== 'ANULADO') ||
+        orden.facturas.some((f) => f.estado !== 'CANCELADA')
+      )
+        throw new ConflictException(
+          'Resuelve las entregas, pagos y facturas antes de cancelar la venta',
         );
       const motivo = texto(b.motivo, 4000);
       await tx.crm_ordenes_venta.update({
@@ -914,7 +971,7 @@ export class CrmService {
       this.prisma.crm_ordenes_venta.findMany({
         where: {
           ...this.scope(u),
-          estado: { notIn: ['CANCELADA', 'BORRADOR'] },
+          estado: { notIn: ['CANCELADA'] },
         },
         orderBy: { fecha_confirmacion: 'asc' },
       }),
