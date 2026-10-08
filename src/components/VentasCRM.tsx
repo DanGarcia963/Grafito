@@ -943,6 +943,17 @@ export default function VentasCRM() {
               )}
             </article>
           ))}
+          <h3>Precio objetivo de Costos</h3>
+          {detalle.costos_oportunidad?.length ? detalle.costos_oportunidad.map((c: any) => (
+            <article key={c.id} className={s.historyItem}>
+              <strong>
+                {c.precio_objetivo_litro != null
+                  ? `${dinero(c.precio_objetivo_litro, c.moneda)} por litro`
+                  : "Precio pendiente de Costos"}
+              </strong>
+              {c.reporte?.version && <p>Calculado para el reporte de ID v{c.reporte.version} · {fecha(c.precio_emitido_en)}</p>}
+            </article>
+          )) : <p>Esta oportunidad aún no tiene un precio objetivo emitido por Costos.</p>}
           <h3>Cotizaciones y revisiones</h3>
           {detalle.cotizaciones.map((c: any) => (
             <article key={c.id} className={s.historyItem}>

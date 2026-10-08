@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { pedir } from '@/utils/api';
 
-type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'seguridad';
+type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'seguridad' | 'costos';
 
 export default function LoginPage() {
 const [area, setArea] = useState<Area>('produccion');
@@ -25,7 +25,7 @@ try {
   throw new Error('El servidor no devolvió un token de sesión. Revisa la respuesta de /api/auth/login.');
  }
  localStorage.setItem('sesion',JSON.stringify(sesion));window.dispatchEvent(new Event('sesion-cambiada'));
- router.push(area ==='seguridad'?'/matriz':area==='calidad'?'/calidad':area==='produccion'?'/tanques':area==='ventas'?'/ventas-muestras':'/investigacion');
+ router.push(area ==='seguridad'?'/matriz':area==='calidad'?'/calidad':area==='produccion'?'/tanques':area==='ventas'?'/ventas-muestras':area==='costos'?'/costos':'/investigacion');
 } catch(e){setError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
 
 };
@@ -52,6 +52,7 @@ US Technologies · Muestras y procesos </h1>
       <option value="calidad">Muestras · Calidad</option>
       <option value="id">Muestras · Investigación y Desarrollo</option>
       <option value="ventas">Ventas · CRM de muestras I+D</option>
+      <option value="costos">Costos · Precios objetivo</option>
       <option value="seguridad">Seguridad</option>
     </select>
 
