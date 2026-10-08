@@ -117,6 +117,29 @@ export class CrmService {
     return { success: true, data, total, pagina };
   }
   async detalle(id: number, u: Usuario) {
+    const costosSelect: Prisma.crm_costos_oportunidadFindManyArgs['select'] =
+      u.area === 'id'
+        ? {
+            id: true,
+            version: true,
+            formula: true,
+            formula_enviada_por: true,
+            formula_enviada_en: true,
+            precio_objetivo_litro: true,
+            moneda: true,
+            precio_emitido_por: true,
+            precio_emitido_en: true,
+            reporte: { select: { version: true } },
+          }
+        : {
+            id: true,
+            version: true,
+            precio_objetivo_litro: true,
+            moneda: true,
+            precio_emitido_en: true,
+            reporte: { select: { version: true } },
+          };
+
     const data = await this.prisma.crm_oportunidades.findFirst({
       where: { id, ...this.scope(u) },
       include: {
@@ -139,6 +162,11 @@ export class CrmService {
           orderBy: { version: 'desc' },
         },
         reportes_id: { omit: sinArchivo, orderBy: { version: 'desc' } },
+        costos_oportunidad: {
+          where: { reporte: { is: { estado: 'PUBLICADO' } } },
+          orderBy: { version: 'desc' },
+          select: costosSelect,
+        },
       },
     });
     if (!data) throw new NotFoundException('Oportunidad no encontrada');
@@ -545,6 +573,47 @@ export class CrmService {
     this.avisar(id);
     return { success: true, data };
   }
+
+ async enviarFormulaCostos(id: number, b: any, u: Usuario) {
+    const formula = texto(b.formula, 12000);
+    if (!formula) throw new BadRequestException('Captura la fórmula para Costos');
+    const data = await this.prisma.$transaction(async (tx) => {
+      const o = await bloquearOportunidad(tx, id, u);
+      versionValida(o, b.version);
+      const reporte = await tx.id_reportes_oportunidad.findFirst({
+        where: { oportunidad_id: id, estado: 'PUBLICADO' },
+        orderBy: { version: 'desc' },
+      });
+      if (!reporte || reporte.resultado !== 'VIABLE')
+        throw new BadRequestException('Se requiere un reporte viable publicado');
+      const enviada = await tx.crm_costos_oportunidad.findFirst({
+        where: { reporte_id: reporte.id, oportunidad_id: id },
+      });
+      if (enviada)
+        throw new ConflictException('Ya se envió una fórmula para este reporte; publica una nueva versión del reporte para reenviarla');
+      const previa = await tx.crm_costos_oportunidad.findFirst({
+        where: { oportunidad_id: id },
+        orderBy: { version: 'desc' },
+      });
+      return tx.crm_costos_oportunidad.create({
+        data: {
+          oportunidad_id: id,
+          reporte_id: reporte.id,
+          version: (previa?.version ?? 0) + 1,
+          formula,
+          formula_enviada_por: u.usuario,
+        },
+        select: {
+          id: true, version: true, formula: true, formula_enviada_por: true,
+          formula_enviada_en: true, reporte: { select: { version: true } },
+        },
+      });
+    });
+    this.avisar(id);
+    this.eventos.notificar('COSTOS_FORMULA_RECIBIDA', { oportunidad_id: id });
+    return { success: true, data };
+  }
+
   async anularReporte(id: number, rid: number, b: any, u: Usuario) {
     await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
@@ -626,6 +695,11 @@ export class CrmService {
         where: { oportunidad_id: id, estado: 'PUBLICADO', resultado: 'VIABLE' },
         orderBy: { version: 'desc' },
       });
+      const costo = await tx.crm_costos_oportunidad.findFirst({
+        where: { reporte_id: reporte.id, oportunidad_id: id },
+      });
+      if (!costo?.precio_objetivo_litro)
+        throw new BadRequestException('Costos debe emitir el precio objetivo antes de cotizar');
       const producto = await tx.productos_materiales.findUnique({
         where: { id_Produc_Mater: idValido(b.producto_id) },
       });
@@ -916,9 +990,7 @@ export class CrmService {
       });
       if (!previa) throw new NotFoundException('Orden no encontrada');
       if (previa.oportunidad_id == null)
-        throw new NotFoundException(
-          'La orden no tiene una oportunidad asociada',
-        );
+        throw new NotFoundException('La orden no tiene una oportunidad asociada');
       const o = await bloquearOportunidad(tx, previa.oportunidad_id, u);
       await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${id} FOR UPDATE`;
       const orden = await tx.crm_ordenes_venta.findUniqueOrThrow({
@@ -952,12 +1024,12 @@ export class CrmService {
           motivo_cancelacion: motivo,
         },
       });
-      if (orden.cotizacion_id != null) {
-        await tx.crm_cotizaciones.update({
-          where: { id: orden.cotizacion_id },
-          data: { estado: 'CANCELADA' },
-        });
-      }
+      if (orden.cotizacion_id == null)
+        throw new NotFoundException('Cotización no encontrada');
+      await tx.crm_cotizaciones.update({
+        where: { id: orden.cotizacion_id },
+        data: { estado: 'CANCELADA' },
+      });
       await eventoCrm(tx, o, u, 'CANCELACION', motivo, {
         etapa: 'CANCELADA',
         motivo_cierre: motivo,
