@@ -46,16 +46,18 @@ export default function TanquesPage() {
     } | null>(null),
     [plan, setPlan] = useState(false);
   const cargar = useCallback(async () => {
-    const [o, t, m, c] = await Promise.all([
+    const [o, t, m, c, maybeLotes] = await Promise.all([
       pedir("/api/produccion/test", undefined, "GET"),
       pedir("/api/produccion/tanques?tipo=GRAFITO", undefined, "GET"),
       pedir("/api/calidad/obtenerMuestras", undefined, "GET"),
       pedir("/api/produccion/catalogos", undefined, "GET"),
+      pedir("/api/produccion/lotes-pendientes", undefined, "GET"),
     ]);
     setOrdenes(o.result);
     setBitacora(o.bitacora);
     setTanques(t.result);
     setCat(c);
+    setLotesPendientes(maybeLotes.data?.data ?? []);
     const ids = new Set(
       o.result.flatMap((o: any) =>
         o.lotes_produccion.map((l: any) => l.id_Lote_Produccion),
@@ -272,9 +274,26 @@ export default function TanquesPage() {
           {tab === "ordenes" && (
             <section className="space-y-4">
               {produccion && (
-                <button className={boton} onClick={() => setPlan(true)}>
-                  Crear OP independiente
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button className={boton} onClick={() => setPlan(true)}>
+                    Crear OP independiente
+                  </button>
+                  <button className={boton} onClick={() => setForm({ tipo: "lote-pendiente", dato: null })}>
+                    Registrar LP antes de asignar OP
+                  </button>
+                </div>
+              )}
+              {produccion && lotesPendientes.length > 0 && (
+                <section className="space-y-2 rounded-xl border border-amber-700 bg-amber-950/30 p-4">
+                  <h2 className="font-bold">Lotes pendientes de asignación o arranque</h2>
+                  <p className="text-sm text-slate-300">Estos borradores no reservan ni descuentan inventario. Vincula una OP y el consumo ocurrirá hasta iniciar el lote en un tanque.</p>
+                  {lotesPendientes.map((l: any) => (
+                    <article key={l.id_Lote_Produccion} className="flex flex-wrap items-center justify-between gap-2 border-t border-amber-800 pt-2">
+                      <div><strong>{l.no_Lote}</strong> · {l.ordenes_produccion?.no_Orden_Produc ?? "Sin OP"}{l.observaciones && <p>{l.observaciones}</p>}</div>
+                      {!l.orden_Produccion_id && <button className={boton} onClick={() => setForm({ tipo: "vincular-lote", dato: l })}>Asignar OP</button>}
+                    </article>
+                  ))}
+                </section>
               )}
               {plan && (
                 <PlanProduccion
@@ -657,6 +676,8 @@ export default function TanquesPage() {
                     rezagado: "Marcar material rezagado",
                     estado: "Cambiar proceso del tanque",
                     nota: "Añadir nota a la bitácora",
+                    "lote-pendiente": "Registrar lote de producción pendiente",
+                    "vincular-lote": "Asignar lote pendiente a una OP",
                   } as Record<string, string>
                 )[form.tipo]
               }
@@ -671,6 +692,10 @@ export default function TanquesPage() {
                   b.especificaciones = JSON.parse(b.especificaciones);
                 void ejecutar(async () => {
                   const d = form.dato;
+                  if (form.tipo === "lote-pendiente")
+                    await pedir("/api/produccion/lotes/pendiente", b);
+                  if (form.tipo === "vincular-lote")
+                    await pedir(`/api/produccion/lotes/${d.id_Lote_Produccion}/vincular-orden`, b);
                   if (form.tipo === "apertura")
                     await pedir("/api/produccion/inventario/apertura", b);
                   if (form.tipo === "recepcion")
@@ -735,6 +760,26 @@ export default function TanquesPage() {
               }}
             >
               <fieldset disabled={busy} className="grid gap-4">
+                {form.tipo === "lote-pendiente" && (
+                  <>
+                    <p>Registra el folio del lote antes de definir su OP. Este paso no consume inventario ni ocupa un tanque.</p>
+                    <label>Folio del lote<input required name="no_Lote" maxLength={50} className={input} /></label>
+                    <label>Observaciones<textarea name="observaciones" maxLength={4000} className={input} /></label>
+                  </>
+                )}
+                {form.tipo === "vincular-lote" && (
+                  <>
+                    <p>Solo se muestran OP de Grafito planificadas o en proceso. El inventario se reservará/consumirá al iniciar el lote en tanque.</p>
+                    <label>Orden de producción
+                      <select required name="orden_produccion_id" className={input}>
+                        <option value="">Selecciona</option>
+                        {ordenes.filter((o: any) => o.linea_Produccion?.toUpperCase() === "GRAFITO" && ["PLANIFICADA", "EN_PROCESO"].includes(o.estado_Plan)).map((o: any) => (
+                          <option key={o.id_Orden_Produc} value={o.id_Orden_Produc}>{o.no_Orden_Produc} · {o.productos_materiales.nombre_Producto}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
                 {form.tipo === "ubicacion" && (
                   <>
                     <label>
@@ -1028,10 +1073,16 @@ export default function TanquesPage() {
                         required
                         name="no_Lote"
                         maxLength={50}
+                        list={`lotes-pendientes-${form.dato.id_Orden_Produc}`}
                       />
+                      <datalist id={`lotes-pendientes-${form.dato.id_Orden_Produc}`}>
+                        {lotesPendientes
+                          .filter((l: any) => l.orden_Produccion_id === form.dato.id_Orden_Produc)
+                          .map((l: any) => <option key={l.id_Lote_Produccion} value={l.no_Lote} />)}
+                      </datalist>
                     </label>
                     <p>
-                      Indica la cantidad de cada material que cargarás. El resto
+                      Puedes elegir un LP pendiente de esta OP o capturar un folio nuevo. Indica la cantidad de cada material que cargarás. El resto
                       sigue reservado para los siguientes lotes.
                     </p>
                     {form.dato.reservas_material
