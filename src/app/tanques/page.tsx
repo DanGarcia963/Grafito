@@ -33,7 +33,8 @@ export default function TanquesPage() {
     [muestras, setMuestras] = useState<any[]>([]),
     [bitacora, setBitacora] = useState<any[]>([]),
     [cat, setCat] = useState<any>({ ubicaciones: [] }),
-    [stock, setStock] = useState<any[]>([]);
+    [stock, setStock] = useState<any[]>([]),
+    [lotesPendientes, setLotesPendientes] = useState<any[]>([]);
   const [tab, setTab] = useState("tanques"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
