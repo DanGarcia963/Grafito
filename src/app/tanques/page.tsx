@@ -57,7 +57,7 @@ export default function TanquesPage() {
     setBitacora(o.bitacora);
     setTanques(t.result);
     setCat(c);
-    setLotesPendientes(maybeLotes.data?.data ?? []);
+    setLotesPendientes(maybeLotes.data ?? []);
     const ids = new Set(
       o.result.flatMap((o: any) =>
         o.lotes_produccion.map((l: any) => l.id_Lote_Produccion),
