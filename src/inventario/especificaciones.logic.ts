@@ -87,7 +87,7 @@ export function especificacionesValidas(
   return { version: 1, atributos, contenedores };
 }
 
-/** F.E. solo es insumo de reproceso, nunca existencia liberada para entregar. */
+/** F.E. solo es insumo de reproceso; SUCIO es materia prima para regenerar. */
 export function aptitudMaterial(l: {
   origen: string;
   condicion: string;
@@ -104,10 +104,16 @@ export function aptitudMaterial(l: {
     calidad === 'LIBERADO' &&
     l.condicion !== 'FUERA_DE_ESPECIFICACION' &&
     l.condicion !== 'RESIDUO';
+  const rechazado = ['RECHAZADO', 'BLOQUEADO'].includes(calidad ?? '');
+  const materiaPorRegenerar =
+    l.condicion === 'SUCIO' && !rechazado;
+  const fueraDeEspecificacion =
+    l.condicion === 'FUERA_DE_ESPECIFICACION' &&
+    ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(calidad ?? '');
+  // El dictamen de recepción no equivale a la liberación del producto terminado.
+  // El material SUCIO puede entrar a una OP de reproceso mientras no esté bloqueado,
+  // rechazado ni vencido; nunca queda disponible para venta por esta regla.
   const reprocesable =
-    vigente &&
-    (liberado ||
-      (l.condicion === 'FUERA_DE_ESPECIFICACION' &&
-        ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(calidad ?? '')));
+    vigente && (liberado || materiaPorRegenerar || fueraDeEspecificacion);
   return { liberado, venta: vigente && liberado, reprocesable };
 }
