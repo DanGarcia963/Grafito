@@ -102,8 +102,7 @@ export function aptitudMaterial(l: {
   const vigente = !l.fecha_caducidad || l.fecha_caducidad >= new Date();
   const liberado =
     calidad === 'LIBERADO' &&
-    l.condicion !== 'FUERA_DE_ESPECIFICACION' &&
-    l.condicion !== 'RESIDUO';
+    !['SUCIO', 'FUERA_DE_ESPECIFICACION', 'RESIDUO'].includes(l.condicion);
   const rechazado = ['RECHAZADO', 'BLOQUEADO'].includes(calidad ?? '');
   const materiaPorRegenerar =
     l.condicion === 'SUCIO' && !rechazado;
