@@ -915,6 +915,8 @@ export class CrmService {
         where: { id, ...this.scope(u) },
       });
       if (!previa) throw new NotFoundException('Orden no encontrada');
+      if (previa.oportunidad_id == null)
+        throw new NotFoundException('Oportunidad no encontrada');
       const o = await bloquearOportunidad(tx, previa.oportunidad_id, u);
       await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${id} FOR UPDATE`;
       const orden = await tx.crm_ordenes_venta.findUniqueOrThrow({
@@ -948,6 +950,8 @@ export class CrmService {
           motivo_cancelacion: motivo,
         },
       });
+      if (orden.cotizacion_id == null)
+        throw new NotFoundException('Cotización no encontrada');
       await tx.crm_cotizaciones.update({
         where: { id: orden.cotizacion_id },
         data: { estado: 'CANCELADA' },
