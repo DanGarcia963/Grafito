@@ -10,7 +10,7 @@ export default function PlanProduccion({
   onDone: () => void;
   onClose: () => void;
 }) {
-  const [reproceso, setReproceso] = useState(false);
+  const [reproceso, setReproceso] = useState(!venta || venta?.tipo_venta === "SERVICIO_REGENERACION");
   const [stock, setStock] = useState<any[]>([]),
     [cat, setCat] = useState<any>({ productos: [], personas: [] }),
     [error, setError] = useState(""),
@@ -138,15 +138,21 @@ export default function PlanProduccion({
               ))}
             </select>
           </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={reproceso}
-              onChange={(e) => setReproceso(e.target.checked)}
-            />{" "}
-            Regeneración / reproceso de material (permite F.E. sin liberarlo
-            para entrega)
-          </label>
+          <div>
+            <label>
+              <input
+                type="checkbox"
+                checked={reproceso}
+                onChange={(e) => setReproceso(e.target.checked)}
+              />{" "}
+              Esta OP regenerará o reprocesará material
+            </label>
+            <p className="text-sm text-slate-600">
+              Al activarlo se muestran existencias SUCIAS aptas para regeneración
+              y material F.E. rechazado. El material reservado no se descuenta
+              físicamente hasta que inicies un lote de producción en un tanque.
+            </p>
+          </div>
           {reproceso && (
             <label>
               Motivo del reproceso
@@ -186,8 +192,8 @@ export default function PlanProduccion({
           )}
           {!stock.length && (
             <p>
-              No hay materiales liberados disponibles. Registra su recepción y
-              dictamen antes de planificar.
+              No hay materiales disponibles para esta operación. Revisa la
+              condición, el estado de Calidad, la ubicación y las reservas activas.
             </p>
           )}
           <label>
