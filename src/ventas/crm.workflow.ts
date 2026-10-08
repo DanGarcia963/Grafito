@@ -18,7 +18,19 @@ export async function bloquearOportunidad(
 ) {
   await tx.$queryRaw`SELECT id FROM crm_oportunidades WHERE id=${id} FOR UPDATE`;
   const o = await tx.crm_oportunidades.findFirst({
-    where: { id, ...(u.area === 'ventas' ? { vendedor_id: u.personaId } : {}) },
+    where: {
+      id,
+      ...(u.area === 'ventas'
+        ? {
+            vendedor_id: u.personaId,
+            cliente: {
+              crm_perfil_comercial: {
+                is: { vendedor_responsable_id: u.personaId },
+              },
+            },
+          }
+        : {}),
+    },
   });
   if (!o) throw new NotFoundException('Oportunidad no encontrada');
   return o;
