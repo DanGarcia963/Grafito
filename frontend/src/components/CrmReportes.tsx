@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { API_URL, apiFetch, pedir } from "@/utils/api";
+import { API_URL, apiFetch, pedir, sesionActual } from "@/utils/api";
 export async function descargarCrm(tipo: string, id: number, nombre: string) {
   const r = await apiFetch(
     `${API_URL}/api/ventas/crm/documentos/${tipo}/${id}`,
@@ -21,7 +21,9 @@ export default function CrmReportes({
   const [o, setO] = useState<any>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [mensaje, setMensaje] = useState("");
+    [mensaje, setMensaje] = useState(""),
+    [area, setArea] = useState(""),
+    [formula, setFormula] = useState("");
   const cargar = async () => {
     const r = await pedir(
       `/api/ventas/crm/oportunidades/${oportunidadId}`,
@@ -31,6 +33,7 @@ export default function CrmReportes({
     setO(r.data);
   };
   useEffect(() => {
+    setArea(sesionActual()?.area ?? "");
     void cargar().catch((e) => setError(e.message));
   }, [oportunidadId]);
   const ejecutar = async (fn: () => Promise<unknown>) => {
@@ -146,6 +149,36 @@ export default function CrmReportes({
               </button>
             </form>
           )}
+          {area === "id" && (() => {
+            const vigente = o.reportes_id.find((r: any) => r.estado === "PUBLICADO" && r.resultado === "VIABLE");
+            const enviada = vigente && o.costos_oportunidad?.find((x: any) => x.reporte?.version === vigente.version);
+            return vigente && !enviada ? (
+              <form className="grid gap-3 border rounded-lg p-3 bg-white" onSubmit={(e) => {
+                e.preventDefault();
+                void ejecutar(async () => {
+                  await pedir(`/api/ventas/crm/oportunidades/${oportunidadId}/formulas-costos`, {
+                    version: o.version,
+                    formula,
+                  });
+                  setFormula("");
+                });
+              }}>
+                <h4 className="font-semibold">Enviar fórmula a Costos · Reporte v{vigente.version}</h4>
+                <p className="text-sm">La fórmula quedará asociada a este reporte viable. Costos registrará el precio objetivo por litro en una versión auditable.</p>
+                <label>Fórmula / proceso propuesto
+                  <textarea required maxLength={12000} value={formula} onChange={(e) => setFormula(e.target.value)} className="border p-2 block w-full min-h-28" />
+                </label>
+                <button disabled={busy} className="bg-indigo-700 text-white p-2 rounded">Enviar fórmula a Costos</button>
+              </form>
+            ) : null;
+          })()}
+          {area === "id" && o.costos_oportunidad?.map((c: any) => (
+            <p key={c.id} className="text-sm">Fórmula v{c.version} · Reporte v{c.reporte?.version} · {c.precio_emitido_en ? `Precio objetivo recibido: ${c.precio_objetivo_litro} ${c.moneda}/L` : "Pendiente de precio de Costos"}</p>
+          ))}
+          {area === "ventas" && o.costos_oportunidad?.find((c: any) => c.precio_objetivo_litro != null) && (() => {
+            const c = o.costos_oportunidad.find((x: any) => x.precio_objetivo_litro != null);
+            return <p className="rounded-lg bg-emerald-50 border border-emerald-300 p-3 text-emerald-900">Precio objetivo de Costos: <strong>{c.precio_objetivo_litro} {c.moneda}/L</strong> · Reporte v{c.reporte?.version}</p>;
+          })()}
           {o.reportes_id.map((r: any) => (
             <article key={r.id} className="border rounded p-3 space-y-2">
               <strong>

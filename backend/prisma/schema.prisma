@@ -829,6 +829,7 @@ model crm_oportunidades {
   historial                  crm_oportunidad_historial[]
   reportes_id                id_reportes_oportunidad[]
   cotizaciones               crm_cotizaciones[]
+  costos_oportunidad        crm_costos_oportunidad[]
   orden_venta                crm_ordenes_venta?
 
   @@index([persona_id, fecha_apertura], map: "idx_crm_oportunidad_cliente")
@@ -878,10 +879,31 @@ model id_reportes_oportunidad {
   /// Snapshot de IDs de muestras y ciclos evaluados al publicar; validación en backend.
   muestras_ciclos Json
   cotizaciones    crm_cotizaciones[]
+  costos          crm_costos_oportunidad[]
 
   @@unique([oportunidad_id, version], map: "uq_id_reporte_oportunidad_version")
-  @@unique([id, oportunidad_id])
+  @@unique([id, oportunidad_id], map: "uq_id_reporte_oportunidad")
   @@index([estado, publicado_en], map: "idx_id_reporte_estado_publicacion")
+}
+
+model crm_costos_oportunidad {
+  id                    Int                    @id @default(autoincrement())
+  oportunidad_id        Int
+  reporte_id            Int
+  version               Int
+  formula               String                 @db.Text
+  formula_enviada_por   String                 @db.VarChar(100)
+  formula_enviada_en    DateTime               @default(now()) @db.Timestamptz(6)
+  precio_objetivo_litro Decimal?                @db.Decimal(18, 6)
+  moneda                crm_moneda              @default(MXN)
+  precio_emitido_por    String?                 @db.VarChar(100)
+  precio_emitido_en     DateTime?               @db.Timestamptz(6)
+  oportunidad           crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reporte               id_reportes_oportunidad @relation(fields: [reporte_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([oportunidad_id, version], map: "uq_crm_costos_oportunidad_version")
+  @@unique([reporte_id, oportunidad_id], map: "uq_crm_costos_reporte")
+  @@index([precio_emitido_en], map: "idx_crm_costos_emitido")
 }
 
 model crm_cotizaciones {
