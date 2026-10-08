@@ -160,7 +160,7 @@ export class ProductionService {
         if (!tanque || tanque.status !== 'OPERATIVO')
           throw new BadRequestException('Tanque no disponible');
         const op = await tx.ordenes_produccion.findUniqueOrThrow({
-          where: { id_Orden_Produc: lote.orden_Produccion_id },
+          where: { id_Orden_Produc: Number(lote.orden_Produccion_id) },
         });
         if (op.linea_Produccion?.toUpperCase() !== tanque.tipo)
           throw new BadRequestException('Tanque de otra línea de producción');
@@ -408,16 +408,23 @@ export class ProductionService {
           },
         });
         if (!pendiente) {
+          const productoId = Number(lote?.ordenes_produccion?.producto_id ?? 0);
+          const clienteId = Number(
+            lote?.ordenes_produccion?.crm_ordenes_venta?.persona_id ?? 0,
+          );
+          const muestraData: Prisma.muestrasUncheckedCreateInput = {
+            no_Muestra: lote.no_Lote,
+            fecha_Toma: new Date(),
+            Hora_Toma: new Date(),
+            tanque_id: id,
+            lote_id: lote.id_Lote_Produccion,
+            producto_id:
+              Number.isFinite(productoId) && productoId > 0 ? productoId : 0,
+            cliente_id:
+              Number.isFinite(clienteId) && clienteId > 0 ? clienteId : 0,
+          };
           const muestra = await tx.muestras.create({
-            data: {
-              no_Muestra: lote.no_Lote,
-              fecha_Toma: new Date(),
-              Hora_Toma: new Date(),
-              tanque_id: id,
-              lote_id: lote.id_Lote_Produccion,
-              producto_id: lote.ordenes_produccion.producto_id,
-              cliente_id: lote.ordenes_produccion.crm_ordenes_venta?.persona_id,
-            },
+            data: muestraData,
           });
           await tx.lotes_produccion.update({
             where: { id_Lote_Produccion: lote.id_Lote_Produccion },
@@ -773,8 +780,13 @@ export class ProductionService {
         throw new BadRequestException(
           'Selecciona una ubicación de destino activa',
         );
-      const op = lote.ordenes_produccion,
-        ov = op.crm_ordenes_venta;
+      const op = lote.ordenes_produccion;
+      if (!op) {
+        throw new BadRequestException(
+          'La orden de producción asociada al lote no está disponible',
+        );
+      }
+      const ov = op.crm_ordenes_venta;
       const cliente =
         op.propietario_id ??
         (ov?.tipo_venta === 'SERVICIO_REGENERACION' ? ov.persona_id : null);

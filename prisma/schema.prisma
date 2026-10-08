@@ -156,7 +156,7 @@ model incidencias_proveedores {
 model lotes_produccion {
   id_Lote_Produccion    Int                            @id @default(autoincrement())
   no_Lote               String                         @unique @db.VarChar(50)
-  orden_Produccion_id   Int
+  orden_Produccion_id   Int?
   tanque_id             Int?
   /// Estado de ejecución separado del dictamen de Calidad.
   estado                produccion_lote_estado         @default(PENDIENTE)
@@ -165,7 +165,7 @@ model lotes_produccion {
   estado_Calida         lotes_produccion_estado_Calida @default(PROCESANDO)
   observaciones_Calidad String?                        @db.Text
   observaciones         String?                        @db.Text
-  ordenes_produccion    ordenes_produccion             @relation(fields: [orden_Produccion_id], references: [id_Orden_Produc], onDelete: Restrict)
+  ordenes_produccion    ordenes_produccion?             @relation(fields: [orden_Produccion_id], references: [id_Orden_Produc], onDelete: Restrict)
   equipos_tanques       equipos_tanques?               @relation(fields: [tanque_id], references: [id_Equipos_Tanques], onDelete: Restrict)
   inventario_obtenido   lotes_inventario[]
   movimientos           movimientos_inventario[]
@@ -928,8 +928,8 @@ model crm_ordenes_venta {
   especificaciones Json? @db.JsonB
   id                   Int                     @id @default(autoincrement())
   folio                String                  @unique(map: "uq_crm_orden_venta_folio") @db.VarChar(60)
-  oportunidad_id       Int                     @unique(map: "uq_crm_orden_venta_oportunidad")
-  cotizacion_id        Int                     @unique(map: "uq_crm_orden_venta_cotizacion")
+  oportunidad_id       Int?                     @unique(map: "uq_crm_orden_venta_oportunidad")
+  cotizacion_id        Int?                     @unique(map: "uq_crm_orden_venta_cotizacion")
   persona_id           Int
   vendedor_id          Int
   tipo_venta           crm_tipo_venta
@@ -951,8 +951,8 @@ model crm_ordenes_venta {
   creado_por           String                  @db.VarChar(100)
   creado_en            DateTime                @default(now()) @db.Timestamptz(6)
   actualizado_en       DateTime                @updatedAt @db.Timestamptz(6)
-  oportunidad          crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
-  cotizacion           crm_cotizaciones        @relation(fields: [cotizacion_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
+  oportunidad          crm_oportunidades?       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
+  cotizacion           crm_cotizaciones?        @relation(fields: [cotizacion_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
   cliente              personas                @relation("crm_orden_venta_cliente", fields: [persona_id], references: [id_Persona], onDelete: Restrict)
   vendedor             personas                @relation("crm_orden_venta_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict)
   producto             productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
