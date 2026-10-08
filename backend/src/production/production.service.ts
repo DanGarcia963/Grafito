@@ -590,6 +590,105 @@ export class ProductionService {
       ),
     };
   }
+  async lotesPendientes() {
+    const data = await this.prisma.lotes_produccion.findMany({
+      where: { estado: 'PENDIENTE' },
+      include: {
+        ordenes_produccion: {
+          select: {
+            id_Orden_Produc: true,
+            no_Orden_Produc: true,
+            linea_Produccion: true,
+            estado_Plan: true,
+            productos_materiales: { select: { nombre_Producto: true } },
+          },
+        },
+      },
+      orderBy: { id_Lote_Produccion: 'desc' },
+    });
+    return { success: true, data };
+  }
+
+  async crearLotePendiente(b: any, u: Usuario) {
+    const folio = texto(b.no_Lote, 50);
+    if (!folio) throw new BadRequestException('Captura el folio del lote');
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`lp-pendiente:${folio}`}))::text`;
+      const existente = await tx.lotes_produccion.findUnique({
+        where: { no_Lote: folio },
+      });
+      if (existente) {
+        if (existente.estado === 'PENDIENTE' && !existente.orden_Produccion_id)
+          return existente;
+        throw new ConflictException('El folio ya está asociado a otro lote');
+      }
+      const lote = await tx.lotes_produccion.create({
+        data: {
+          no_Lote: folio,
+          estado: 'PENDIENTE',
+          estado_Calida: 'PROCESANDO',
+          observaciones: texto(b.observaciones, 4000) || null,
+        },
+      });
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'LOTE',
+          entidad_id: lote.id_Lote_Produccion,
+          ciclo: 1,
+          fecha: new Date(),
+          accion: 'CREAR_LOTE_PENDIENTE',
+          detalle: JSON.stringify({ realizado_por: u.usuario }),
+        },
+      });
+      return lote;
+    });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', {});
+    return { success: true, data };
+  }
+
+  async vincularLoteOrden(id: number, b: any, u: Usuario) {
+    const opId = idValido(b.orden_produccion_id);
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id_Equipos_Tanques" FROM equipos_tanques ORDER BY "id_Equipos_Tanques" FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Orden_Produc" FROM ordenes_produccion WHERE "id_Orden_Produc"=${opId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion"=${id} FOR UPDATE`;
+      const [lote, op] = await Promise.all([
+        tx.lotes_produccion.findUnique({
+          where: { id_Lote_Produccion: id },
+          include: { movimientos: true, muestras: true },
+        }),
+        tx.ordenes_produccion.findUnique({ where: { id_Orden_Produc: opId } }),
+      ]);
+      if (!lote || !op) throw new NotFoundException('Lote u OP no encontrado');
+      if (lote.estado !== 'PENDIENTE' || lote.tanque_id ||
+          lote.movimientos.length || lote.muestras.length)
+        throw new ConflictException('Solo se puede asignar una OP a un lote pendiente aún no iniciado');
+      if (lote.orden_Produccion_id === opId) return lote;
+      if (lote.orden_Produccion_id)
+        throw new ConflictException('El lote ya pertenece a otra OP');
+      if (op.linea_Produccion?.toUpperCase() !== 'GRAFITO' ||
+          !['PLANIFICADA', 'EN_PROCESO'].includes(op.estado_Plan))
+        throw new BadRequestException('La OP no está disponible para Grafito');
+      const actualizado = await tx.lotes_produccion.update({
+        where: { id_Lote_Produccion: id },
+        data: { orden_Produccion_id: opId },
+      });
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'LOTE',
+          entidad_id: id,
+          ciclo: 1,
+          fecha: new Date(),
+          accion: 'VINCULAR_OP',
+          detalle: JSON.stringify({ orden_produccion_id: opId, realizado_por: u.usuario }),
+        },
+      });
+      return actualizado;
+    });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', {});
+    return { success: true, data };
+  }
+
   async iniciarLote(b: any, u: Usuario) {
     const opId = idValido(b.orden_produccion_id),
       tanqueId = idValido(b.tanque_id),
@@ -611,8 +710,10 @@ export class ProductionService {
       });
       if (existente) {
         if (existente.orden_Produccion_id !== opId)
-          throw new BadRequestException('Folio ocupado');
-        return existente;
+          throw new BadRequestException('Folio ocupado o lote pendiente sin vincular a esta OP');
+        if (existente.estado !== 'PENDIENTE') return existente;
+        if (existente.tanque_id)
+          throw new ConflictException('El lote pendiente ya está asignado a un tanque');
       }
       const tanque = await tx.equipos_tanques.findUnique({
         where: { id_Equipos_Tanques: tanqueId },
@@ -685,15 +786,25 @@ export class ProductionService {
         throw new BadRequestException(
           'La carga excede la capacidad del tanque',
         );
-      const lote = await tx.lotes_produccion.create({
-        data: {
-          no_Lote: folio,
-          orden_Produccion_id: opId,
-          tanque_id: tanqueId,
-          estado: 'EN_PROCESO',
-          fecha_inicio: new Date(),
-        },
-      });
+      const lote = existente
+        ? await tx.lotes_produccion.update({
+            where: { id_Lote_Produccion: existente.id_Lote_Produccion },
+            data: {
+              orden_Produccion_id: opId,
+              tanque_id: tanqueId,
+              estado: 'EN_PROCESO',
+              fecha_inicio: new Date(),
+            },
+          })
+        : await tx.lotes_produccion.create({
+            data: {
+              no_Lote: folio,
+              orden_Produccion_id: opId,
+              tanque_id: tanqueId,
+              estado: 'EN_PROCESO',
+              fecha_inicio: new Date(),
+            },
+          });
       for (const c of consumos) {
         const r = reservas.find((r) => r.id === c.id)!;
         await tx.movimientos_inventario.create({

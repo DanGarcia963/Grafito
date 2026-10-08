@@ -32,6 +32,22 @@ export class ProductionController {
   ) {
     return this.productionService.crearOrden(b, r.usuario);
   }
+  @Areas('produccion') @Get('lotes-pendientes') lotesPendientes() {
+    return this.productionService.lotesPendientes();
+  }
+  @Areas('produccion') @Post('lotes/pendiente') lotePendiente(
+    @Body() b: any,
+    @Req() r: any,
+  ) {
+    return this.productionService.crearLotePendiente(b, r.usuario);
+  }
+  @Areas('produccion') @Post('lotes/:id/vincular-orden') vincularLoteOrden(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() b: any,
+    @Req() r: any,
+  ) {
+    return this.productionService.vincularLoteOrden(id, b, r.usuario);
+  }
   @Areas('produccion') @Post('lotes') iniciar(@Body() b: any, @Req() r: any) {
     return this.productionService.iniciarLote(b, r.usuario);
   }
