@@ -70,6 +70,10 @@ export class CrmController {
   ) {
     return this.crm.asociar(id, b, r.usuario);
   }
+  @Areas('id') @Post('oportunidades/:id/formulas-costos')
+  enviarFormulaCostos(@Param('id', ParseIntPipe) id: number, @Req() r: any, @Body() b: any) {
+    return this.crm.enviarFormulaCostos(id, b, r.usuario);
+  }
   @Areas('id')
   @Post('oportunidades/:id/reportes')
   @UseInterceptors(archivo())
