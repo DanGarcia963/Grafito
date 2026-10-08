@@ -54,7 +54,54 @@ export class CrmService {
     });
   }
   private scope(u: Usuario) {
-    return u.area === 'ventas' ? { vendedor_id: u.personaId } : {};
+    return u.area === 'ventas'
+      ? {
+          vendedor_id: u.personaId,
+          cliente: {
+            crm_perfil_comercial: {
+              is: { vendedor_responsable_id: u.personaId },
+            },
+          },
+        }
+      : {};
+  }
+  private cuentaScope(u: Usuario): Prisma.personasWhereInput {
+    return u.area === 'ventas'
+      ? {
+          crm_perfil_comercial: {
+            is: { vendedor_responsable_id: u.personaId },
+          },
+        }
+      : {};
+  }
+  private async validarAsignacionCuenta(
+    tx: Prisma.TransactionClient,
+    personaId: number,
+    vendedorId: number,
+    responsableActual?: number | null,
+  ) {
+    if (responsableActual != null && responsableActual !== vendedorId)
+      throw new NotFoundException('Cuenta no encontrada');
+    if (responsableActual == null) {
+      const [otraOportunidad, otraOrden] = await Promise.all([
+        tx.crm_oportunidades.findFirst({
+          where: {
+            persona_id: personaId,
+            vendedor_id: { not: vendedorId },
+          },
+          select: { id: true },
+        }),
+        tx.crm_ordenes_venta.findFirst({
+          where: {
+            persona_id: personaId,
+            vendedor_id: { not: vendedorId },
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (otraOportunidad || otraOrden)
+        throw new NotFoundException('Cuenta no encontrada');
+    }
   }
   private archivo(f: Archivo) {
     if (!f) return {};
@@ -175,6 +222,7 @@ export class CrmService {
   async cuentas(u: Usuario, q: string) {
     const data = await this.prisma.personas.findMany({
       where: {
+        ...this.cuentaScope(u),
         AND: [
           {
             OR: [
@@ -257,13 +305,12 @@ export class CrmService {
       const anterior = await tx.crm_perfiles_comerciales.findUnique({
         where: { persona_id: p.id_Persona },
       });
-      if (
-        anterior?.vendedor_responsable_id &&
-        anterior.vendedor_responsable_id !== u.personaId
-      )
-        throw new ConflictException(
-          'La cuenta tiene otro vendedor responsable',
-        );
+      await this.validarAsignacionCuenta(
+        tx,
+        p.id_Persona,
+        u.personaId,
+        anterior?.vendedor_responsable_id,
+      );
       const frecuencia = body.frecuencia_esperada_dias
         ? idValido(body.frecuencia_esperada_dias)
         : null;
@@ -291,16 +338,21 @@ export class CrmService {
               ? 'CLIENTE'
               : 'PROSPECTO',
         },
-        update: Object.fromEntries(
-          Object.entries(campos).filter(([key]) => body[key] !== undefined),
-        ),
+        update: {
+          ...Object.fromEntries(
+            Object.entries(campos).filter(([key]) => body[key] !== undefined),
+          ),
+          ...(anterior?.vendedor_responsable_id == null
+            ? { vendedor_responsable_id: u.personaId }
+            : {}),
+        },
       });
     });
     return { success: true, data };
   }
   async cuenta(id: number, u: Usuario) {
-    const persona = await this.prisma.personas.findUnique({
-      where: { id_Persona: id },
+    const persona = await this.prisma.personas.findFirst({
+      where: { id_Persona: id, ...this.cuentaScope(u) },
       include: { crm_perfil_comercial: true },
     });
     if (!persona) throw new NotFoundException('Cuenta no encontrada');
@@ -344,6 +396,12 @@ export class CrmService {
         throw new BadRequestException('Selecciona una cuenta comercial');
       if (p.crm_perfil_comercial && !p.crm_perfil_comercial.activo)
         throw new BadRequestException('Cuenta inactiva');
+      await this.validarAsignacionCuenta(
+        tx,
+        persona_id,
+        u.personaId,
+        p.crm_perfil_comercial?.vendedor_responsable_id,
+      );
       await tx.crm_perfiles_comerciales.upsert({
         where: { persona_id },
         create: {
@@ -354,7 +412,7 @@ export class CrmService {
               ? 'CLIENTE'
               : 'PROSPECTO',
         },
-        update: {},
+        update: { vendedor_responsable_id: u.personaId },
       });
       const o = await tx.crm_oportunidades.create({
         data: {
@@ -849,6 +907,10 @@ export class CrmService {
       const perfil = await tx.crm_perfiles_comerciales.findUnique({
         where: { persona_id: o.persona_id },
       });
+      if (perfil?.vendedor_responsable_id !== o.vendedor_id)
+        throw new ConflictException(
+          'La cuenta y la oportunidad deben pertenecer al mismo vendedor',
+        );
       const productoOrden = await tx.productos_materiales.findUniqueOrThrow({
         where: { id_Produc_Mater: c.producto_id },
       });
@@ -970,9 +1032,16 @@ export class CrmService {
     };
   }
   async produccion(id: number, b: any, u: Usuario) {
-    const data = await this.prisma.$transaction((tx) =>
-      crearOrdenProduccion(tx, b, u, id),
-    );
+    const data = await this.prisma.$transaction(async (tx) => {
+      if (u.area === 'ventas') {
+        const orden = await tx.crm_ordenes_venta.findFirst({
+          where: { id, ...this.scope(u) },
+          select: { id: true },
+        });
+        if (!orden) throw new NotFoundException('Orden no encontrada');
+      }
+      return crearOrdenProduccion(tx, b, u, id);
+    });
     this.avisar();
     return { success: true, data };
   }
