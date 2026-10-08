@@ -408,20 +408,66 @@ export class ProductionService {
           },
         });
         if (!pendiente) {
-          const productoId = Number(lote?.ordenes_produccion?.producto_id ?? 0);
-          const clienteId = Number(
-            lote?.ordenes_produccion?.crm_ordenes_venta?.persona_id ?? 0,
-          );
+          // La muestra siempre necesita un producto real. Si el LP aún no tiene OP,
+          // se toma del material de inventario que fue consumido para cargarlo.
+          const consumos = await tx.movimientos_inventario.findMany({
+            where: {
+              lote_produccion_id: lote.id_Lote_Produccion,
+              tipo: 'SALIDA_CONSUMO',
+            },
+            include: { lote: true },
+            orderBy: { id_Movi_Invent: 'asc' },
+          });
+          const productosEntrada = [
+            ...new Set(consumos.map((m) => m.lote.producto_id)),
+          ];
+          const productoOrden = lote.ordenes_produccion?.producto_id ?? null;
+          if (
+            productosEntrada.length > 1 ||
+            (productoOrden != null &&
+              productosEntrada.some((productoId) => productoId !== productoOrden))
+          )
+            throw new BadRequestException(
+              'Los materiales consumidos no coinciden en producto con el LP/OP',
+            );
+          const productoId = productoOrden ?? productosEntrada[0] ?? null;
+          if (!productoId)
+            throw new BadRequestException(
+              'No se puede crear la muestra: vincula una OP o registra el consumo de inventario del LP para identificar el producto',
+            );
+
+          const propietariosEntrada = [
+            ...new Set(
+              consumos
+                .filter((m) => m.lote.propiedad === 'DE_CLIENTE')
+                .map((m) => m.lote.propietario_id)
+                .filter((owner): owner is number => owner != null),
+            ),
+          ];
+          if (propietariosEntrada.length > 1)
+            throw new BadRequestException(
+              'El LP contiene materiales de distintos clientes',
+            );
+          const clienteId =
+            lote.ordenes_produccion?.crm_ordenes_venta?.persona_id ??
+            lote.ordenes_produccion?.propietario_id ??
+            propietariosEntrada[0] ??
+            null;
+          if (
+            propietariosEntrada.length &&
+            clienteId !== propietariosEntrada[0]
+          )
+            throw new BadRequestException(
+              'El propietario del material no coincide con la OP/venta',
+            );
           const muestraData: Prisma.muestrasUncheckedCreateInput = {
             no_Muestra: lote.no_Lote,
             fecha_Toma: new Date(),
             Hora_Toma: new Date(),
             tanque_id: id,
             lote_id: lote.id_Lote_Produccion,
-            producto_id:
-              Number.isFinite(productoId) && productoId > 0 ? productoId : 0,
-            cliente_id:
-              Number.isFinite(clienteId) && clienteId > 0 ? clienteId : 0,
+            producto_id: productoId,
+            cliente_id: clienteId,
           };
           const muestra = await tx.muestras.create({
             data: muestraData,
