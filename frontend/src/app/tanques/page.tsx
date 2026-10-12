@@ -25,6 +25,82 @@ const input =
     "rounded-lg border border-slate-600 px-3 py-2 hover:bg-slate-700 disabled:opacity-40";
 const cantidad = (v: unknown) =>
   Number(v ?? 0).toLocaleString("es-MX", { maximumFractionDigits: 4 });
+const etiquetaCondicion: Record<string, string> = {
+  SUCIO: "Grafito sucio / por regenerar",
+  NUEVO: "Grafito nuevo",
+  INTERMEDIO: "Producto intermedio",
+  REGENERADO: "Grafito regenerado",
+  TERMINADO: "Producto terminado",
+  INSUMO: "Insumo",
+  FUERA_DE_ESPECIFICACION: "F.E.",
+  RESIDUO: "Residuo",
+  SIN_CLASIFICAR: "Sin clasificación",
+};
+const ordenPrensas = [
+  "Nuevo",
+  "Forgemaster",
+  "Fagor",
+  "Polymaster",
+  "Sin prensa registrada",
+];
+type FilaExistenciaResumen = {
+  condicion?: string | null;
+  fisico?: number | string | null;
+  lote_inventario_id: number;
+  envase_id?: number | null;
+  atributos?: { tipo_prensa?: unknown } | null;
+};
+function resumirContenedores(stock: FilaExistenciaResumen[]) {
+  const grupos = new Map<
+    string,
+    {
+      condicion: string;
+      envases: Map<string, { prensa: string; kilos: number }>;
+      kilosSinEnvase: number;
+    }
+  >();
+  for (const fila of stock) {
+    const kilos = Number(fila.fisico ?? 0);
+    if (!Number.isFinite(kilos) || kilos <= 0) continue;
+    const condicion = String(fila.condicion ?? "SIN_CLASIFICAR");
+    let grupo = grupos.get(condicion);
+    if (!grupo) {
+      grupo = { condicion, envases: new Map(), kilosSinEnvase: 0 };
+      grupos.set(condicion, grupo);
+    }
+    if (fila.envase_id == null) {
+      grupo.kilosSinEnvase += kilos;
+      continue;
+    }
+    const llave = `${fila.lote_inventario_id}:${fila.envase_id}`;
+    const valor =
+      condicion === "NUEVO"
+        ? "Nuevo"
+        : String(fila.atributos?.tipo_prensa ?? "").trim();
+    const prensa =
+      ordenPrensas.find((p) => p.toLowerCase() === valor.toLowerCase()) ??
+      "Sin prensa registrada";
+    const envase = grupo.envases.get(llave) ?? { prensa, kilos: 0 };
+    envase.kilos += kilos;
+    grupo.envases.set(llave, envase);
+  }
+  const ordenCondiciones = [
+    "SUCIO",
+    "NUEVO",
+    "FUERA_DE_ESPECIFICACION",
+    "REGENERADO",
+    "TERMINADO",
+    "INTERMEDIO",
+    "INSUMO",
+    "RESIDUO",
+    "SIN_CLASIFICAR",
+  ];
+  return [...grupos.values()].sort((a, b) => {
+    const ai = ordenCondiciones.indexOf(a.condicion);
+    const bi = ordenCondiciones.indexOf(b.condicion);
+    return (ai < 0 ? ordenCondiciones.length : ai) - (bi < 0 ? ordenCondiciones.length : bi);
+  });
+}
 export default function TanquesPage() {
   const socket = useSocket();
   const [productoEspec, setProductoEspec] = useState("");
@@ -548,7 +624,73 @@ export default function TanquesPage() {
                 Saldos por lote y ubicación. F.E. solo puede reservarse para
                 reproceso; nunca para entrega.
               </p>
-              <div className="overflow-auto">
+                            <div className="mb-5 rounded-xl border border-slate-700 bg-slate-900 p-4">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold">Contenedores en existencia</h2>
+                    <p className="text-sm text-slate-400">
+                      La prensa identifica el equipo del cliente al que pertenece el grafito.
+                      El grafito nuevo se muestra como “Nuevo”.
+                    </p>
+                  </div>
+                  <p className="text-lg font-bold text-cyan-300">
+                    Total: {cantidad(totalContenedores)} contenedores
+                  </p>
+                </div>
+                {resumenContenedores.length ? (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {resumenContenedores.map((grupo) => {
+                      const porPrensa = new Map<string, { contenedores: number; kilos: number }>();
+                      for (const envase of grupo.envases.values()) {
+                        const actual = porPrensa.get(envase.prensa) ?? { contenedores: 0, kilos: 0 };
+                        actual.contenedores += 1;
+                        actual.kilos += envase.kilos;
+                        porPrensa.set(envase.prensa, actual);
+                      }
+                      const prensas = [...porPrensa.entries()].sort(
+                        ([a], [b]) => ordenPrensas.indexOf(a) - ordenPrensas.indexOf(b),
+                      );
+                      return (
+                        <article
+                          key={grupo.condicion}
+                          className="rounded-lg border border-slate-700 bg-slate-950 p-4"
+                        >
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <h3 className="font-semibold">
+                              {etiquetaCondicion[grupo.condicion] ?? grupo.condicion}
+                            </h3>
+                            <span className="font-bold text-cyan-300">
+                              {cantidad(grupo.envases.size)} contenedores
+                            </span>
+                          </div>
+                          {prensas.length ? (
+                            <ul className="space-y-1 text-sm">
+                              {prensas.map(([prensa, detalle]) => (
+                                <li key={prensa} className="flex justify-between gap-3">
+                                  <span>{prensa}</span>
+                                  <span>
+                                    {cantidad(detalle.contenedores)} · {cantidad(detalle.kilos)} kg
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-slate-400">Sin envases identificados.</p>
+                          )}
+                          {grupo.kilosSinEnvase > 0 && (
+                            <p className="mt-2 border-t border-slate-800 pt-2 text-sm text-amber-300">
+                              Sin desglose por contenedor: {cantidad(grupo.kilosSinEnvase)} kg
+                            </p>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400">No hay existencias físicas registradas.</p>
+                )}
+              </div>
+<div className="overflow-auto">
                 <table className="w-full text-left">
                   <thead>
                     <tr>
