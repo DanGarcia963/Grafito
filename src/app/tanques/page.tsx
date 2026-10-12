@@ -196,6 +196,11 @@ export default function TanquesPage() {
       t.estatus_proceso === "VACIO" &&
       !lotes.some((l) => l.tanque_id === t.id_Equipos_Tanques),
   );
+  const resumenContenedores = resumirContenedores(stock);
+  const totalContenedores = resumenContenedores.reduce(
+    (total, grupo) => total + grupo.envases.size,
+    0,
+  );
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-5 md:p-8">
       <header className="flex justify-between flex-wrap gap-3 mb-6">
