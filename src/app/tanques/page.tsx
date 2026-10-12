@@ -49,6 +49,14 @@ type FilaExistenciaResumen = {
   lote_inventario_id: number;
   envase_id?: number | null;
   atributos?: { tipo_prensa?: unknown } | null;
+  especificaciones?: {
+    atributos?: { tipo_prensa?: unknown } | null;
+    contenedores?: Array<{
+      codigo?: unknown;
+      tipo_prensa?: unknown;
+      atributos?: { tipo_prensa?: unknown } | null;
+    }>;
+  } | null;
 };
 function resumirContenedores(stock: FilaExistenciaResumen[]) {
   const grupos = new Map<
@@ -56,6 +64,7 @@ function resumirContenedores(stock: FilaExistenciaResumen[]) {
     {
       condicion: string;
       envases: Map<string, { prensa: string; kilos: number }>;
+      kgFisicos: number;
       kilosSinEnvase: number;
     }
   >();
@@ -65,24 +74,47 @@ function resumirContenedores(stock: FilaExistenciaResumen[]) {
     const condicion = String(fila.condicion ?? "SIN_CLASIFICAR");
     let grupo = grupos.get(condicion);
     if (!grupo) {
-      grupo = { condicion, envases: new Map(), kilosSinEnvase: 0 };
+      grupo = { condicion, envases: new Map(), kgFisicos: 0, kilosSinEnvase: 0 };
       grupos.set(condicion, grupo);
     }
-    if (fila.envase_id == null) {
-      grupo.kilosSinEnvase += kilos;
-      continue;
-    }
-    const llave = `${fila.lote_inventario_id}:${fila.envase_id}`;
-    const valor =
+    grupo.kgFisicos += kilos;
+    const atributos = fila.atributos ?? fila.especificaciones?.atributos;
+    const prensaDeLote =
       condicion === "NUEVO"
         ? "Nuevo"
-        : String(fila.atributos?.tipo_prensa ?? "").trim();
-    const prensa =
-      ordenPrensas.find((p) => p.toLowerCase() === valor.toLowerCase()) ??
-      "Sin prensa registrada";
-    const envase = grupo.envases.get(llave) ?? { prensa, kilos: 0 };
-    envase.kilos += kilos;
-    grupo.envases.set(llave, envase);
+        : String(atributos?.tipo_prensa ?? "").trim();
+    const normalizarPrensa = (valor: unknown) => {
+      const texto = String(valor ?? "").trim();
+      return (
+        ordenPrensas.find((p) => p.toLowerCase() === texto.toLowerCase()) ??
+        "Sin prensa registrada"
+      );
+    };
+    if (fila.envase_id != null) {
+      const llave = `${fila.lote_inventario_id}:id:${fila.envase_id}`;
+      const prensa = normalizarPrensa(prensaDeLote);
+      const envase = grupo.envases.get(llave) ?? { prensa, kilos: 0 };
+      envase.kilos += kilos;
+      grupo.envases.set(llave, envase);
+      continue;
+    }
+    const contenedores = fila.especificaciones?.contenedores ?? [];
+    if (contenedores.length) {
+      for (const [indice, contenedor] of contenedores.entries()) {
+        const codigo = String(contenedor.codigo ?? `sin-codigo-${indice + 1}`);
+        const llave = `${fila.lote_inventario_id}:codigo:${codigo}`;
+        const prensaContenedor =
+          contenedor.tipo_prensa ?? contenedor.atributos?.tipo_prensa ?? prensaDeLote;
+        if (!grupo.envases.has(llave)) {
+          grupo.envases.set(llave, {
+            prensa: normalizarPrensa(prensaContenedor),
+            kilos: 0,
+          });
+        }
+      }
+      continue;
+    }
+    grupo.kilosSinEnvase += kilos;
   }
   const ordenCondiciones = [
     "SUCIO",
@@ -634,7 +666,7 @@ export default function TanquesPage() {
                   <div>
                     <h2 className="text-xl font-semibold">Contenedores en existencia</h2>
                     <p className="text-sm text-slate-400">
-                      La prensa identifica el equipo del cliente al que pertenece el grafito.
+                      La prensa se lee de las especificaciones ya guardadas en cada lote.
                       El grafito nuevo se muestra como “Nuevo”.
                     </p>
                   </div>
@@ -665,7 +697,7 @@ export default function TanquesPage() {
                               {etiquetaCondicion[grupo.condicion] ?? grupo.condicion}
                             </h3>
                             <span className="font-bold text-cyan-300">
-                              {cantidad(grupo.envases.size)} contenedores
+                              {cantidad(grupo.envases.size)} contenedores · {cantidad(grupo.kgFisicos)} kg
                             </span>
                           </div>
                           {prensas.length ? (
@@ -674,7 +706,7 @@ export default function TanquesPage() {
                                 <li key={prensa} className="flex justify-between gap-3">
                                   <span>{prensa}</span>
                                   <span>
-                                    {cantidad(detalle.contenedores)} · {cantidad(detalle.kilos)} kg
+                                    {cantidad(detalle.contenedores)} contenedores
                                   </span>
                                 </li>
                               ))}
