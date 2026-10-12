@@ -84,6 +84,7 @@ export class ProductionService {
         lotes_produccion: o.lotes_produccion.map((l) => ({
           ...l,
           cantidad_consumida: consumido(l.movimientos),
+          cantidad_cargada: l.cantidad_Cargada ?? consumido(l.movimientos),
           cantidad_producida: l.movimientos
             .filter((m) => m.tipo === 'ENTRADA_PRODUCCION')
             .reduce(
@@ -838,6 +839,7 @@ export class ProductionService {
             data: {
               orden_Produccion_id: opId,
               tanque_id: tanqueId,
+              cantidad_Cargada: carga,
               estado: 'EN_PROCESO',
               fecha_inicio: new Date(),
             },
@@ -847,6 +849,7 @@ export class ProductionService {
               no_Lote: folio,
               orden_Produccion_id: opId,
               tanque_id: tanqueId,
+              cantidad_Cargada: carga,
               estado: 'EN_PROCESO',
               fecha_inicio: new Date(),
             },
