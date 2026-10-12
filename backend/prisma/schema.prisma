@@ -158,6 +158,8 @@ model lotes_produccion {
   no_Lote               String                         @unique @db.VarChar(50)
   orden_Produccion_id   Int?
   tanque_id             Int?
+  /// Cantidad física cargada al tanque, independiente del saldo consumido del almacén.
+  cantidad_Cargada      Decimal?                       @db.Decimal(18, 4)
   /// Estado de ejecución separado del dictamen de Calidad.
   estado                produccion_lote_estado         @default(PENDIENTE)
   fecha_inicio          DateTime?                      @db.Timestamptz(6)

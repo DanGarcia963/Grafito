@@ -216,7 +216,7 @@ export default function TanquesPage() {
                             "Sin orden de venta"}
                         </p>
                         <p className="mt-2">
-                          Carga: {cantidad(l.cantidad_consumida)}{" "}
+                          Carga: {cantidad(l.cantidad_cargada ?? l.cantidad_consumida)}{" "}
                           {t.unidad_capacidad}
                         </p>
                         <p>Calidad: {l.estado_Calida}</p>
