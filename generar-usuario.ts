@@ -9,16 +9,16 @@ type UsuarioConfig = {
 
 const usuarios: UsuarioConfig[] = [
   {
-    usuario: 'usuario_produccion',
-    password: 'Produccion123!',
+    usuario: 'Brenda_R',
+    password: 'BrendaR123!',
     areas: ['produccion'],
-    personaId: 1,
+    personaId: 15,
   },
   {
-    usuario: 'usuario_calidad',
-    password: 'Calidad123!',
+    usuario: 'Yesenia',
+    password: 'Yesenia123!',
     areas: ['calidad'],
-    personaId: 2,
+    personaId: 13,
   },
   {
     usuario: 'usuario_id',
@@ -26,17 +26,41 @@ const usuarios: UsuarioConfig[] = [
     areas: ['id'],
     personaId: 3,
   },
-  {
-    usuario: 'usuario_ventas',
-    password: 'Ventas123!',
-    areas: ['ventas'],
+    {
+    usuario: 'Mauricio_Garcia',
+    password: 'Usteyl2026$',
+    areas: ['costos', 'ventas'],
     personaId: 11,
   },
   {
-    usuario: 'usuario_seguridad',
-    password: 'Seguridad123!',
+    usuario: 'Fernando_Franco',
+    password: 'FrancoF123!',
+    areas: ['ventas'],
+    personaId: 18,
+  },
+  {
+    usuario: 'Raul_Molina',
+    password: 'MolinaR123!',
+    areas: ['ventas'],
+    personaId: 16,
+  },
+    {
+    usuario: 'Elena_Gallegos',
+    password: 'GallegosE123!',
+    areas: ['ventas'],
+    personaId: 17,
+  },
+  {
+    usuario: 'Rodrigo_Chavez',
+    password: 'ChavezR123!',
+    areas: ['ventas'],
+    personaId: 21,
+  },
+  {
+    usuario: 'Melissa_Vargas',
+    password: 'VargasM123!',
     areas: ['seguridad'],
-    personaId: 5,
+    personaId: 20,
   }
 ];
 
