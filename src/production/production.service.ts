@@ -15,6 +15,7 @@ import {
 } from '../inventario/inventario.logic';
 import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
 import { EventsGateway } from '../events.gateway';
+import { calcularBalanceProduccion } from './production.logic';
 import {
   Injectable,
   BadRequestException,
@@ -84,17 +85,38 @@ export class ProductionService {
           ...r,
           pendiente: r.cantidad.sub(consumido(r.movimientos)),
         })),
-        lotes_produccion: o.lotes_produccion.map((l) => ({
-          ...l,
-          cantidad_consumida: consumido(l.movimientos),
-          cantidad_cargada: l.cantidad_Cargada ?? consumido(l.movimientos),
-          cantidad_producida: l.movimientos
+        lotes_produccion: o.lotes_produccion.map((l) => {
+          const cantidad_cargada =
+            l.cantidad_Cargada ?? consumido(l.movimientos);
+          const cantidad_producida = l.movimientos
             .filter((m) => m.tipo === 'ENTRADA_PRODUCCION')
             .reduce(
               (a, m) => a.add(m.cantidad).sub(m.reversion?.cantidad ?? 0),
               new Prisma.Decimal(0),
-            ),
-        })),
+            );
+          const balance = calcularBalanceProduccion(
+            cantidad_cargada,
+            cantidad_producida,
+          );
+          const contenedores_producidos = l.inventario_obtenido.reduce(
+            (total, inventario) => {
+              const especificaciones = inventario.especificaciones as
+                | Prisma.JsonObject
+                | null;
+              const contenedores = especificaciones?.contenedores;
+              return total + (Array.isArray(contenedores) ? contenedores.length : 0);
+            },
+            0,
+          );
+          return {
+            ...l,
+            cantidad_consumida: consumido(l.movimientos),
+            cantidad_cargada,
+            cantidad_producida,
+            ...balance,
+            contenedores_producidos,
+          };
+        }),
       })),
       bitacora,
     };
@@ -990,7 +1012,20 @@ export class ProductionService {
         op.productos_materiales.configuracion_operativa,
         op.unidad,
         cantidad,
+        {
+          permitirContenedorParcial:
+            op.linea_Produccion?.trim().toUpperCase() === 'GRAFITO',
+        },
       );
+      const contenedores = (especificaciones as any)?.contenedores;
+      if (
+        op.linea_Produccion?.trim().toUpperCase() === 'GRAFITO' &&
+        op.unidad === 'Kilogramos' &&
+        (!Array.isArray(contenedores) || contenedores.length === 0)
+      )
+        throw new BadRequestException(
+          'Registra cada contenedor y su peso real para descargar el producto obtenido',
+        );
       const material = await tx.lotes_inventario.create({
         data: {
           folio: `PT-${lote.no_Lote}`,

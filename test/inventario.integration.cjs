@@ -213,8 +213,14 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
       },
       user,
     );
-    const material = await p.lotes_inventario.findFirstOrThrow();
+    const material = await p.lotes_inventario.findFirstOrThrow({
+      where: { folio: 'MP-R1' },
+    });
     assert.equal(material.especificaciones.contenedores.length, 3);
+    const saldoEntrada = (await prod.stock()).data.find(
+      (s) => s.lote_inventario_id === material.id,
+    );
+    assert.equal(saldoEntrada.contenedores_restantes.length, 3);
     const base = {
       producto_id: producto.id_Produc_Mater,
       cantidad: '2550',
@@ -239,7 +245,15 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
       data: { estado_calidad_recepcion: 'LIBERADO' },
     });
     const op = (
-      await prod.crearOrden({ ...base, no_Orden_Produc: 'OP1' }, user)
+      await prod.crearOrden(
+        {
+          ...base,
+          no_Orden_Produc: 'OP1',
+          es_reproceso: true,
+          motivo_reproceso: 'Regeneración de material sucio recibido',
+        },
+        user,
+      )
     ).data;
     assert.equal(op.orden_venta_id, null);
     assert.equal(op.propietario_id, 2);
@@ -306,6 +320,17 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
     );
     assert.equal(String(saldo.disponible), '0');
     assert.equal(String(saldo.disponible_reproceso), '2550');
+    assert.equal(saldo.contenedores_restantes.length, 3);
+    const loteResumen = (
+      await prod.obtenerTodasLasOrdenesGrafito()
+    ).result
+      .flatMap((orden) => orden.lotes_produccion)
+      .find((item) => item.id_Lote_Produccion === lote.id_Lote_Produccion);
+    assert.equal(loteResumen.cantidad_cargada.toString(), '2550');
+    assert.equal(loteResumen.cantidad_producida.toString(), '2550');
+    assert.equal(loteResumen.diferencia_neta.toString(), '0');
+    assert.equal(loteResumen.rendimiento_porcentaje.toString(), '100');
+    assert.equal(loteResumen.contenedores_producidos, 3);
     await assert.rejects(
       calidad.actualizarEstatusMuestra({
         id_Muestra: muestra.id_Muestra,
