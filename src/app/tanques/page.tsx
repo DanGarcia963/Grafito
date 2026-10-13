@@ -48,6 +48,11 @@ type FilaExistenciaResumen = {
   fisico?: number | string | null;
   lote_inventario_id: number;
   envase_id?: number | null;
+  contenedores_restantes?: Array<{
+    codigo?: unknown;
+    peso_kg?: unknown;
+    saldo_kg?: unknown;
+  }>;
   atributos?: { tipo_prensa?: unknown } | null;
   especificaciones?: {
     atributos?: { tipo_prensa?: unknown } | null;
@@ -96,6 +101,20 @@ function resumirContenedores(stock: FilaExistenciaResumen[]) {
       const envase = grupo.envases.get(llave) ?? { prensa, kilos: 0 };
       envase.kilos += kilos;
       grupo.envases.set(llave, envase);
+      continue;
+    }
+    if (Array.isArray(fila.contenedores_restantes)) {
+      for (const [indice, contenedor] of fila.contenedores_restantes.entries()) {
+        const saldo = Number(contenedor.saldo_kg ?? 0);
+        if (!Number.isFinite(saldo) || saldo <= 0) continue;
+        const codigo = String(contenedor.codigo ?? "sin-codigo-" + (indice + 1));
+        const llave = fila.lote_inventario_id + ":codigo:" + codigo;
+        if (!grupo.envases.has(llave))
+          grupo.envases.set(llave, {
+            prensa: normalizarPrensa(prensaDeLote),
+            kilos: saldo,
+          });
+      }
       continue;
     }
     const contenedores = fila.especificaciones?.contenedores ?? [];
@@ -521,6 +540,31 @@ export default function TanquesPage() {
                             <td>{l.estado_Calida}</td>
                             <td>
                               {cantidad(l.cantidad_producida)} {o.unidad}
+                              <p className="text-slate-400">
+                                Carga: {cantidad(l.cantidad_cargada ?? l.cantidad_consumida)}{" "}
+                                {o.unidad}
+                              </p>
+                              {l.inventario_obtenido?.length ? (
+                                <>
+                                  <p className="text-slate-400">
+                                    Variación neta: {cantidad(l.diferencia_neta)}{" "}
+                                    {o.unidad}
+                                    {l.rendimiento_porcentaje != null
+                                      ? " · Rendimiento: " +
+                                        cantidad(l.rendimiento_porcentaje) +
+                                        "%"
+                                      : ""}
+                                  </p>
+                                  <p className="text-slate-400">
+                                    Contenedores descargados:{" "}
+                                    {cantidad(l.contenedores_producidos)}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-slate-400">
+                                  Pendiente de descarga
+                                </p>
+                              )}
                             </td>
                             <td>
                               <button
@@ -666,8 +710,9 @@ export default function TanquesPage() {
                   <div>
                     <h2 className="text-xl font-semibold">Contenedores en existencia</h2>
                     <p className="text-sm text-slate-400">
-                      La prensa se lee de las especificaciones ya guardadas en cada lote.
-                      El grafito nuevo se muestra como “Nuevo”.
+                      Cuenta los contenedores que todavía tienen producto. El
+                      saldo se distribuye FIFO según los kg registrados y
+                      consumidos por lote.
                     </p>
                   </div>
                   <p className="text-lg font-bold text-cyan-300">
@@ -763,19 +808,26 @@ export default function TanquesPage() {
                           </p>
                           <details>
                             <summary>
-                              Contenedores al ingreso:{" "}
-                              {s.especificaciones?.contenedores?.length ??
-                                "Sin detalle"}
+                              Contenedores con saldo:{" "}
+                              {Array.isArray(s.contenedores_restantes)
+                                ? s.contenedores_restantes.length
+                                : s.especificaciones?.contenedores?.length ??
+                                  "Sin detalle"}
                             </summary>
-                            {s.especificaciones?.contenedores?.map((c: any) => (
-                              <p key={c.codigo}>
-                                {c.codigo}: {c.peso_kg} kg
-                              </p>
-                            ))}
-                            <p>
-                              El detalle original no representa los contenedores
-                              restantes tras consumos parciales.
-                            </p>
+                            {Array.isArray(s.contenedores_restantes)
+                              ? s.contenedores_restantes.map((c: any) => (
+                                  <p key={c.codigo}>
+                                    {c.codigo}: {cantidad(c.saldo_kg)} kg de{" "}
+                                    {cantidad(c.peso_kg)} kg
+                                  </p>
+                                ))
+                              : s.especificaciones?.contenedores?.map(
+                                  (c: any) => (
+                                    <p key={c.codigo}>
+                                      {c.codigo}: {c.peso_kg} kg
+                                    </p>
+                                  ),
+                                )}
                           </details>
                           <p>
                             Disponible reproceso:{" "}
@@ -870,6 +922,29 @@ export default function TanquesPage() {
                 );
                 if (b.especificaciones)
                   b.especificaciones = JSON.parse(b.especificaciones);
+                if (
+                  form.tipo === "descargar" &&
+                  form.dato.orden.linea_Produccion?.toUpperCase() === "GRAFITO" &&
+                  form.dato.orden.unidad === "Kilogramos"
+                ) {
+                  const contenedores = b.especificaciones?.contenedores;
+                  if (!Array.isArray(contenedores) || contenedores.length === 0) {
+                    setError("Registra cada contenedor y su peso real para descargar el producto obtenido.");
+                    return;
+                  }
+                  const totalContenedores = contenedores.reduce(
+                    (total: number, contenedor: any) =>
+                      total + Number(contenedor.peso_kg),
+                    0,
+                  );
+                  if (
+                    !Number.isFinite(totalContenedores) ||
+                    Math.abs(totalContenedores - Number(b.cantidad)) > 0.00005
+                  ) {
+                    setError("La suma de los pesos de los contenedores debe coincidir con la cantidad realmente obtenida.");
+                    return;
+                  }
+                }
                 void ejecutar(async () => {
                   const d = form.dato;
                   if (form.tipo === "lote-pendiente")
@@ -1331,11 +1406,18 @@ export default function TanquesPage() {
                       </select>
                     </label>
                     <EspecificacionesMaterial
+                      key={"descarga-" + form.dato.id_Lote_Produccion}
                       config={
                         form.dato.orden.productos_materiales
                           ?.configuracion_operativa
                       }
                       unidad={form.dato.orden.unidad}
+                      contenedoresObligatorios={
+                        form.dato.orden.linea_Produccion?.toUpperCase() ===
+                          "GRAFITO" &&
+                        form.dato.orden.unidad === "Kilogramos"
+                      }
+                      productoTerminado
                     />
                   </>
                 )}
