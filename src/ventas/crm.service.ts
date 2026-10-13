@@ -32,6 +32,7 @@ import {
   reiniciarTecnico,
   versionValida,
 } from './crm.workflow';
+import { calcularCumplimientoOV } from './crm.fulfillment';
 type Archivo = Parameters<typeof fichaValida>[0];
 const opc = (v: unknown, max = 4000) =>
   v == null || v === '' ? null : texto(v, max);
@@ -1010,25 +1011,132 @@ export class CrmService {
       where: this.scope(u),
       include: {
         cliente: { select: { nombre: true } },
-        ordenes_produccion: true,
-        entregas: { include: { detalles: true } },
+        ordenes_produccion: {
+          select: {
+            id_Orden_Produc: true,
+            no_Orden_Produc: true,
+            orden_venta_id: true,
+            producto_id: true,
+            tipo_Operacion: true,
+            linea_Produccion: true,
+            cantidad_Planificada: true,
+            unidad: true,
+            estado_Plan: true,
+            fecha_Inicio_Plan: true,
+            fecha_Termino_Plan: true,
+            fecha_Inicio_Produccion: true,
+            fecha_Termino_Real: true,
+            lotes_produccion: {
+              orderBy: { id_Lote_Produccion: 'asc' },
+              select: {
+                id_Lote_Produccion: true,
+                no_Lote: true,
+                estado: true,
+                fecha_inicio: true,
+                fecha_fin: true,
+                estado_Calida: true,
+                observaciones_Calidad: true,
+                tanque_id: true,
+                cantidad_Cargada: true,
+                muestras: {
+                  orderBy: { id_Muestra: 'asc' },
+                  select: {
+                    id_Muestra: true,
+                    no_Muestra: true,
+                    categoria_Muestra: true,
+                    estado_Muestra: true,
+                    fecha_Toma: true,
+                    fecha_ingreso_laboratorio: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        materiales_recibidos: {
+          select: {
+            id: true,
+            folio: true,
+            origen: true,
+            condicion: true,
+            unidad: true,
+            recepcion: {
+              select: {
+                id: true,
+                no_lote: true,
+                fecha_llegada: true,
+                fecha_Revision: true,
+                reviso_nombre: true,
+                estado_recepcion: true,
+                estado_checklist: true,
+                checklist_contenedor: {
+                  orderBy: { no_consecutivo: 'asc' },
+                  select: {
+                    no_consecutivo: true,
+                    numero_contenedor: true,
+                    tapa_valvula: true,
+                    rejilla_danada: true,
+                    base_danada: true,
+                    derrame: true,
+                    observaciones: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        entregas: {
+          orderBy: { creado_en: 'asc' },
+          select: {
+            id_Entrega: true,
+            folio: true,
+            estado_entrega: true,
+            destino: true,
+            fecha_programada: true,
+            fecha_Salida_Transporte: true,
+            fecha_Entrega_Cliente: true,
+            recibido_por: true,
+            transportista_id: true,
+            observaciones: true,
+            detalles: {
+              select: {
+                id: true,
+                cantidad: true,
+                cantidad_recibida: true,
+                observaciones: true,
+                lote: {
+                  select: {
+                    id: true,
+                    folio: true,
+                    lote_produccion_id: true,
+                  },
+                },
+              },
+            },
+            transportista: { select: { nombre: true } },
+          },
+        },
       },
       orderBy: { id: 'desc' },
     });
+    const clasificadas = await this.clasificarCompras(
+      ordenes.map((o) => ({
+        ...o,
+        cantidad_entregada: o.entregas
+          .filter((e) => e.estado_entrega === 'ENTREGADA')
+          .flatMap((e) => e.detalles)
+          .reduce(
+            (a, d) => a.add(d.cantidad_recibida ?? 0),
+            new Prisma.Decimal(0),
+          ),
+      })),
+    );
     return {
       success: true,
-      data: await this.clasificarCompras(
-        ordenes.map((o) => ({
-          ...o,
-          cantidad_entregada: o.entregas
-            .filter((e) => e.estado_entrega === 'ENTREGADA')
-            .flatMap((e) => e.detalles)
-            .reduce(
-              (a, d) => a.add(d.cantidad_recibida ?? 0),
-              new Prisma.Decimal(0),
-            ),
-        })),
-      ),
+      data: clasificadas.map((orden) => ({
+        ...orden,
+        ...calcularCumplimientoOV(orden),
+      })),
     };
   }
   async produccion(id: number, b: any, u: Usuario) {
