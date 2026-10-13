@@ -63,7 +63,7 @@ export class ProductionService {
           orderBy: { id_Lote_Produccion: 'asc' },
         },
       },
-      orderBy: { creado_en: 'desc' },
+      orderBy: { creado_en: 'desc', crm_ordenes_venta: { id: 'desc' } },
     });
     const ids = result.flatMap((o) =>
       o.lotes_produccion.map((l) => l.id_Lote_Produccion),
