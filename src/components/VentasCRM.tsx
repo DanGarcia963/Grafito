@@ -27,6 +27,10 @@ const dinero = (x: string, m: string) =>
   new Intl.NumberFormat("es-MX", { style: "currency", currency: m }).format(
     Number(x),
   );
+const cantidad = (x: string | number | null | undefined, unidad?: string) =>
+  x === null || x === undefined
+    ? "Sin dato"
+    : `${Number(x).toLocaleString("es-MX", { maximumFractionDigits: 4 })}${unidad ? ` ${unidad}` : ""}`;
 type Field = {
   name: string;
   label: string;
@@ -34,6 +38,120 @@ type Field = {
   required?: boolean;
   options?: { value: string | number; label: string }[];
   value?: string | number;
+};
+type ChecklistContenedorVista = {
+  no_consecutivo: number;
+  numero_contenedor: string;
+  tapa_valvula: boolean;
+  rejilla_danada: boolean;
+  base_danada: boolean;
+  derrame: boolean;
+  observaciones: string | null;
+};
+type RecepcionVista = {
+  id: number;
+  folio: string;
+  fecha_llegada: string;
+  fecha_revision: string | null;
+  estado_recepcion: string;
+  estado_checklist: string;
+  reviso_nombre: string | null;
+  incidencias: number;
+  contenedores: ChecklistContenedorVista[];
+};
+type MuestraLoteVista = {
+  id_Muestra: number;
+  no_Muestra: string | null;
+  categoria_Muestra: string;
+  estado_Muestra: string;
+  fecha_Toma: string;
+  fecha_ingreso_laboratorio: string | null;
+};
+type LoteProduccionVista = {
+  id_Lote_Produccion: number;
+  no_Lote: string | null;
+  estado: string;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+  estado_Calida: string;
+  observaciones_Calidad: string | null;
+  tanque_id: number | null;
+  cantidad_Cargada: string | null;
+  muestras: MuestraLoteVista[];
+  cumplimiento_entrega: {
+    cantidad_despachada: number;
+    cantidad_entregada: number;
+  };
+};
+type OrdenProduccionVista = {
+  id_Orden_Produc: number;
+  no_Orden_Produc: string;
+  orden_venta_id: number | null;
+  producto_id: number;
+  tipo_Operacion: string;
+  linea_Produccion: string | null;
+  cantidad_Planificada: string;
+  unidad: string;
+  estado_Plan: string;
+  fecha_Inicio_Plan: string | null;
+  fecha_Termino_Plan: string | null;
+  fecha_Inicio_Produccion: string | null;
+  fecha_Termino_Real: string | null;
+  lotes_produccion: LoteProduccionVista[];
+};
+type DetalleEntregaVista = {
+  id: number;
+  cantidad: string;
+  cantidad_recibida: string | null;
+  observaciones: string | null;
+  lote: { id: number; folio: string; lote_produccion_id: number | null };
+};
+type EntregaVista = {
+  id_Entrega: number;
+  folio: string;
+  estado_entrega: string;
+  destino: string;
+  fecha_programada: string | null;
+  fecha_Salida_Transporte: string | null;
+  fecha_Entrega_Cliente: string | null;
+  recibido_por: string | null;
+  transportista_id: number | null;
+  transportista: { nombre: string } | null;
+  observaciones: string | null;
+  detalles: DetalleEntregaVista[];
+};
+type CumplimientoVista = {
+  estado: string;
+  etiqueta: string;
+  pasos: { key: string; label: string; estado: string; detalle: string }[];
+  cantidad_solicitada: number;
+  cantidad_despachada: number;
+  cantidad_entregada: number;
+  porcentaje_entregado: number;
+  ordenes: { total: number; activas: number };
+  lotes: {
+    total: number;
+    liberados: number;
+    en_calidad: number;
+    rechazados: number;
+    en_produccion: number;
+  };
+  recepciones: RecepcionVista[];
+};
+type OrdenVentaVista = {
+  id: number;
+  oportunidad_id: number;
+  estado: string;
+  tipo_venta: string;
+  tipo_compra: string | null;
+  fecha_confirmacion: string;
+  importe_total: string;
+  moneda: string;
+  unidad: string;
+  cliente: { nombre: string };
+  ordenes_produccion: OrdenProduccionVista[];
+  entregas: EntregaVista[];
+  cumplimiento?: CumplimientoVista;
 };
 function Form({
   title,
@@ -175,11 +293,17 @@ export default function VentasCRM() {
   }, [user, cargar]);
   useEffect(() => {
     const f = () => void cargar().catch((e) => setError(e.message));
-    socket?.on("CRM_OPORTUNIDAD_ACTUALIZADA", f);
-    socket?.on("ID_MUESTRA_ACTUALIZADA", f);
+    const eventos = [
+      "CRM_OPORTUNIDAD_ACTUALIZADA",
+      "ID_MUESTRA_ACTUALIZADA",
+      "MUESTRA_CREADA",
+      "MUESTRA_ACTUALIZADA",
+      "TANQUE_ACTUALIZADO",
+      "ESTATUS_TANQUE_CAMBIADO",
+    ];
+    eventos.forEach((evento) => socket?.on(evento, f));
     return () => {
-      socket?.off("CRM_OPORTUNIDAD_ACTUALIZADA", f);
-      socket?.off("ID_MUESTRA_ACTUALIZADA", f);
+      eventos.forEach((evento) => socket?.off(evento, f));
     };
   }, [socket, cargar]);
   const abrir = async (id: number) => {
@@ -1024,6 +1148,12 @@ export default function VentasCRM() {
       {vista === "ordenes" && (
         <section className={s.panel}>
           <h2>Órdenes comerciales</h2>
+          <p className={s.help}>
+            El avance se calcula desde las recepciones, OP, lotes de producción,
+            liberaciones de Calidad y entregas que están vinculadas a cada OV.
+            Cada OP y LP conserva su propio estado para mostrar avances
+            parciales.
+          </p>
           <div className={s.tableWrap}>
             <table>
               <thead>
@@ -1034,7 +1164,7 @@ export default function VentasCRM() {
                     "Confirmación",
                     "Compra",
                     "Importe",
-                    "Estado / producción",
+                    "Cumplimiento",
                     "Acciones",
                   ].map((h) => (
                     <th key={h}>{h}</th>
@@ -1042,7 +1172,7 @@ export default function VentasCRM() {
                 </tr>
               </thead>
               <tbody>
-                {ordenes
+                {(ordenes as OrdenVentaVista[])
                   .filter(
                     (o) =>
                       (!q ||
@@ -1059,14 +1189,278 @@ export default function VentasCRM() {
                       <td>{fecha(o.fecha_confirmacion)}</td>
                       <td>{o.tipo_compra}</td>
                       <td>{dinero(o.importe_total, o.moneda)}</td>
-                      <td>
-                        {o.estado}
-                        {o.ordenes_produccion.map((p: any) => (
-                          <p key={p.id_Orden_Produc}>
-                            OP #{p.id_Orden_Produc} · {p.estado_Plan} ·{" "}
-                            {p.cantidad_Planificada} {p.unidad}
-                          </p>
-                        ))}
+                      <td className={s.fulfillmentCell}>
+                        {(() => {
+                          const c = o.cumplimiento;
+                          const pasos = c?.pasos ?? [];
+                          const lotes = c?.lotes ?? { total: 0, liberados: 0 };
+                          return (
+                            <>
+                              <div className={s.fulfillmentSummary}>
+                                <span
+                                  className={s.fulfillmentStatus}
+                                  data-state={c?.estado ?? o.estado}
+                                >
+                                  {c?.etiqueta ?? nombre(o.estado)}
+                                </span>
+                                <small>OV: {nombre(o.estado)}</small>
+                                <small>
+                                  {c?.ordenes.activas ?? 0} OP activas ·{" "}
+                                  {lotes.liberados} de {lotes.total} LP
+                                  liberados
+                                  {" · "}
+                                  {c?.porcentaje_entregado ?? 0}% entregado
+                                </small>
+                              </div>
+                              <div className={s.fulfillmentAmounts}>
+                                <span>
+                                  Solicitado:{" "}
+                                  {cantidad(c?.cantidad_solicitada, o.unidad)}
+                                </span>
+                                <span>
+                                  Entregado:{" "}
+                                  {cantidad(c?.cantidad_entregada, o.unidad)}
+                                </span>
+                                <span>
+                                  Despachado:{" "}
+                                  {cantidad(c?.cantidad_despachada, o.unidad)}
+                                </span>
+                              </div>
+                              <div className={s.fulfillmentSteps}>
+                                {pasos.map((p) => (
+                                  <span
+                                    key={p.key}
+                                    className={s.fulfillmentStep}
+                                    data-state={p.estado}
+                                    title={p.detalle}
+                                  >
+                                    {p.label}
+                                  </span>
+                                ))}
+                              </div>
+                              <details className={s.fulfillmentDetails}>
+                                <summary>
+                                  Ver detalle por recepción, OP, LP y entrega
+                                </summary>
+                                <div className={s.fulfillmentGroups}>
+                                  <section>
+                                    <h4>Ingreso a planta y checklist</h4>
+                                    {c?.recepciones?.length ? (
+                                      c.recepciones.map((r) => (
+                                        <article
+                                          className={s.fulfillmentRecord}
+                                          key={r.id}
+                                        >
+                                          <strong>
+                                            Recepción {r.folio || `#${r.id}`} ·{" "}
+                                            {nombre(r.estado_checklist)}
+                                          </strong>
+                                          <small>
+                                            Llegada: {fecha(r.fecha_llegada)} ·{" "}
+                                            {r.contenedores.length}{" "}
+                                            contenedor(es) · {r.incidencias}{" "}
+                                            incidencia(s)
+                                            {r.reviso_nombre
+                                              ? ` · Revisó: ${r.reviso_nombre}`
+                                              : ""}
+                                          </small>
+                                          {r.contenedores.length > 0 && (
+                                            <ul>
+                                              {r.contenedores.map((k) => {
+                                                const danos = [
+                                                  k.tapa_valvula &&
+                                                    "tapa/válvula",
+                                                  k.rejilla_danada && "rejilla",
+                                                  k.base_danada && "base",
+                                                  k.derrame && "derrame",
+                                                ].filter(Boolean);
+                                                return (
+                                                  <li key={k.no_consecutivo}>
+                                                    Contenedor{" "}
+                                                    {k.numero_contenedor ||
+                                                      k.no_consecutivo}
+                                                    :{" "}
+                                                    {danos.length
+                                                      ? danos.join(", ")
+                                                      : "sin daños registrados"}
+                                                    {k.observaciones
+                                                      ? ` · ${k.observaciones}`
+                                                      : ""}
+                                                  </li>
+                                                );
+                                              })}
+                                            </ul>
+                                          )}
+                                        </article>
+                                      ))
+                                    ) : (
+                                      <p className={s.fulfillmentEmpty}>
+                                        {o.tipo_venta ===
+                                        "SERVICIO_REGENERACION"
+                                          ? "No hay recepción vinculada a esta OV. Si se usa inventario existente, el avance de producción se muestra por separado."
+                                          : "Esta orden no requiere una recepción de material por regeneración."}
+                                      </p>
+                                    )}
+                                  </section>
+                                  <section>
+                                    <h4>Órdenes de producción y lotes</h4>
+                                    {o.ordenes_produccion.length ? (
+                                      o.ordenes_produccion.map((p) => (
+                                        <article
+                                          className={s.fulfillmentRecord}
+                                          key={p.id_Orden_Produc}
+                                        >
+                                          <strong>
+                                            OP{" "}
+                                            {p.no_Orden_Produc ||
+                                              `#${p.id_Orden_Produc}`}{" "}
+                                            · {nombre(p.estado_Plan)}
+                                          </strong>
+                                          <small>
+                                            {cantidad(
+                                              p.cantidad_Planificada,
+                                              p.unidad,
+                                            )}{" "}
+                                            ·{" "}
+                                            {p.linea_Produccion || "Sin línea"}
+                                          </small>
+                                          {p.lotes_produccion.length ? (
+                                            <ul className={s.productionLots}>
+                                              {p.lotes_produccion.map((l) => (
+                                                <li key={l.id_Lote_Produccion}>
+                                                  <strong>
+                                                    LP{" "}
+                                                    {l.no_Lote ||
+                                                      `provisional #${l.id_Lote_Produccion}`}
+                                                  </strong>
+                                                  <span>
+                                                    Producción:{" "}
+                                                    {nombre(l.estado)} ·
+                                                    Calidad:{" "}
+                                                    {nombre(l.estado_Calida)}
+                                                    {l.tanque_id
+                                                      ? ` · Tanque #${l.tanque_id}`
+                                                      : ""}
+                                                    {l.cantidad_Cargada !== null
+                                                      ? ` · Carga ${cantidad(l.cantidad_Cargada, p.unidad)}`
+                                                      : ""}
+                                                  </span>
+                                                  <span>
+                                                    Despachado{" "}
+                                                    {cantidad(
+                                                      l.cumplimiento_entrega
+                                                        ?.cantidad_despachada,
+                                                      p.unidad,
+                                                    )}{" "}
+                                                    · recibido por cliente{" "}
+                                                    {cantidad(
+                                                      l.cumplimiento_entrega
+                                                        ?.cantidad_entregada,
+                                                      p.unidad,
+                                                    )}
+                                                  </span>
+                                                  {l.muestras.length > 0 && (
+                                                    <small>
+                                                      Muestras:{" "}
+                                                      {l.muestras
+                                                        .map(
+                                                          (m) =>
+                                                            `${m.no_Muestra || `#${m.id_Muestra}`} (${nombre(m.estado_Muestra)})`,
+                                                        )
+                                                        .join(" · ")}
+                                                    </small>
+                                                  )}
+                                                  {l.observaciones_Calidad && (
+                                                    <small>
+                                                      Observaciones de Calidad:{" "}
+                                                      {l.observaciones_Calidad}
+                                                    </small>
+                                                  )}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <p className={s.fulfillmentEmpty}>
+                                              Esta OP todavía no tiene LP.
+                                            </p>
+                                          )}
+                                        </article>
+                                      ))
+                                    ) : (
+                                      <p className={s.fulfillmentEmpty}>
+                                        Todavía no hay OP vinculadas.
+                                      </p>
+                                    )}
+                                  </section>
+                                  <section>
+                                    <h4>Entregas logísticas</h4>
+                                    {o.entregas.length ? (
+                                      o.entregas.map((e) => (
+                                        <article
+                                          className={s.fulfillmentRecord}
+                                          key={e.id_Entrega}
+                                        >
+                                          <strong>
+                                            {e.folio} ·{" "}
+                                            {nombre(e.estado_entrega)}
+                                          </strong>
+                                          <small>
+                                            Programada:{" "}
+                                            {fecha(e.fecha_programada)} ·
+                                            salida:{" "}
+                                            {fecha(e.fecha_Salida_Transporte)} ·
+                                            entrega:{" "}
+                                            {fecha(e.fecha_Entrega_Cliente)}
+                                            {` · Destino: ${e.destino}`}
+                                            {e.transportista
+                                              ? ` · Transportista: ${e.transportista.nombre}`
+                                              : ""}
+                                            {e.recibido_por
+                                              ? ` · Recibió: ${e.recibido_por}`
+                                              : ""}
+                                          </small>
+                                          {e.detalles.length ? (
+                                            <ul>
+                                              {e.detalles.map((d) => (
+                                                <li key={d.id}>
+                                                  {d.lote?.lote_produccion_id
+                                                    ? `LP #${d.lote.lote_produccion_id}`
+                                                    : `Inventario ${d.lote?.folio ?? "sin lote"}`}
+                                                  {": "}
+                                                  {cantidad(
+                                                    d.cantidad,
+                                                    o.unidad,
+                                                  )}{" "}
+                                                  despachados ·{" "}
+                                                  {cantidad(
+                                                    d.cantidad_recibida,
+                                                    o.unidad,
+                                                  )}{" "}
+                                                  recibidos
+                                                  {d.observaciones
+                                                    ? ` · ${d.observaciones}`
+                                                    : ""}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <p className={s.fulfillmentEmpty}>
+                                              Sin partidas registradas.
+                                            </p>
+                                          )}
+                                        </article>
+                                      ))
+                                    ) : (
+                                      <p className={s.fulfillmentEmpty}>
+                                        Todavía no hay entregas registradas.
+                                      </p>
+                                    )}
+                                  </section>
+                                </div>
+                              </details>
+                            </>
+                          );
+                        })()}
                       </td>
                       <td>
                         <button

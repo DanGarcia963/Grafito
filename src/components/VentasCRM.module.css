@@ -553,3 +553,168 @@
   margin: 12px 0;
   border-radius: 8px;
 }
+.fulfillmentCell {
+  min-width: 470px;
+  max-width: 680px;
+}
+.fulfillmentSummary,
+.fulfillmentAmounts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+}
+.fulfillmentSummary small,
+.fulfillmentAmounts {
+  color: #607086;
+  font-size: 11px;
+}
+.fulfillmentStatus,
+.fulfillmentStep {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbd7e5;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #46566b;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 9px;
+}
+.fulfillmentStatus[data-state="ENTREGADA"],
+.fulfillmentStep[data-state="COMPLETADO"] {
+  border-color: #9fd2b7;
+  background: #e8f7ef;
+  color: #17613e;
+}
+.fulfillmentStatus[data-state="EN_TRANSITO"],
+.fulfillmentStatus[data-state="CONTROL_DE_CALIDAD"],
+.fulfillmentStatus[data-state="EN_PRODUCCION"],
+.fulfillmentStatus[data-state="PRODUCCION_PROGRAMADA"],
+.fulfillmentStatus[data-state="ESPERANDO_RECEPCION"],
+.fulfillmentStatus[data-state="REVISION_CONTENEDORES"],
+.fulfillmentStep[data-state="EN_PROCESO"] {
+  border-color: #f0d08a;
+  background: #fff7df;
+  color: #7a5500;
+}
+.fulfillmentStatus[data-state="ATENCION_REQUERIDA"],
+.fulfillmentStatus[data-state="ENTREGA_PARCIAL"],
+.fulfillmentStep[data-state="CON_INCIDENCIAS"] {
+  border-color: #efb2a9;
+  background: #fff0ed;
+  color: #9a3425;
+}
+.fulfillmentStatus[data-state="LISTA_PARA_ENTREGA"],
+.fulfillmentStatus[data-state="AVANCE_PARCIAL"] {
+  border-color: #b8a7e4;
+  background: #f3efff;
+  color: #563d98;
+}
+.fulfillmentStatus[data-state="CANCELADA"],
+.fulfillmentStatus[data-state="PENDIENTE_OP"] {
+  border-color: #d5dde7;
+  background: #f3f5f8;
+  color: #66758a;
+}
+.fulfillmentStep[data-state="PENDIENTE"],
+.fulfillmentStep[data-state="NO_APLICA"] {
+  color: #69788b;
+  background: #f7f8fa;
+}
+.fulfillmentAmounts {
+  justify-content: flex-start;
+  margin: 8px 0;
+}
+.fulfillmentSteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 9px 0;
+}
+.fulfillmentStep {
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fulfillmentDetails {
+  border-top: 1px solid #e7edf4;
+  margin-top: 9px;
+  padding-top: 8px;
+  font-size: 11px;
+}
+.fulfillmentDetails summary {
+  color: #175bd1;
+  cursor: pointer;
+  font-weight: 650;
+}
+.fulfillmentGroups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  align-items: start;
+  gap: 12px;
+  padding-top: 12px;
+}
+.fulfillmentGroups section {
+  min-width: 0;
+  border: 1px solid #e2e9f1;
+  border-radius: 9px;
+  padding: 11px;
+  background: #fbfcfe;
+}
+.fulfillmentGroups h4 {
+  color: #2d4766;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 9px;
+}
+.fulfillmentRecord {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid #e6ecf3;
+  padding: 9px 0;
+  overflow-wrap: anywhere;
+}
+.fulfillmentRecord:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.fulfillmentRecord strong,
+.fulfillmentRecord li strong {
+  color: #273e5a;
+  font-size: 11px;
+}
+.fulfillmentRecord small,
+.fulfillmentRecord span {
+  color: #64758b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.fulfillmentRecord ul {
+  display: grid;
+  gap: 5px;
+  margin: 4px 0 0;
+  padding-left: 17px;
+}
+.fulfillmentRecord li {
+  color: #53657a;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.productionLots > li {
+  display: grid;
+  gap: 4px;
+  border-left: 2px solid #a8c5ea;
+  padding-left: 8px;
+}
+.fulfillmentEmpty {
+  color: #718096;
+  font-size: 10px;
+  line-height: 1.5;
+}
+@media (max-width: 800px) {
+  .fulfillmentCell {
+    min-width: 440px;
+  }
+}
