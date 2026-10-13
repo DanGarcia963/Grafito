@@ -81,17 +81,20 @@ export class ProductionService {
           ...r,
           pendiente: r.cantidad.sub(consumido(r.movimientos)),
         })),
-        lotes_produccion: o.lotes_produccion.map((l) => ({
-          ...l,
-          cantidad_consumida: consumido(l.movimientos),
-          cantidad_cargada: l.cantidad_Cargada ?? consumido(l.movimientos),
-          cantidad_producida: l.movimientos
-            .filter((m) => m.tipo === 'ENTRADA_PRODUCCION')
-            .reduce(
-              (a, m) => a.add(m.cantidad).sub(m.reversion?.cantidad ?? 0),
-              new Prisma.Decimal(0),
-            ),
-        })),
+        lotes_produccion: o.lotes_produccion.map((l) => {
+          const lote = l as any;
+          return {
+            ...l,
+            cantidad_consumida: consumido(l.movimientos),
+            cantidad_cargada: lote.cantidad_Cargada ?? consumido(l.movimientos),
+            cantidad_producida: l.movimientos
+              .filter((m) => m.tipo === 'ENTRADA_PRODUCCION')
+              .reduce(
+                (a, m) => a.add(m.cantidad).sub(m.reversion?.cantidad ?? 0),
+                new Prisma.Decimal(0),
+              ),
+          };
+        }),
       })),
       bitacora,
     };
