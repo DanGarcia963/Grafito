@@ -1,11 +1,6 @@
 // GRAFITO — MODELO OBJETIVO LIMPIO (2026-10-06)
-<<<<<<< Updated upstream
 // Backend/frontend adaptados al inventario y reproceso; aplicar SQL incremental antes del despliegue.
 // No usar reset/db push sobre la base compartida. Ver prisma/actualizaciones/.
-=======
-// No es compatible con las consultas actuales hasta adaptar backend/frontend.
-// NO aplicado a Supabase ni al repositorio. No usar reset/db push sobre la base compartida.
->>>>>>> Stashed changes
 // Legal y KPI se conservan íntegros; no borrar toda la base para aplicar este rediseño.
 // Una venta = un producto y un servicio. OP opcionalmente ligada a una sola venta.
 // Existencia = movimientos físicos; reserva != consumo; recepción != producción.
@@ -100,21 +95,12 @@ model entregas_logistica {
 
 model equipos_tanques {
   id_Equipos_Tanques    Int                             @id @default(autoincrement())
-<<<<<<< Updated upstream
   codigo_Equipo         String                          @unique @db.VarChar(50)
   nombre_Equipo         String                          @db.VarChar(100)
   tipo                  equipos_tanques_tipo
   area                  String?                         @db.VarChar(50)
   capacidad             Decimal                         @db.Decimal(18, 4)
   unidad_capacidad      productos_materiales_UM
-=======
-  codigo_Equipo         String?                          @unique @db.VarChar(50)
-  nombre_Equipo         String                          @db.VarChar(100)
-  tipo                  equipos_tanques_tipo
-  area                  String?                         @db.VarChar(50)
-  capacidad             Decimal?                         @db.Decimal(18, 4)
-  unidad_capacidad      productos_materiales_UM?
->>>>>>> Stashed changes
   status                equipos_tanques_status          @default(OPERATIVO)
   estatus_proceso       equipos_tanques_estatus_proceso
   lotes_produccion      lotes_produccion[]
@@ -170,15 +156,10 @@ model incidencias_proveedores {
 model lotes_produccion {
   id_Lote_Produccion    Int                            @id @default(autoincrement())
   no_Lote               String                         @unique @db.VarChar(50)
-<<<<<<< Updated upstream
   orden_Produccion_id   Int?
   tanque_id             Int?
   /// Cantidad física cargada al tanque, independiente del saldo consumido del almacén.
   cantidad_Cargada      Decimal?                       @db.Decimal(18, 4)
-=======
-  orden_Produccion_id   Int
-  tanque_id             Int?
->>>>>>> Stashed changes
   /// Estado de ejecución separado del dictamen de Calidad.
   estado                produccion_lote_estado         @default(PENDIENTE)
   fecha_inicio          DateTime?                      @db.Timestamptz(6)
@@ -186,11 +167,7 @@ model lotes_produccion {
   estado_Calida         lotes_produccion_estado_Calida @default(PROCESANDO)
   observaciones_Calidad String?                        @db.Text
   observaciones         String?                        @db.Text
-<<<<<<< Updated upstream
   ordenes_produccion    ordenes_produccion?             @relation(fields: [orden_Produccion_id], references: [id_Orden_Produc], onDelete: Restrict)
-=======
-  ordenes_produccion    ordenes_produccion             @relation(fields: [orden_Produccion_id], references: [id_Orden_Produc], onDelete: Restrict)
->>>>>>> Stashed changes
   equipos_tanques       equipos_tanques?               @relation(fields: [tanque_id], references: [id_Equipos_Tanques], onDelete: Restrict)
   inventario_obtenido   lotes_inventario[]
   movimientos           movimientos_inventario[]
@@ -364,13 +341,10 @@ model no_conformidades {
 }
 
 model ordenes_produccion {
-<<<<<<< Updated upstream
   es_reproceso Boolean @default(false)
   motivo_reproceso String? @db.Text
   propietario_id Int?
   propietario personas? @relation("op_propietario", fields: [propietario_id], references: [id_Persona], onDelete: Restrict)
-=======
->>>>>>> Stashed changes
   id_Orden_Produc         Int                            @id @default(autoincrement())
   no_Orden_Produc         String                         @unique @db.VarChar(50)
   orden_venta_id          Int?
@@ -415,10 +389,7 @@ model parametros_laboratorio {
 }
 
 model personas {
-<<<<<<< Updated upstream
   ordenes_produccion_propietario ordenes_produccion[] @relation("op_propietario")
-=======
->>>>>>> Stashed changes
   id_Persona                                                             Int                        @id @default(autoincrement())
   codigo                                                                 String?                    @db.VarChar(50)
   nombre                                                                 String                     @db.VarChar(150)
@@ -860,10 +831,7 @@ model crm_oportunidades {
   historial                  crm_oportunidad_historial[]
   reportes_id                id_reportes_oportunidad[]
   cotizaciones               crm_cotizaciones[]
-<<<<<<< Updated upstream
   costos_oportunidad        crm_costos_oportunidad[]
-=======
->>>>>>> Stashed changes
   orden_venta                crm_ordenes_venta?
 
   @@index([persona_id, fecha_apertura], map: "idx_crm_oportunidad_cliente")
@@ -911,7 +879,6 @@ model id_reportes_oportunidad {
   oportunidad      crm_oportunidades    @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   /// Snapshot de IDs de muestras y ciclos evaluados al publicar; validación en backend.
-<<<<<<< Updated upstream
   muestras_ciclos Json
   cotizaciones    crm_cotizaciones[]
   costos          crm_costos_oportunidad[]
@@ -973,48 +940,6 @@ model crm_cotizaciones {
   producto                productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
   orden_venta             crm_ordenes_venta?
 
-=======
-  muestras_ciclos Json?
-  cotizaciones    crm_cotizaciones[]
-
-  @@unique([oportunidad_id, version], map: "uq_id_reporte_oportunidad_version")
-  @@unique([id, oportunidad_id])
-  @@index([estado, publicado_en], map: "idx_id_reporte_estado_publicacion")
-}
-
-model crm_cotizaciones {
-  id                      Int                     @id @default(autoincrement())
-  oportunidad_id          Int
-  reporte_id              Int
-  version                 Int
-  folio                   String                  @unique(map: "uq_crm_cotizacion_folio") @db.VarChar(60)
-  estado                  crm_cotizacion_estado   @default(BORRADOR)
-  tipo_venta              crm_tipo_venta
-  producto_id             Int
-  servicio                String                  @db.VarChar(100)
-  cantidad                Decimal                 @db.Decimal(18, 4)
-  unidad                  productos_materiales_UM
-  moneda                  crm_moneda              @default(MXN)
-  subtotal                Decimal                 @db.Decimal(18, 2)
-  impuestos               Decimal                 @db.Decimal(18, 2)
-  total                   Decimal                 @db.Decimal(18, 2)
-  vigencia_hasta          DateTime                @db.Date
-  condiciones_comerciales String                  @db.Text
-  notas                   String?                 @db.Text
-  nombre_archivo          String?                 @db.VarChar(255)
-  tipo_mime               String?                 @db.VarChar(150)
-  contenido               Bytes?                  @db.ByteA
-  creado_por              String                  @db.VarChar(100)
-  creado_en               DateTime                @default(now()) @db.Timestamptz(6)
-  enviado_en              DateTime?               @db.Timestamptz(6)
-  aceptado_en             DateTime?               @db.Timestamptz(6)
-  rechazado_en            DateTime?               @db.Timestamptz(6)
-  oportunidad             crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
-  reporte                 id_reportes_oportunidad @relation(fields: [reporte_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
-  producto                productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
-  orden_venta             crm_ordenes_venta?
-
->>>>>>> Stashed changes
   @@unique([id, oportunidad_id])
   @@unique([oportunidad_id, version], map: "uq_crm_cotizacion_oportunidad_version")
   @@index([reporte_id, oportunidad_id])
@@ -1023,19 +948,12 @@ model crm_cotizaciones {
 }
 
 model crm_ordenes_venta {
-<<<<<<< Updated upstream
   /// Presentación acordada; los pesos reales se registran en el lote de inventario.
   especificaciones Json? @db.JsonB
   id                   Int                     @id @default(autoincrement())
   folio                String                  @unique(map: "uq_crm_orden_venta_folio") @db.VarChar(60)
   oportunidad_id       Int?                     @unique(map: "uq_crm_orden_venta_oportunidad")
   cotizacion_id        Int?                     @unique(map: "uq_crm_orden_venta_cotizacion")
-=======
-  id                   Int                     @id @default(autoincrement())
-  folio                String                  @unique(map: "uq_crm_orden_venta_folio") @db.VarChar(60)
-  oportunidad_id       Int                     @unique(map: "uq_crm_orden_venta_oportunidad")
-  cotizacion_id        Int                     @unique(map: "uq_crm_orden_venta_cotizacion")
->>>>>>> Stashed changes
   persona_id           Int
   vendedor_id          Int
   tipo_venta           crm_tipo_venta
@@ -1057,13 +975,8 @@ model crm_ordenes_venta {
   creado_por           String                  @db.VarChar(100)
   creado_en            DateTime                @default(now()) @db.Timestamptz(6)
   actualizado_en       DateTime                @updatedAt @db.Timestamptz(6)
-<<<<<<< Updated upstream
   oportunidad          crm_oportunidades?       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
   cotizacion           crm_cotizaciones?        @relation(fields: [cotizacion_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
-=======
-  oportunidad          crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
-  cotizacion           crm_cotizaciones        @relation(fields: [cotizacion_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
->>>>>>> Stashed changes
   cliente              personas                @relation("crm_orden_venta_cliente", fields: [persona_id], references: [id_Persona], onDelete: Restrict)
   vendedor             personas                @relation("crm_orden_venta_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict)
   producto             productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
@@ -1454,11 +1367,8 @@ enum kpi_configuraciones_agregacion {
 
 // ===== RECEPCIÓN E INVENTARIO POR LOTE =====
 model lotes_inventario {
-<<<<<<< Updated upstream
   /// Identificación de la recepción/descarga; el saldo vigente se calcula en movimientos.
   especificaciones Json? @db.JsonB
-=======
->>>>>>> Stashed changes
   id                       Int                        @id @default(autoincrement())
   folio                    String                     @unique @db.VarChar(100)
   producto_id              Int
@@ -1562,12 +1472,9 @@ enum inventario_propiedad {
 }
 
 enum inventario_condicion {
-<<<<<<< Updated upstream
   NUEVO
   REZAGADO
   FUERA_DE_ESPECIFICACION
-=======
->>>>>>> Stashed changes
   SUCIO
   INTERMEDIO
   REGENERADO
