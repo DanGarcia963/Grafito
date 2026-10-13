@@ -50,7 +50,7 @@ US Technologies · Muestras y procesos </h1>
     >
       <option value="produccion">Producción</option>
       <option value="calidad">Muestras · Calidad</option>
-      <option value="id">Muestras · Investigación y Desarrollo</option>
+      <option value="id">I+D · Análisis de muestras</option>
       <option value="ventas">Ventas · CRM de muestras I+D</option>
       <option value="costos">Costos · Precios objetivo</option>
       <option value="seguridad">Seguridad</option>
