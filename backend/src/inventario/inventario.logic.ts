@@ -1,4 +1,7 @@
-import { aptitudMaterial } from './especificaciones.logic';
+import {
+  aptitudMaterial,
+  saldosContenedoresRestantes,
+} from './especificaciones.logic';
 import {
   BadRequestException,
   ConflictException,
@@ -44,8 +47,19 @@ export async function existencias(
     where: { activo: true },
   });
   return lotes
-    .flatMap((l) =>
-      ubicaciones.map((u) => {
+    .flatMap((l) => {
+      const saldoFisicoLote = l.movimientos.reduce(
+        (a, m) =>
+          a
+            .add(m.ubicacion_destino_id == null ? 0 : m.cantidad)
+            .sub(m.ubicacion_origen_id == null ? 0 : m.cantidad),
+        new Prisma.Decimal(0),
+      );
+      const contenedores_restantes = saldosContenedoresRestantes(
+        l.especificaciones,
+        saldoFisicoLote,
+      );
+      return ubicaciones.map((u) => {
         const fisico = l.movimientos.reduce(
           (a, m) =>
             a
@@ -70,6 +84,7 @@ export async function existencias(
           propietario_id: l.propietario_id,
           condicion: l.condicion,
           especificaciones: l.especificaciones,
+          contenedores_restantes,
           orden_venta_id: l.orden_venta_id,
           ubicacion_id: u.id,
           ubicacion: u.nombre,
@@ -83,8 +98,8 @@ export async function existencias(
             : new Prisma.Decimal(0),
           liberado: aptitud.liberado,
         };
-      }),
-    )
+      });
+    })
     .filter((x) => !x.fisico.isZero() || !x.reservado.isZero());
 }
 export function consumido(

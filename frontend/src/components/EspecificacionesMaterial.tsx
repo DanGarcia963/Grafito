@@ -14,14 +14,18 @@ type Config = {
 export default function EspecificacionesMaterial({
   config,
   unidad,
+  contenedoresObligatorios = false,
+  productoTerminado = false,
 }: {
   config?: Config | null;
   unidad?: string;
+  contenedoresObligatorios?: boolean;
+  productoTerminado?: boolean;
 }) {
   const [atributos, setAtributos] = useState<Record<string, string>>({});
   const [contenedores, setContenedores] = useState<
     { codigo: string; peso_kg: string }[]
-  >([]);
+  >(() => (contenedoresObligatorios ? [{ codigo: "", peso_kg: "" }] : []));
   return (
     <section className="border border-slate-500 rounded-xl p-4 grid gap-3">
       <h3 className="font-bold">Especificaciones del material</h3>
@@ -53,9 +57,9 @@ export default function EspecificacionesMaterial({
       {unidad === "Kilogramos" && (
         <>
           <p>
-            Registra el peso real de cada contenedor en kg. Su suma debe
-            coincidir con la cantidad total. El detalle describe esta entrada;
-            los consumos posteriores se controlan por kg del lote.
+            {productoTerminado
+              ? "Registra los contenedores que realmente salieron del proceso y el peso de cada uno. Su suma debe coincidir con la cantidad obtenida; puede ser menor que la carga al tanque."
+              : "Registra el peso real de cada contenedor en kg. Su suma debe coincidir con la cantidad total. El saldo de inventario se calcula con los movimientos registrados."}
           </p>
           {contenedores.map((c, i) => (
             <div key={i} className="flex flex-wrap gap-2">
@@ -80,7 +84,9 @@ export default function EspecificacionesMaterial({
                 required
                 type="number"
                 step="0.0001"
-                min={config?.peso_min_kg ?? 0.0001}
+                min={
+                  productoTerminado ? 0.0001 : (config?.peso_min_kg ?? 0.0001)
+                }
                 max={config?.peso_max_kg}
                 className="border bg-transparent p-2"
                 value={c.peso_kg}

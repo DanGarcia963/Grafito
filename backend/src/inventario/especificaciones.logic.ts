@@ -19,6 +19,7 @@ export function especificacionesValidas(
   configuracion: Prisma.JsonValue | null,
   unidad: string,
   cantidad: Prisma.Decimal,
+  opciones: { permitirContenedorParcial?: boolean } = {},
 ): Prisma.InputJsonObject | undefined {
   const config = (configuracion ?? {}) as ConfiguracionOperativa;
   if (entrada == null) {
@@ -55,7 +56,7 @@ export function especificacionesValidas(
     throw new BadRequestException('Captura hasta 500 contenedores');
   let total = new Prisma.Decimal(0);
   const codigos = new Set<string>();
-  const contenedores = e.contenedores.map((c: any) => {
+  const contenedores = e.contenedores.map((c: any, indice: number) => {
     if (
       !c ||
       typeof c.codigo !== 'string' ||
@@ -70,8 +71,16 @@ export function especificacionesValidas(
     const peso = decimalCrm(c.peso_kg, 4);
     if (unidad !== 'Kilogramos')
       throw new BadRequestException('Los pesos requieren un producto en Kg');
+    const parcialFinalValido =
+      opciones.permitirContenedorParcial === true &&
+      indice === e.contenedores.length - 1 &&
+      config.peso_min_kg != null &&
+      peso.lt(config.peso_min_kg) &&
+      (config.peso_max_kg == null || peso.lte(config.peso_max_kg));
     if (
-      (config.peso_min_kg != null && peso.lt(config.peso_min_kg)) ||
+      (config.peso_min_kg != null &&
+        peso.lt(config.peso_min_kg) &&
+        !parcialFinalValido) ||
       (config.peso_max_kg != null && peso.gt(config.peso_max_kg))
     )
       throw new BadRequestException(
@@ -85,6 +94,50 @@ export function especificacionesValidas(
       'La suma de pesos debe coincidir con la cantidad total en kg',
     );
   return { version: 1, atributos, contenedores };
+}
+
+/**
+ * Calcula cuántos envases conservan producto según el saldo físico del lote.
+ * Como los movimientos actuales descuentan kg por lote y no por envase, el saldo
+ * se distribuye FIFO en el orden en que se registraron los contenedores.
+ */
+export function saldosContenedoresRestantes(
+  especificaciones: unknown,
+  saldoFisico: Prisma.Decimal,
+): { codigo: string; peso_kg: string; saldo_kg: string }[] {
+  if (
+    !especificaciones ||
+    typeof especificaciones !== 'object' ||
+    Array.isArray(especificaciones)
+  )
+    return [];
+  const contenedores = (especificaciones as Record<string, unknown>)
+    .contenedores;
+  if (!Array.isArray(contenedores)) return [];
+
+  let pendiente = saldoFisico.gt(0) ? saldoFisico : new Prisma.Decimal(0);
+  const restantes: { codigo: string; peso_kg: string; saldo_kg: string }[] = [];
+  try {
+    for (const contenedor of contenedores) {
+      if (!contenedor || typeof contenedor !== 'object') return [];
+      const c = contenedor as Record<string, unknown>;
+      const peso = new Prisma.Decimal(String(c.peso_kg ?? ''));
+      const codigo = String(c.codigo ?? '').trim();
+      if (!codigo || !peso.isFinite() || !peso.gt(0)) return [];
+      const saldo = pendiente.lt(peso) ? pendiente : peso;
+      if (saldo.gt(0))
+        restantes.push({
+          codigo,
+          peso_kg: peso.toString(),
+          saldo_kg: saldo.toString(),
+        });
+      pendiente = pendiente.sub(saldo);
+    }
+  } catch {
+    // Un detalle histórico inválido no debe impedir consultar las existencias.
+    return [];
+  }
+  return restantes;
 }
 
 /** F.E. solo es insumo de reproceso; SUCIO es materia prima para regenerar. */
@@ -104,8 +157,7 @@ export function aptitudMaterial(l: {
     calidad === 'LIBERADO' &&
     !['SUCIO', 'FUERA_DE_ESPECIFICACION', 'RESIDUO'].includes(l.condicion);
   const rechazado = ['RECHAZADO', 'BLOQUEADO'].includes(calidad ?? '');
-  const materiaPorRegenerar =
-    l.condicion === 'SUCIO' && !rechazado;
+  const materiaPorRegenerar = l.condicion === 'SUCIO' && !rechazado;
   const fueraDeEspecificacion =
     l.condicion === 'FUERA_DE_ESPECIFICACION' &&
     ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(calidad ?? '');
