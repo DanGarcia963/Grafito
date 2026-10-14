@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowDownToLine, CheckCircle2, ClipboardCheck, FileText, RefreshCw, Truck } from 'lucide-react';
+import { ArrowDownToLine, CheckCircle2, ClipboardCheck, FileText, Mail, RefreshCw, Truck } from 'lucide-react';
 import { useSocket } from '@/context/SocketContext';
 import { API_URL, apiFetch, pedir, sesionActual } from '@/utils/api';
 
 type Stage = 'PEDIDO' | 'RECOLECCION' | 'PESAJE' | 'VERIFICAR_DATOS' | 'CORRECCION_DATOS' | 'CONTADURIA' | 'RESGUARDO';
 type Person = { id_Persona: number; nombre: string; tipo_persona: string };
+type Client = { id_Persona: number; nombre: string; crm_perfil_comercial?: { correo: string | null } | null };
 type Order = {
   id: number; folio: string; cantidad: string; unidad: string; orden_cliente: string;
-  estado: string; tipo_venta: string; cliente: { id_Persona: number; nombre: string };
+  estado: string; tipo_venta: string; cliente: Client;
   producto: { nombre_Producto: string }; materiales_recibidos: { id: number }[];
 };
 type EventItem = { id: number; accion: string; estado_anterior: string | null; estado_nuevo: string; actor_usuario: string; actor?: { nombre: string } | null; creado_en: string; datos?: Record<string, unknown> | null };
@@ -25,9 +26,9 @@ type Manifest = {
   documento_llegada_nombre: string | null; documento_manifiesto_nombre: string | null; resguardado_en: string | null;
   creado_en: string; actualizado_en: string; operador?: { id_Persona: number; nombre: string } | null;
   firmado_por?: { id_Persona: number; nombre: string } | null; resguardado_por?: { id_Persona: number; nombre: string } | null;
-  orden_venta?: Order | null; eventos: EventItem[];
+  cliente?: Client | null; orden_venta?: Order | null; eventos: EventItem[];
 };
-type Catalogs = { operadores: Person[]; ordenes: Omit<Order, 'estado' | 'tipo_venta' | 'materiales_recibidos'>[] };
+type Catalogs = { operadores: Person[]; clientes: Client[]; ordenes: Omit<Order, 'estado' | 'tipo_venta' | 'materiales_recibidos'>[] };
 
 const stages: { id: Stage; label: string; area: string; hint: string }[] = [
   { id: 'PEDIDO', label: 'Pedido', area: 'Logística', hint: 'Asigna número de manifiesto y operador.' },
@@ -86,7 +87,8 @@ async function upload(path: string, form: FormData) {
   return result;
 }
 
-function MetadataInputs({ manifest, operators, withAssignment = false, allowGknEdit = false }: { manifest?: Manifest; operators: Person[]; withAssignment?: boolean; allowGknEdit?: boolean }) {
+function MetadataInputs({ manifest, operators, withAssignment = false, allowGknEdit = false, complete = false }: { manifest?: Manifest; operators: Person[]; withAssignment?: boolean; allowGknEdit?: boolean; complete?: boolean }) {
+  const requiredFields = new Set(['razon_social_generadora', 'nombre_residuo', 'destino_autorizacion', 'destino_razon_social', 'linea_Produccion']);
   return <>
     {withAssignment && <div className="grid gap-3 sm:grid-cols-3">
       <label>No. manifiesto <input required name="no_Manifiesto" maxLength={100} defaultValue={manifest?.no_Manifiesto ?? ''} className="field" /></label>
@@ -97,7 +99,7 @@ function MetadataInputs({ manifest, operators, withAssignment = false, allowGknE
     <div className="grid gap-3 sm:grid-cols-2">
       {metadataFields.map(([key, label]) => {
         if (manifest?.es_gkn && !allowGknEdit && (key === 'transportista' || key.startsWith('transportista_'))) return null;
-        return <label key={key}>{label}<input name={key} maxLength={key === 'transportista_placas' ? 40 : 200} defaultValue={asText(manifest?.[key])} className="field" /></label>;
+        return <label key={key}>{label}<input name={key} required={complete && requiredFields.has(key)} maxLength={key === 'transportista_placas' ? 40 : 200} defaultValue={asText(manifest?.[key])} className="field" /></label>;
       })}
     </div>
   </>;
@@ -125,7 +127,7 @@ export default function ManifiestosPage() {
   const router = useRouter();
   const area = useSyncExternalStore(subscribeArea, currentArea, serverArea);
   const [manifests, setManifests] = useState<Manifest[]>([]);
-  const [catalogs, setCatalogs] = useState<Catalogs>({ operadores: [], ordenes: [] });
+  const [catalogs, setCatalogs] = useState<Catalogs>({ operadores: [], clientes: [], ordenes: [] });
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -138,7 +140,7 @@ export default function ManifiestosPage() {
       pedir('/api/manifiestos/catalogos', undefined, 'GET'),
     ]);
     setManifests(m.data ?? []);
-    setCatalogs({ operadores: c.operadores ?? [], ordenes: c.ordenes ?? [] });
+    setCatalogs({ operadores: c.operadores ?? [], clientes: c.clientes ?? [], ordenes: c.ordenes ?? [] });
   }, []);
 
   useEffect(() => {
@@ -201,15 +203,29 @@ export default function ManifiestosPage() {
     try {
       const result = await pedir('/api/manifiestos', {
         orden_venta_id: form.get('orden_venta_id') || null,
+        cliente_id: form.get('cliente_id') || null,
         es_gkn: form.get('es_gkn') === 'on',
         razon_social_generadora: form.get('razon_social_generadora'),
         nombre_residuo: form.get('nombre_residuo'),
         peso_pedido: form.get('peso_pedido') || null,
       });
-      setNotice(result.mensaje ?? 'Manifiesto creado en Pedido.');
+      setNotice(result.mensaje ?? 'Solicitud creada para Recolección.');
       formElement.reset();
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo crear el manifiesto'); }
+    finally { setBusy(null); }
+  };
+
+  const createComplete = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formElement = e.currentTarget;
+    setBusy(0); setError(''); setNotice('');
+    try {
+      const result = await upload('/api/manifiestos/completo', new FormData(formElement));
+      setNotice(result.mensaje ?? 'Manifiesto completo registrado.');
+      formElement.reset();
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar el manifiesto completo'); }
     finally { setBusy(null); }
   };
 
@@ -233,19 +249,43 @@ export default function ManifiestosPage() {
     {error && <p role="alert" className="mb-4 rounded-lg border border-red-900 bg-red-950/70 p-3 text-sm text-red-200">{error}</p>}
     {notice && <p role="status" className="mb-4 rounded-lg border border-emerald-900 bg-emerald-950/50 p-3 text-sm text-emerald-200">{notice}</p>}
 
-    {area === 'seguridad' && <details className="mb-5 rounded-xl border border-cyan-900/60 bg-slate-900 p-4">
-      <summary className="cursor-pointer font-semibold text-cyan-200">+ Registrar manifiesto GKN</summary>
-      <form onSubmit={create} className="mt-4 grid gap-3 md:grid-cols-4">
-        <label className="md:col-span-2">Orden de venta (opcional)
-          <select name="orden_venta_id" className="field"><option value="">Sin OV · recepción independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select>
-        </label>
-        <label>Razón social generadora<input name="razon_social_generadora" required maxLength={200} className="field" /></label>
-        <label>Nombre del residuo<input name="nombre_residuo" required maxLength={200} className="field" /></label>
-        <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
-        <label className="flex items-center gap-2 self-end rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm"><input type="checkbox" name="es_gkn" defaultChecked /> Es un manifiesto de GKN</label>
-        <button disabled={busy === 0} className="rounded-lg bg-cyan-700 px-4 py-2 font-semibold hover:bg-cyan-600 disabled:opacity-50">Crear en Pedido</button>
-      </form>
-    </details>}
+    {area === 'seguridad' && <div className="mb-5 grid gap-4 xl:grid-cols-2">
+      <details className="rounded-xl border border-cyan-900/60 bg-slate-900 p-4">
+        <summary className="cursor-pointer font-semibold text-cyan-200">+ Crear solicitud para Recolección</summary>
+        <p className="mt-2 text-xs text-slate-400">Captura lo básico. La tarjeta quedará en Recolección para que Almacén confirme la llegada. Si eliges una OV, se reutiliza la tarjeta que se creó al confirmar la venta.</p>
+        <form onSubmit={create} className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="sm:col-span-2">Orden de venta (opcional)
+            <select name="orden_venta_id" className="field"><option value="">Sin OV · recepción independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select>
+          </label>
+          <label className="sm:col-span-2">Cliente registrado (para poder enviarle el manifiesto)<select name="cliente_id" className="field"><option value="">Selecciona cliente si no hay OV</option>{catalogs.clientes.map(p => <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}{p.crm_perfil_comercial?.correo ? ` · ${p.crm_perfil_comercial.correo}` : ' · sin correo'}</option>)}</select></label>
+          <label>Razón social generadora<input name="razon_social_generadora" required maxLength={200} className="field" /></label>
+          <label>Nombre del residuo<input name="nombre_residuo" required maxLength={200} className="field" /></label>
+          <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
+          <label className="flex items-center gap-2 self-end rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs"><input type="checkbox" name="es_gkn" /> Es GKN (obligatorio si no hay OV)</label>
+          <button disabled={busy === 0} className="rounded-lg bg-cyan-700 px-4 py-2 font-semibold hover:bg-cyan-600 disabled:opacity-50 sm:col-span-2">Crear solicitud para Recolección</button>
+        </form>
+      </details>
+
+      <details className="rounded-xl border border-violet-900/60 bg-slate-900 p-4">
+        <summary className="cursor-pointer font-semibold text-violet-200">+ Registrar manifiesto completo</summary>
+        <p className="mt-2 text-xs text-slate-400">SHyMA puede capturar todos los datos y documentos en una sola acción. El registro completo pasa directo a la validación del checklist; si eliges una OV, debe tener su manifiesto en Pedido.</p>
+        <form onSubmit={createComplete} encType="multipart/form-data" className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="sm:col-span-2">Orden de venta (opcional)
+              <select name="orden_venta_id" className="field"><option value="">Sin OV · GKN independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select>
+            </label>
+            <label className="sm:col-span-2">Cliente registrado<select name="cliente_id" className="field"><option value="">Se toma del cliente de la OV o selecciona uno</option>{catalogs.clientes.map(p => <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}{p.crm_perfil_comercial?.correo ? ` · ${p.crm_perfil_comercial.correo}` : ' · sin correo'}</option>)}</select></label>
+            <MetadataInputs operators={catalogs.operadores} withAssignment allowGknEdit complete />
+            <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
+            <label>Peso de llegada (kg)<input required name="peso_llegada" type="number" min="0.0001" step="0.0001" className="field" /></label>
+            <label>PDF del manifiesto (opcional)<input name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
+            <label>PDF de llegada a almacén (opcional)<input name="documento_llegada" type="file" accept="application/pdf,.pdf" className="field" /></label>
+          </div>
+          <p className="text-[11px] text-slate-500">Para manifiestos no GKN también se requieren transportista, autorización SEMARNAT, placas y registro SCT. Cada PDF puede pesar hasta 10 MB.</p>
+          <button disabled={busy === 0} className="w-full rounded-lg bg-violet-700 px-4 py-2 font-semibold hover:bg-violet-600 disabled:opacity-50">Registrar y enviar a checklist SHyMA</button>
+        </form>
+      </details>
+    </div>}
 
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-slate-400">{filtered.length} manifiestos · {manifests.filter(m => m.estado === 'RESGUARDO' && m.resguardado_en).length} con PDF resguardado</p>
@@ -274,7 +314,7 @@ export default function ManifiestosPage() {
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Peso llegada</dt><dd className="text-right text-slate-300">{m.peso_llegada ? `${m.peso_llegada} kg` : '—'}</dd></div>
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Operador</dt><dd className="text-right text-slate-300">{m.operador?.nombre ?? '—'}</dd></div>
               </dl>
-              {m.orden_venta && <p className="mt-3 rounded-lg border border-slate-800 bg-slate-900 p-2 text-[11px] text-slate-400">{m.orden_venta.cliente.nombre} · Compra {m.numero_compra ?? m.orden_venta.orden_cliente} · Inventario {m.orden_venta.materiales_recibidos?.length ? 'vinculado' : 'pendiente'}</p>}
+              {(m.orden_venta || m.cliente) && <p className="mt-3 rounded-lg border border-slate-800 bg-slate-900 p-2 text-[11px] text-slate-400">{m.orden_venta?.cliente.nombre ?? m.cliente?.nombre}{area === 'seguridad' && ((m.cliente?.crm_perfil_comercial?.correo ?? m.orden_venta?.cliente.crm_perfil_comercial?.correo) ? ` · ${m.cliente?.crm_perfil_comercial?.correo ?? m.orden_venta?.cliente.crm_perfil_comercial?.correo}` : ' · sin correo registrado')}{m.orden_venta && <> · Compra {m.numero_compra ?? m.orden_venta.orden_cliente} · Inventario {m.orden_venta.materiales_recibidos?.length ? 'vinculado' : 'pendiente'}</>}</p>}
               {m.motivo_correccion && <p className="mt-3 whitespace-pre-line rounded-lg border border-amber-900/70 bg-amber-950/40 p-2 text-[11px] text-amber-200">Observaciones SHyMA: {m.motivo_correccion}</p>}
               {m.documento_llegada_nombre && <button onClick={() => void download(m.id, 'llegada', m.documento_llegada_nombre!)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800"><ArrowDownToLine size={13} /> Documento de llegada</button>}
               {m.documento_manifiesto_nombre && <button onClick={() => void download(m.id, 'manifiesto', m.documento_manifiesto_nombre!)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800"><FileText size={13} /> PDF de manifiesto</button>}
@@ -300,14 +340,24 @@ export default function ManifiestosPage() {
               {m.estado === 'CORRECCION_DATOS' && area === 'logistica' && <details className="mt-3 rounded-lg border border-amber-900/60 p-2" open><summary className="cursor-pointer text-xs font-semibold text-amber-200">Corregir datos</summary>
                 <form onSubmit={submitForm(m.id, `/api/manifiestos/${m.id}/corregir`, f => Object.fromEntries([...f.entries()]))} className="mt-3 space-y-3">
                   <MetadataInputs manifest={m} operators={catalogs.operadores} allowGknEdit />
-                  <button disabled={busy === m.id} className="w-full rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600 disabled:opacity-50">Devolver a SHyMA</button>
+                  <label>Después de corregir, enviar a<select name="destino" defaultValue="VERIFICAR_DATOS" className="field"><option value="VERIFICAR_DATOS">Revalidación del checklist SHyMA</option><option value="CONTADURIA">Contaduría, si se cumplen los controles pendientes</option></select></label>
+                  <p className="text-[11px] text-slate-500">El pase directo revisa nuevamente los datos obligatorios, el peso y la trazabilidad de inventario. La clasificación GKN y la bitácora deben haber sido confirmadas por SHyMA.</p>
+                  <button disabled={busy === m.id} className="w-full rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600 disabled:opacity-50">Guardar corrección y enviar</button>
                 </form>
               </details>}
               {m.estado === 'CONTADURIA' && area === 'contaduria' && <button disabled={busy === m.id} onClick={() => void act(m.id, `/api/manifiestos/${m.id}/firmar`, {})} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold hover:bg-emerald-600 disabled:opacity-50"><CheckCircle2 size={14} /> Firmar y enviar a Resguardo</button>}
-              {m.estado === 'RESGUARDO' && area === 'seguridad' && (m.resguardado_en ? <p className="mt-3 rounded-lg border border-emerald-900 bg-emerald-950/50 p-2 text-xs text-emerald-200">Resguardado {showDate(m.resguardado_en)}{m.resguardado_por ? ` · ${m.resguardado_por.nombre}` : ''}</p> : <form onSubmit={e => { e.preventDefault(); void actUpload(m.id, `/api/manifiestos/${m.id}/resguardo`, new FormData(e.currentTarget)); }} className="mt-3 space-y-3">
-                <label>PDF final del manifiesto<input required name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
-                <button disabled={busy === m.id} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">Guardar en resguardo</button>
-              </form>)}
+              {m.estado === 'RESGUARDO' && area === 'seguridad' && <div className="mt-3 space-y-2">
+                {m.resguardado_en
+                  ? <p className="rounded-lg border border-emerald-900 bg-emerald-950/50 p-2 text-xs text-emerald-200">Resguardado {showDate(m.resguardado_en)}{m.resguardado_por ? ` · ${m.resguardado_por.nombre}` : ''}</p>
+                  : <form onSubmit={e => { e.preventDefault(); void actUpload(m.id, `/api/manifiestos/${m.id}/resguardo`, new FormData(e.currentTarget)); }} className="space-y-3">
+                      <label>{m.documento_manifiesto_nombre ? `PDF del manifiesto ya cargado: ${m.documento_manifiesto_nombre}` : 'PDF final del manifiesto'}<input required={!m.documento_manifiesto_nombre} name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
+                      <button disabled={busy === m.id} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">{m.documento_manifiesto_nombre ? 'Confirmar resguardo' : 'Guardar en resguardo'}</button>
+                    </form>}
+                {m.resguardado_en && (m.cliente?.crm_perfil_comercial?.correo || m.orden_venta?.cliente.crm_perfil_comercial?.correo
+                  ? <button disabled={busy === m.id} onClick={() => void act(m.id, `/api/manifiestos/${m.id}/enviar-correo`, {})} className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-800 px-3 py-2 text-xs font-semibold hover:bg-cyan-700 disabled:opacity-50"><Mail size={14} /> Enviar manifiesto al cliente</button>
+                  : <p className="rounded-lg border border-amber-900/70 bg-amber-950/40 p-2 text-[11px] text-amber-200">Registra el correo del cliente en su perfil comercial para habilitar el envío manual.</p>)}
+                {m.eventos.find(event => event.accion === 'CORREO_MANIFIESTO_ENVIADO') && <p className="text-[10px] text-slate-500">Último envío: {showDate(m.eventos.find(event => event.accion === 'CORREO_MANIFIESTO_ENVIADO')!.creado_en)} · Puedes reenviarlo manualmente.</p>}
+              </div>}
 
               <details className="mt-3 border-t border-slate-800 pt-2"><summary className="cursor-pointer text-[11px] text-slate-500">Bitácora · {m.eventos.length}</summary>
                 <ol className="mt-2 space-y-2">{m.eventos.map(event => <li key={event.id} className="border-l border-slate-700 pl-2 text-[10px]"><span className="text-slate-300">{event.accion.replaceAll('_', ' ')}</span><span className="block text-slate-500">{event.actor?.nombre ?? event.actor_usuario} · {showDate(event.creado_en)}</span></li>)}</ol>
