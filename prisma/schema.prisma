@@ -427,6 +427,10 @@ model personas {
   crm_oportunidades_vendedor                                             crm_oportunidades[]        @relation("crm_oportunidad_vendedor")
   crm_ordenes_venta_cliente                                              crm_ordenes_venta[]        @relation("crm_orden_venta_cliente")
   crm_ordenes_venta_vendedor                                             crm_ordenes_venta[]        @relation("crm_orden_venta_vendedor")
+  manifiestos_como_operador                                               manifiestos[]              @relation("manifiesto_operador")
+  manifiestos_firmados                                                    manifiestos[]              @relation("manifiesto_firmado_por")
+  manifiestos_resguardados                                                manifiestos[]              @relation("manifiesto_resguardado_por")
+  manifiesto_eventos                                                      manifiesto_eventos[]       @relation("manifiesto_evento_actor")
 
   inventario_propiedad lotes_inventario[]   @relation("inventario_propietario")
   recepciones          lotes_llegada[]      @relation("recepcion_remitente")
@@ -1007,6 +1011,7 @@ model crm_ordenes_venta {
   entregas             entregas_logistica[]
   facturas             facturas_venta[]
   pagos                pagos_venta[]
+  manifiestos          manifiestos[]
 
   @@unique([cotizacion_id, oportunidad_id])
   /// Pedido confirmado = esta orden. Cumplimiento y saldo se derivan de entregas/pagos.
@@ -1014,6 +1019,73 @@ model crm_ordenes_venta {
   @@index([persona_id, fecha_confirmacion])
   @@index([vendedor_id, fecha_confirmacion])
   @@index([producto_id])
+}
+
+/// Un manifiesto puede nacer de una OV o ser capturado por SHyMA para una entrada GKN sin OV.
+/// Los documentos se almacenan en bytea siguiendo el patrón de adjuntos ya usado por el sistema.
+model manifiestos {
+  id                             Int                  @id @default(autoincrement())
+  no_Manifiesto                  String?              @unique(map: "uq_manifiestos_numero") @db.VarChar(100)
+  fecha_Expedicion               DateTime?            @db.Date
+  estado                         String               @default("PEDIDO") @db.VarChar(30)
+  orden_venta_id                 Int?
+  operador_id                    Int?
+  es_gkn                         Boolean              @default(false)
+  razon_social_generadora        String?              @db.VarChar(200)
+  nombre_residuo                 String?              @db.VarChar(200)
+  transportista                  String?              @db.VarChar(200)
+  transportista_autorizacion     String?              @db.VarChar(100)
+  transportista_placas           String?              @db.VarChar(40)
+  transportista_registro_sct     String?              @db.VarChar(80)
+  destino_autorizacion           String?              @db.VarChar(100)
+  destino_razon_social           String?              @db.VarChar(200)
+  linea_Produccion               String?              @db.VarChar(80)
+  numero_compra                  String?              @db.VarChar(100)
+  peso_pedido                    Decimal?             @db.Decimal(18, 4)
+  peso_llegada                   Decimal?             @db.Decimal(18, 4)
+  fecha_recepcion_almacen        DateTime?            @db.Timestamptz(6)
+  checklist                      Json?                @db.JsonB
+  motivo_correccion              String?              @db.Text
+  documento_llegada_nombre       String?              @db.VarChar(255)
+  documento_llegada_mime         String?              @db.VarChar(150)
+  documento_llegada_contenido    Bytes?               @db.ByteA
+  firmado_por_persona_id         Int?
+  firmado_en                     DateTime?            @db.Timestamptz(6)
+  documento_manifiesto_nombre    String?              @db.VarChar(255)
+  documento_manifiesto_mime      String?              @db.VarChar(150)
+  documento_manifiesto_contenido Bytes?               @db.ByteA
+  resguardado_por_persona_id     Int?
+  resguardado_en                 DateTime?            @db.Timestamptz(6)
+  creado_por                     String               @db.VarChar(100)
+  creado_en                      DateTime             @default(now()) @db.Timestamptz(6)
+  actualizado_en                 DateTime             @updatedAt @db.Timestamptz(6)
+  orden_venta                    crm_ordenes_venta?   @relation(fields: [orden_venta_id], references: [id], onDelete: Restrict, map: "fk_manifiestos_orden_venta")
+  operador                       personas?            @relation("manifiesto_operador", fields: [operador_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_operador")
+  firmado_por                    personas?            @relation("manifiesto_firmado_por", fields: [firmado_por_persona_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_firmado_por")
+  resguardado_por                personas?            @relation("manifiesto_resguardado_por", fields: [resguardado_por_persona_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_resguardado_por")
+  eventos                        manifiesto_eventos[]
+
+  @@index([estado, actualizado_en], map: "idx_manifiestos_estado_actualizado")
+  @@index([orden_venta_id, estado], map: "idx_manifiestos_orden_estado")
+  @@index([operador_id], map: "idx_manifiestos_operador")
+}
+
+/// Bitácora append-only de movimientos y decisiones por área.
+model manifiesto_eventos {
+  id               Int         @id @default(autoincrement())
+  manifiesto_id    Int
+  estado_anterior  String?     @db.VarChar(30)
+  estado_nuevo     String      @db.VarChar(30)
+  accion           String      @db.VarChar(50)
+  actor_persona_id Int?
+  actor_usuario    String      @db.VarChar(100)
+  datos            Json?       @db.JsonB
+  creado_en        DateTime    @default(now()) @db.Timestamptz(6)
+  manifiesto       manifiestos @relation(fields: [manifiesto_id], references: [id], onDelete: Cascade, map: "fk_manifiesto_eventos_manifest")
+  actor            personas?   @relation("manifiesto_evento_actor", fields: [actor_persona_id], references: [id_Persona], onDelete: SetNull, map: "fk_manifiesto_eventos_actor")
+
+  @@index([manifiesto_id, creado_en], map: "idx_manifiesto_eventos_manifest_fecha")
+  @@index([actor_persona_id, creado_en], map: "idx_manifiesto_eventos_actor_fecha")
 }
 
 model id_ejecuciones {

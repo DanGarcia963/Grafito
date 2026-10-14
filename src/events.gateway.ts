@@ -16,6 +16,7 @@ export class EventsGateway implements OnGatewayConnection {
   }catch{client.disconnect(true);}
  }
  notificar(evento:string,data:unknown){
+  if (evento.startsWith('MANIFIESTO_')) { this.server?.to(['seguridad','logistica','almacen','contaduria']).emit(evento,data); return; }
   if (evento.startsWith('CRM_')) { this.server?.to('ventas').emit(evento, data); return; }
   if (evento.startsWith('COSTOS_')) { this.server?.to('costos').emit(evento, data); return; }
   if (evento.startsWith('TRAMITE_')) { this.server?.to('seguridad').emit(evento, data); return; }
