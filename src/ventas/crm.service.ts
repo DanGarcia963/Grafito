@@ -947,6 +947,31 @@ export class CrmService {
           creado_por: u.usuario,
         },
       });
+      const cliente = await tx.personas.findUniqueOrThrow({
+        where: { id_Persona: orden.persona_id },
+        select: { nombre: true },
+      });
+      const manifiesto = await tx.manifiestos.create({
+        data: {
+          orden_venta_id: orden.id,
+          estado: 'PEDIDO',
+          es_gkn: false,
+          razon_social_generadora: cliente.nombre,
+          numero_compra: orden.orden_cliente,
+          ...(orden.unidad === 'Kilogramos' ? { peso_pedido: orden.cantidad } : {}),
+          creado_por: u.usuario,
+        },
+      });
+      await tx.manifiesto_eventos.create({
+        data: {
+          manifiesto_id: manifiesto.id,
+          estado_nuevo: 'PEDIDO',
+          accion: 'CREADO_DESDE_ORDEN_VENTA',
+          actor_persona_id: u.personaId,
+          actor_usuario: u.usuario,
+          datos: { orden_venta_id: orden.id, folio_orden: orden.folio },
+        },
+      });
       await tx.crm_perfiles_comerciales.upsert({
         where: { persona_id: o.persona_id },
         create: {
@@ -975,6 +1000,7 @@ export class CrmService {
       return orden;
     });
     this.avisar(id);
+    this.eventos.notificar('MANIFIESTO_ACTUALIZADO', { ordenVentaId: data.id });
     return { success: true, data };
   }
   private async clasificarCompras<

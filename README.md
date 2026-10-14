@@ -124,3 +124,15 @@ Antes de desplegar el backend:
 3. Opcionalmente configura `MAILJET_SEND_NAME`, `MATRIZ_LEGAL_ALERT_EMAIL` y `MATRIZ_LEGAL_URL`. El destino predeterminado es `coordinadorshyma@ust.com.mx`; la URL predeterminada es `https://siust.netlify.app/matriz`.
 
 El historial guarda el trámite, la fecha de vencimiento observada, el hito, el destinatario, el estado y los reintentos. La tabla tiene RLS habilitado sin políticas de acceso desde la API Data; el servicio del backend la consulta mediante Prisma.
+
+## Manifiestos
+
+Las órdenes de venta vigentes generan automáticamente una tarjeta en **Pedido**. SHyMA también puede registrar manifiestos GKN sin OV. El avance está restringido al área de cada etapa: Logística, Almacén, SHyMA (acceso `seguridad`) y Contaduría.
+
+Antes de desplegar:
+
+1. Ejecuta una sola vez `prisma/actualizaciones/20261015_manifiestos.sql` en el SQL Editor de Supabase. La migración crea las tablas con RLS activado, niega acceso de la Data API y genera tarjetas `PEDIDO` para las OVs vigentes existentes.
+2. En Railway, configura `UST_USUARIOS_JSON` con `logistica`, `almacen` y `contaduria` en las cuentas correspondientes. SHyMA conserva `seguridad`.
+3. Despliega backend y frontend; el frontend no requiere una key nueva. El backend continúa conectándose con sus credenciales privadas de PostgreSQL.
+
+El peso de una OV en kilogramos se compara con el pesaje real usando tolerancia inclusiva de ±500 kg. Si excede ese rango, el peso queda guardado y la tarjeta permanece en **Pesaje**. Para cerrar **Resguardo**, SHyMA adjunta el PDF final.
