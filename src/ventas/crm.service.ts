@@ -20,6 +20,7 @@ import {
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
 import { Usuario } from '../auth/auth.service';
+import { escaparHtmlCorreo, MailjetService } from '../correo/mailjet.service';
 import { texto, idValido, fichaValida } from '../investigacion/id.logic';
 import {
   abierta,
@@ -48,6 +49,7 @@ export class CrmService {
   constructor(
     private prisma: PrismaService,
     private eventos: EventsGateway,
+    private correo: MailjetService,
   ) {}
   private avisar(id?: number) {
     this.eventos.notificar('CRM_OPORTUNIDAD_ACTUALIZADA', {
@@ -872,6 +874,125 @@ export class CrmService {
     this.avisar(id);
     return { success: true };
   }
+
+  async enviarCotizacion(id: number, cid: number, b: any, u: Usuario) {
+    const resultado = await this.prisma.$transaction(
+      async (tx) => {
+        const oportunidad = await bloquearOportunidad(tx, id, u);
+        versionValida(oportunidad, b.version);
+        await this.habilitada(tx, oportunidad);
+        const cotizacion = await tx.crm_cotizaciones.findFirst({
+          where: { id: cid, oportunidad_id: id },
+          include: { producto: { select: { nombre_Producto: true } } },
+        });
+        if (!cotizacion) throw new NotFoundException('Cotización no encontrada.');
+        if (!['BORRADOR', 'ENVIADA'].includes(cotizacion.estado))
+          throw new ConflictException('Solo se puede enviar o reenviar por correo una cotización vigente.');
+        const reenvio = cotizacion.estado === 'ENVIADA';
+        if (
+          cotizacion.vigencia_hasta &&
+          cotizacion.vigencia_hasta.toISOString().slice(0, 10) <
+            new Date().toISOString().slice(0, 10)
+        )
+          throw new BadRequestException('La cotización venció; crea una nueva versión.');
+
+        const perfil = await tx.crm_perfiles_comerciales.findUnique({
+          where: { persona_id: oportunidad.persona_id },
+          select: { correo: true, nombre_contacto: true },
+        });
+        const destinatario = perfil?.correo?.trim();
+        if (!destinatario)
+          throw new BadRequestException('El cliente no tiene correo registrado en su perfil comercial.');
+
+        const producto = cotizacion.producto.nombre_Producto;
+        const vigencia = cotizacion.vigencia_hasta.toISOString().slice(0, 10);
+        const precio = `${cotizacion.moneda} ${cotizacion.total.toFixed(2)}`;
+        const cantidad = `${cotizacion.cantidad.toString()} ${cotizacion.unidad}`;
+        const condiciones = cotizacion.condiciones_comerciales;
+        const contacto = perfil?.nombre_contacto?.trim() || 'cliente';
+        const html = `
+          <div style="margin:0;background:#f1f5f9;padding:32px 12px;font-family:Arial,sans-serif;color:#0f172a">
+            <div style="max-width:640px;margin:0 auto;overflow:hidden;border:1px solid #dbe4ee;border-radius:16px;background:#fff">
+              <div style="background:#082f49;padding:24px 28px;color:#ecfeff">
+                <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#67e8f9">US Technologies · Ventas</div>
+                <h1 style="margin:8px 0 0;font-size:24px">Cotización ${escaparHtmlCorreo(cotizacion.folio)}</h1>
+              </div>
+              <div style="padding:28px">
+                <p>Hola ${escaparHtmlCorreo(contacto)},</p>
+                <p>Te compartimos la cotización preparada para tu solicitud.</p>
+                <table style="width:100%;border-collapse:collapse;margin:20px 0">
+                  <tr><td style="padding:10px;border-bottom:1px solid #e2e8f0;color:#64748b">Producto</td><td style="padding:10px;border-bottom:1px solid #e2e8f0;font-weight:700">${escaparHtmlCorreo(producto)}</td></tr>
+                  <tr><td style="padding:10px;border-bottom:1px solid #e2e8f0;color:#64748b">Servicio</td><td style="padding:10px;border-bottom:1px solid #e2e8f0">${escaparHtmlCorreo(cotizacion.servicio)}</td></tr>
+                  <tr><td style="padding:10px;border-bottom:1px solid #e2e8f0;color:#64748b">Cantidad</td><td style="padding:10px;border-bottom:1px solid #e2e8f0">${escaparHtmlCorreo(cantidad)}</td></tr>
+                  <tr><td style="padding:10px;border-bottom:1px solid #e2e8f0;color:#64748b">Importe total</td><td style="padding:10px;border-bottom:1px solid #e2e8f0;font-weight:700">${escaparHtmlCorreo(precio)}</td></tr>
+                  <tr><td style="padding:10px;color:#64748b">Vigencia</td><td style="padding:10px">${escaparHtmlCorreo(vigencia)}</td></tr>
+                </table>
+                <h2 style="margin:22px 0 8px;font-size:15px">Condiciones comerciales</h2>
+                <div style="white-space:pre-line;border-radius:10px;background:#f8fafc;padding:14px;font-size:13px;line-height:1.6">${escaparHtmlCorreo(condiciones)}</div>
+                ${cotizacion.nombre_archivo ? '<p style="font-size:13px;color:#475569">El documento PDF de la cotización se adjunta a este correo.</p>' : '<p style="font-size:13px;color:#475569">Esta cotización se incluye en el cuerpo del correo; no tiene un archivo adjunto.</p>'}
+                <p style="margin-top:22px;font-size:13px;color:#475569">Responde a este correo o contacta a tu vendedor para confirmar o comentar la propuesta.</p>
+              </div>
+              <div style="border-top:1px solid #e2e8f0;padding:16px 28px;color:#64748b;font-size:11px">US Technologies · Seguimiento de oportunidades</div>
+            </div>
+          </div>`;
+        const texto = [
+          `Hola ${contacto},`,
+          '',
+          `Cotización ${cotizacion.folio}`,
+          `Producto: ${producto}`,
+          `Servicio: ${cotizacion.servicio}`,
+          `Cantidad: ${cantidad}`,
+          `Importe total: ${precio}`,
+          `Vigencia: ${vigencia}`,
+          '',
+          'Condiciones comerciales:',
+          condiciones,
+          '',
+          cotizacion.nombre_archivo
+            ? 'El documento de la cotización se adjunta a este correo.'
+            : 'La cotización no tiene un archivo adjunto.',
+          'Responde a este correo o contacta a tu vendedor para confirmar o comentar la propuesta.',
+        ].join('\n');
+
+        await this.correo.enviar({
+          destinatario,
+          asunto: `Cotización ${cotizacion.folio} · US Technologies`,
+          texto,
+          html,
+          ...(cotizacion.contenido && cotizacion.nombre_archivo
+            ? {
+                adjuntos: [{
+                  nombre: cotizacion.nombre_archivo,
+                  mime: cotizacion.tipo_mime ?? 'application/pdf',
+                  contenido: cotizacion.contenido,
+                }],
+              }
+            : {}),
+        });
+
+        await tx.crm_cotizaciones.update({
+          where: { id: cotizacion.id },
+          data: { estado: 'ENVIADA', enviado_en: new Date() },
+        });
+        await eventoCrm(
+          tx,
+          oportunidad,
+          u,
+          'COTIZACION_ENVIADA',
+          `Cotización ${cotizacion.folio} ${reenvio ? 'reenviada' : 'enviada'} por correo a ${destinatario}`,
+          { etapa: 'SEGUIMIENTO_COTIZACION' },
+        );
+        return { destinatario, folio: cotizacion.folio, reenvio };
+      },
+      { maxWait: 5_000, timeout: 30_000 },
+    );
+    this.avisar(id);
+    return {
+      success: true,
+      destinatario: resultado.destinatario,
+      mensaje: `Cotización ${resultado.folio} ${resultado.reenvio ? 'reenviada' : 'enviada'} manualmente a ${resultado.destinatario}.`,
+    };
+  }
   async confirmar(id: number, b: any, u: Usuario) {
     const data = await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
@@ -954,6 +1075,7 @@ export class CrmService {
       const manifiesto = await tx.manifiestos.create({
         data: {
           orden_venta_id: orden.id,
+          cliente_id: orden.persona_id,
           estado: 'PEDIDO',
           es_gkn: false,
           razon_social_generadora: cliente.nombre,
