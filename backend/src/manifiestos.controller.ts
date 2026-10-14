@@ -13,8 +13,9 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { AuthGuard, Areas } from './auth/auth.guard';
 import { ManifiestosService } from './manifiestos.service';
@@ -27,6 +28,20 @@ const pdf = (field: string) => FileInterceptor(field, {
     callback(null, true);
   },
 });
+const pdfs = () => FileFieldsInterceptor(
+  [
+    { name: 'documento_manifiesto', maxCount: 1 },
+    { name: 'documento_llegada', maxCount: 1 },
+  ],
+  {
+    limits: { fileSize: 10 * 1024 * 1024, files: 2 },
+    fileFilter: (_request, file, callback) => {
+      if (file.mimetype !== 'application/pdf')
+        return callback(new BadRequestException('Solo se permiten archivos PDF.'), false);
+      callback(null, true);
+    },
+  },
+);
 
 @UseGuards(AuthGuard)
 @Areas('seguridad', 'logistica', 'almacen', 'contaduria')
@@ -36,19 +51,30 @@ export class ManifiestosController {
 
   @Get()
   @Header('Cache-Control', 'private, no-store')
-  listar() {
-    return this.service.listar();
+  listar(@Req() request: any) {
+    return this.service.listar(request.usuario);
   }
 
   @Get('catalogos')
-  catalogos() {
-    return this.service.catalogos();
+  catalogos(@Req() request: any) {
+    return this.service.catalogos(request.usuario);
   }
 
   @Post()
   @Areas('seguridad')
   crear(@Body() body: Record<string, unknown>, @Req() request: any) {
     return this.service.crear(body, request.usuario);
+  }
+
+  @Post('completo')
+  @Areas('seguridad')
+  @UseInterceptors(pdfs())
+  crearCompleto(
+    @Body() body: Record<string, unknown>,
+    @UploadedFiles() files: { documento_manifiesto?: Express.Multer.File[]; documento_llegada?: Express.Multer.File[] },
+    @Req() request: any,
+  ) {
+    return this.service.crearCompleto(body, files ?? {}, request.usuario);
   }
 
   @Post(':id/asignar')
@@ -114,6 +140,12 @@ export class ManifiestosController {
     @Req() request: any,
   ) {
     return this.service.resguardar(id, file, request.usuario);
+  }
+
+  @Post(':id/enviar-correo')
+  @Areas('seguridad')
+  enviarCorreo(@Param('id', ParseIntPipe) id: number, @Req() request: any) {
+    return this.service.enviarCorreo(id, request.usuario);
   }
 
   @Get(':id/documento/:tipo')

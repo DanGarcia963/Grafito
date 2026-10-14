@@ -109,6 +109,14 @@ export class CrmController {
   ) {
     return this.crm.estadoCotizacion(id, cid, b, r.usuario);
   }
+  @Post('oportunidades/:id/cotizaciones/:cid/enviar') enviarCotizacion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Req() r: any,
+    @Body() b: any,
+  ) {
+    return this.crm.enviarCotizacion(id, cid, b, r.usuario);
+  }
   @Post('oportunidades/:id/confirmar') confirmar(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,

@@ -82,7 +82,8 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
   factory.connect = async () => wrap(await connect());
   const p = new PrismaClient({ adapter: factory });
   const ev = { notificar: () => {} };
-  const crm = new CrmService(p, ev),
+  const correo = { enviar: async () => {} };
+  const crm = new CrmService(p, ev, correo),
     id = new InvestigacionService(p, ev, new TrazabilidadService(p));
   try {
     await p.personas.createMany({
@@ -163,6 +164,33 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
         pdf,
         lab,
       );
+    const objetivo = async (oid) => {
+      const reporteViable = await p.id_reportes_oportunidad.findFirstOrThrow({
+        where: { oportunidad_id: oid, estado: 'PUBLICADO', resultado: 'VIABLE' },
+        orderBy: { version: 'desc' },
+      });
+      const previa = await p.crm_costos_oportunidad.findFirst({
+        where: { oportunidad_id: oid },
+        orderBy: { version: 'desc' },
+      });
+      const formulaCostos = await p.crm_costos_oportunidad.create({
+        data: {
+          oportunidad_id: oid,
+          reporte_id: reporteViable.id,
+          version: (previa?.version ?? 0) + 1,
+          formula: 'Fórmula de prueba',
+          formula_enviada_por: 'ID',
+        },
+      });
+      await p.crm_costos_oportunidad.update({
+        where: { id: formulaCostos.id },
+        data: {
+          precio_objetivo_litro: '10',
+          precio_emitido_por: 'Costos',
+          precio_emitido_en: new Date(),
+        },
+      });
+    };
     const quote = async (oid) =>
       (
         await crm.cotizar(
@@ -231,6 +259,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     await finish(m2);
     await report(o.id);
     assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'COTIZACION');
+    await objetivo(o.id);
     const c1 = await quote(o.id),
       c2 = await quote(o.id);
     assert.equal(c2.version, 2);
@@ -575,6 +604,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       m3 = await sample(o2.id);
     await finish(m3);
     await report(o2.id);
+    await objetivo(o2.id);
     const c3 = await quote(o2.id);
     await accept(o2.id, c3.id);
     const venta2 = (
@@ -614,6 +644,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       m4 = await sample(o3.id);
     await finish(m4);
     await report(o3.id);
+    await objetivo(o3.id);
     await quote(o3.id);
     await id.planificar(m4, { procesos: [proc.id], nuevoCiclo: true }, lab);
     assert.equal(
@@ -681,6 +712,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     );
     await id.finalizar(m4, { dictamen: 'APROBADO' }, lab);
     await report(o3.id);
+    await objetivo(o3.id);
     assert.equal((await crm.detalle(o3.id, seller)).data.etapa, 'PERDIDA');
     await assert.rejects(quote(o3.id), (e) => e.status === 409);
     await id.planificar(m4, { procesos: [proc.id], nuevoCiclo: true }, lab);
