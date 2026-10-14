@@ -428,6 +428,7 @@ model personas {
   crm_ordenes_venta_cliente                                              crm_ordenes_venta[]        @relation("crm_orden_venta_cliente")
   crm_ordenes_venta_vendedor                                             crm_ordenes_venta[]        @relation("crm_orden_venta_vendedor")
   manifiestos_como_operador                                               manifiestos[]              @relation("manifiesto_operador")
+  manifiestos_como_cliente                                               manifiestos[]              @relation("manifiesto_cliente")
   manifiestos_firmados                                                    manifiestos[]              @relation("manifiesto_firmado_por")
   manifiestos_resguardados                                                manifiestos[]              @relation("manifiesto_resguardado_por")
   manifiesto_eventos                                                      manifiesto_eventos[]       @relation("manifiesto_evento_actor")
@@ -1029,6 +1030,7 @@ model manifiestos {
   fecha_Expedicion               DateTime?            @db.Date
   estado                         String               @default("PEDIDO") @db.VarChar(30)
   orden_venta_id                 Int?
+  cliente_id                     Int?
   operador_id                    Int?
   es_gkn                         Boolean              @default(false)
   razon_social_generadora        String?              @db.VarChar(200)
@@ -1060,6 +1062,7 @@ model manifiestos {
   creado_en                      DateTime             @default(now()) @db.Timestamptz(6)
   actualizado_en                 DateTime             @updatedAt @db.Timestamptz(6)
   orden_venta                    crm_ordenes_venta?   @relation(fields: [orden_venta_id], references: [id], onDelete: Restrict, map: "fk_manifiestos_orden_venta")
+  cliente                        personas?            @relation("manifiesto_cliente", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_cliente")
   operador                       personas?            @relation("manifiesto_operador", fields: [operador_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_operador")
   firmado_por                    personas?            @relation("manifiesto_firmado_por", fields: [firmado_por_persona_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_firmado_por")
   resguardado_por                personas?            @relation("manifiesto_resguardado_por", fields: [resguardado_por_persona_id], references: [id_Persona], onDelete: Restrict, map: "fk_manifiestos_resguardado_por")
@@ -1067,6 +1070,7 @@ model manifiestos {
 
   @@index([estado, actualizado_en], map: "idx_manifiestos_estado_actualizado")
   @@index([orden_venta_id, estado], map: "idx_manifiestos_orden_estado")
+  @@index([cliente_id], map: "idx_manifiestos_cliente")
   @@index([operador_id], map: "idx_manifiestos_operador")
 }
 
