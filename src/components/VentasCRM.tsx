@@ -1104,6 +1104,28 @@ export default function VentasCRM() {
                 )}
                 {abierta && ["BORRADOR", "ENVIADA"].includes(c.estado) && (
                   <button
+                    className={s.primary}
+                    disabled={busy}
+                    onClick={() =>
+                      void ejecutar(
+                        () =>
+                          pedir(
+                            `${base}/oportunidades/${detalle.id}/cotizaciones/${c.id}/enviar`,
+                            { version: detalle.version },
+                          ),
+                        c.estado === "BORRADOR"
+                          ? "Cotización enviada al correo registrado del cliente"
+                          : "Cotización reenviada al correo registrado del cliente",
+                      )
+                    }
+                  >
+                    {c.estado === "BORRADOR"
+                      ? "Enviar cotización por correo"
+                      : "Reenviar cotización por correo"}
+                  </button>
+                )}
+                {abierta && ["BORRADOR", "ENVIADA"].includes(c.estado) && (
+                  <button
                     onClick={() => {
                       setCot(c);
                       setForm("estadoCotizacion");
