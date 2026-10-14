@@ -770,11 +770,33 @@ model tramites_legales {
   id_Tramite_Catalogo Int
   costo_Vigencia      Decimal                          @db.Decimal(12, 4)
   costo_Por_Anio      Decimal                          @db.Decimal(12, 4)
+  alertas_vencimiento tramites_alertas_vencimiento[]
   catalogo_tramites   catalogo_tramites                @relation(fields: [id_Tramite_Catalogo], references: [id_Tramite_Catalogo], onUpdate: Restrict, map: "fk_tramite_catalogo")
   documentos_legales  documentos_legales               @relation(fields: [documento_ID], references: [id_Documento], onUpdate: Restrict, map: "fk_tramite_documento")
 
   @@index([id_Tramite_Catalogo], map: "idx_fk_tramite_catalogo")
   @@index([documento_ID], map: "idx_fk_tramite_documento")
+  @@index([fecha_Vencimiento], map: "idx_tramites_legal_fecha_vencimiento")
+}
+
+model tramites_alertas_vencimiento {
+  id                 Int            @id @default(autoincrement())
+  tramite_id         Int
+  fecha_vencimiento  DateTime       @db.Date
+  meses_anticipacion Int
+  destinatario       String         @db.VarChar(255)
+  estado             String         @default("PENDIENTE") @db.VarChar(16)
+  intentos           Int            @default(0)
+  creado_en          DateTime       @default(now()) @db.Timestamptz(6)
+  enviado_en         DateTime?      @db.Timestamptz(6)
+  siguiente_intento_en DateTime?    @db.Timestamptz(6)
+  bloqueado_hasta    DateTime?      @db.Timestamptz(6)
+  ultimo_error       String?        @db.VarChar(1000)
+  tramite            tramites_legales @relation(fields: [tramite_id], references: [id_Tramite_Legal], onDelete: Cascade, onUpdate: Cascade, map: "fk_alerta_vencimiento_tramite")
+
+  @@unique([tramite_id, fecha_vencimiento, meses_anticipacion], map: "uq_alerta_tramite_vencimiento_hito")
+  @@index([estado, siguiente_intento_en, bloqueado_hasta], map: "idx_alerta_vencimiento_pendientes")
+  @@index([tramite_id, creado_en], map: "idx_alerta_vencimiento_tramite")
 }
 
 model crm_perfiles_comerciales {
