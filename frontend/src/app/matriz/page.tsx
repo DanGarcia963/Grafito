@@ -1460,14 +1460,19 @@ export default function MatrizLegalPage() {
           </p>
         </div>
 
-        <button
-          onClick={
-            abrirNuevoTramite
-          }
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
-        >
-          + Registrar Nuevo Trámite
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <a href="/manifiestos" className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-50">
+            Manifiestos
+          </a>
+          <button
+            onClick={
+              abrirNuevoTramite
+            }
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
+          >
+            + Registrar Nuevo Trámite
+          </button>
+        </div>
 
       </div>
 
