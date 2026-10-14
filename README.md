@@ -112,3 +112,15 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Alertas de vencimiento de la Matriz Legal
+
+El backend revisa los trámites cada 15 minutos y al iniciar. Para cada fecha de vencimiento, crea como máximo un aviso por hito: 6, 4, 2 y 1 mes antes. Los hitos atrasados se recuperan si Railway estuvo detenido; los avisos fallidos se reintentan y quedan registrados.
+
+Antes de desplegar el backend:
+
+1. Ejecuta una vez `prisma/actualizaciones/20261014_matriz_legal_alertas_vencimiento.sql` en el SQL Editor del proyecto Supabase.
+2. Configura en Railway `MAILJET_API_KEY`, `MAILJET_API_SECRET` y `MAILJET_SENDER`. El remitente debe estar validado en Mailjet.
+3. Opcionalmente configura `MAILJET_SEND_NAME`, `MATRIZ_LEGAL_ALERT_EMAIL` y `MATRIZ_LEGAL_URL`. El destino predeterminado es `coordinadorshyma@ust.com.mx`; la URL predeterminada es `https://siust.netlify.app/matriz`.
+
+El historial guarda el trámite, la fecha de vencimiento observada, el hito, el destinatario, el estado y los reintentos. La tabla tiene RLS habilitado sin políticas de acceso desde la API Data; el servicio del backend la consulta mediante Prisma.
