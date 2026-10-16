@@ -279,12 +279,7 @@ export class ProductionService {
                 new Prisma.Decimal(0),
               unidad: ov.unidad,
             };
-          })
-          .filter(
-            (ov) =>
-              (cantidadDisponible.gt(0) && ov.cantidad_pendiente.gt(0)) ||
-              ov.cantidad_asignada_desde_esta_op.gt(0),
-          );
+          });
 
         return {
           id_Orden_Produc: op.id_Orden_Produc,
