@@ -709,13 +709,19 @@ export default function TanquesPage() {
                         Number(op.cantidad_producto_terminado_disponible ?? 0) + actual,
                         Number(ov.cantidad_pendiente ?? 0) + actual,
                       );
+                      const puedeAumentar = maximo > actual;
                       return (
                         <div key={ov.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 p-3">
                           <div>
                             <strong>OV {ov.folio} · {ov.cliente}</strong>
                             <p className="text-sm text-slate-400">Pedido {cantidad(ov.cantidad)} {ov.unidad} · Aporte de esta OP: {cantidad(actual)} {ov.unidad} · Pendiente global de la OV: {cantidad(ov.cantidad_pendiente)} {ov.unidad}</p>
+                            {!puedeAumentar && actual === 0 && (
+                              <p className="text-sm text-amber-300">
+                                Relación visible; no hay producto disponible para asignar desde esta OP.
+                              </p>
+                            )}
                           </div>
-                          <button className={boton} onClick={() => setForm({ tipo: "asignar-producto", dato: { op, venta: ov } })}>
+                          <button disabled={!puedeAumentar && actual === 0} title={!puedeAumentar && actual === 0 ? "No hay producto terminado disponible para asignar" : undefined} className={boton} onClick={() => setForm({ tipo: "asignar-producto", dato: { op, venta: ov } })}>
                             {actual > 0 ? "Ajustar aporte" : "Asignar producto"}
                           </button>
                         </div>
