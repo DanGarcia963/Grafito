@@ -26,6 +26,11 @@ export class ProductionController {
   @Areas('produccion') @Get('existencias') stock() {
     return this.productionService.stock();
   }
+  @Areas('produccion')
+  @Get('ordenes-venta-disponibles')
+  ordenesVentaDisponibles() {
+    return this.productionService.ordenesVentaDisponibles();
+  }
   @Areas('produccion') @Post('ordenes') crearOrden(
     @Body() b: any,
     @Req() r: any,

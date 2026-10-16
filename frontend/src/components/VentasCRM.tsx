@@ -86,7 +86,6 @@ type LoteProduccionVista = {
 type OrdenProduccionVista = {
   id_Orden_Produc: number;
   no_Orden_Produc: string;
-  orden_venta_id: number | null;
   producto_id: number;
   tipo_Operacion: string;
   linea_Produccion: string | null;

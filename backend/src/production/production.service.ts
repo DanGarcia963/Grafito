@@ -46,8 +46,12 @@ export class ProductionService {
         propietario: { select: { nombre: true } },
         productos_materiales: true,
         responsable: { select: { nombre: true } },
-        crm_ordenes_venta: {
-          include: { cliente: { select: { nombre: true } } },
+        ventas_asignadas: {
+          include: {
+            orden_venta: {
+              include: { cliente: { select: { nombre: true } } },
+            },
+          },
         },
         reservas_material: {
           include: {
@@ -64,11 +68,14 @@ export class ProductionService {
           orderBy: { id_Lote_Produccion: 'asc' },
         },
       },
-      orderBy: [
-  { orden_venta_id: { sort: 'desc', nulls: 'last' } },
-  { creado_en: 'desc' },
-],
+      orderBy: { creado_en: 'desc' },
     });
+    const ordenesOrdenadas = [...result].sort(
+      (a, b) =>
+        Number(b.ventas_asignadas.length > 0) -
+          Number(a.ventas_asignadas.length > 0) ||
+        b.creado_en.getTime() - a.creado_en.getTime(),
+    );
     const ids = result.flatMap((o) =>
       o.lotes_produccion.map((l) => l.id_Lote_Produccion),
     );
@@ -79,7 +86,7 @@ export class ProductionService {
     });
     return {
       success: true,
-      result: result.map((o) => ({
+      result: ordenesOrdenadas.map((o) => ({
         ...o,
         reservas_material: o.reservas_material.map((r) => ({
           ...r,
@@ -120,6 +127,25 @@ export class ProductionService {
       })),
       bitacora,
     };
+  }
+
+  async ordenesVentaDisponibles() {
+    const data = await this.prisma.crm_ordenes_venta.findMany({
+      where: { estado: 'CONFIRMADA' },
+      select: {
+        id: true,
+        folio: true,
+        persona_id: true,
+        producto_id: true,
+        cantidad: true,
+        unidad: true,
+        tipo_venta: true,
+        cliente: { select: { nombre: true } },
+        producto: { select: { nombre_Producto: true } },
+      },
+      orderBy: { fecha_confirmacion: 'desc' },
+    });
+    return { success: true, data };
   }
 
   async tanquesAreaProduccion(tipo: string) {
@@ -392,7 +418,16 @@ export class ProductionService {
         where: { tanque_id: id },
         include: {
           ordenes_produccion: {
-            include: { crm_ordenes_venta: true, productos_materiales: true },
+            include: {
+              ventas_asignadas: {
+                include: {
+                  orden_venta: {
+                    select: { persona_id: true, tipo_venta: true },
+                  },
+                },
+              },
+              productos_materiales: true,
+            },
           },
         },
       });
@@ -451,7 +486,9 @@ export class ProductionService {
           if (
             productosEntrada.length > 1 ||
             (productoOrden != null &&
-              productosEntrada.some((productoId) => productoId !== productoOrden))
+              productosEntrada.some(
+                (productoId) => productoId !== productoOrden,
+              ))
           )
             throw new BadRequestException(
               'Los materiales consumidos no coinciden en producto con el LP/OP',
@@ -474,9 +511,16 @@ export class ProductionService {
             throw new BadRequestException(
               'El LP contiene materiales de distintos clientes',
             );
+          const clientesVenta = [
+            ...new Set(
+              (lote.ordenes_produccion?.ventas_asignadas ?? []).map(
+                (asignacion) => asignacion.orden_venta.persona_id,
+              ),
+            ),
+          ];
           const clienteId =
-            lote.ordenes_produccion?.crm_ordenes_venta?.persona_id ??
             lote.ordenes_produccion?.propietario_id ??
+            (clientesVenta.length === 1 ? clientesVenta[0] : null) ??
             propietariosEntrada[0] ??
             null;
           if (
@@ -549,7 +593,9 @@ export class ProductionService {
       const previo = await tx.lotes_inventario.findUnique({ where: { folio } });
       if (previo) {
         if (previo.origen !== 'APERTURA')
-          throw new ConflictException('El folio ya pertenece a otro movimiento');
+          throw new ConflictException(
+            'El folio ya pertenece a otro movimiento',
+          );
         return previo;
       }
       const producto = await tx.productos_materiales.findUnique({
@@ -564,16 +610,28 @@ export class ProductionService {
       if (propiedad === 'DE_CLIENTE' && !propietarioId)
         throw new BadRequestException('Selecciona el propietario del material');
       if (propiedad === 'PROPIO' && b.propietario_id)
-        throw new BadRequestException('El inventario propio no lleva cliente propietario');
+        throw new BadRequestException(
+          'El inventario propio no lleva cliente propietario',
+        );
       const condicion = b.condicion;
       const condiciones = [
-        'NUEVO', 'SUCIO', 'REZAGADO', 'FUERA_DE_ESPECIFICACION',
-        'INTERMEDIO', 'REGENERADO', 'TERMINADO', 'INSUMO',
+        'NUEVO',
+        'SUCIO',
+        'REZAGADO',
+        'FUERA_DE_ESPECIFICACION',
+        'INTERMEDIO',
+        'REGENERADO',
+        'TERMINADO',
+        'INSUMO',
       ];
       if (!condiciones.includes(condicion))
         throw new BadRequestException('Condición de apertura inválida');
       const estadoCalidad = b.estado_calidad_recepcion;
-      if (!['CUARENTENA', 'LIBERADO', 'BLOQUEADO', 'RECHAZADO'].includes(estadoCalidad))
+      if (
+        !['CUARENTENA', 'LIBERADO', 'BLOQUEADO', 'RECHAZADO'].includes(
+          estadoCalidad,
+        )
+      )
         throw new BadRequestException('Estado de Calidad inválido');
       if (
         condicion === 'FUERA_DE_ESPECIFICACION'
@@ -598,7 +656,9 @@ export class ProductionService {
       );
       const observaciones = texto(b.observaciones, 4000);
       if (!observaciones)
-        throw new BadRequestException('Describe el origen o corte del inventario inicial');
+        throw new BadRequestException(
+          'Describe el origen o corte del inventario inicial',
+        );
       const lote = await tx.lotes_inventario.create({
         data: {
           folio,
@@ -732,14 +792,22 @@ export class ProductionService {
         tx.ordenes_produccion.findUnique({ where: { id_Orden_Produc: opId } }),
       ]);
       if (!lote || !op) throw new NotFoundException('Lote u OP no encontrado');
-      if (lote.estado !== 'PENDIENTE' || lote.tanque_id ||
-          lote.movimientos.length || lote.muestras.length)
-        throw new ConflictException('Solo se puede asignar una OP a un lote pendiente aún no iniciado');
+      if (
+        lote.estado !== 'PENDIENTE' ||
+        lote.tanque_id ||
+        lote.movimientos.length ||
+        lote.muestras.length
+      )
+        throw new ConflictException(
+          'Solo se puede asignar una OP a un lote pendiente aún no iniciado',
+        );
       if (lote.orden_Produccion_id === opId) return lote;
       if (lote.orden_Produccion_id)
         throw new ConflictException('El lote ya pertenece a otra OP');
-      if (op.linea_Produccion?.toUpperCase() !== 'GRAFITO' ||
-          !['PLANIFICADA', 'EN_PROCESO'].includes(op.estado_Plan))
+      if (
+        op.linea_Produccion?.toUpperCase() !== 'GRAFITO' ||
+        !['PLANIFICADA', 'EN_PROCESO'].includes(op.estado_Plan)
+      )
         throw new BadRequestException('La OP no está disponible para Grafito');
       const actualizado = await tx.lotes_produccion.update({
         where: { id_Lote_Produccion: id },
@@ -752,7 +820,10 @@ export class ProductionService {
           ciclo: 1,
           fecha: new Date(),
           accion: 'VINCULAR_OP',
-          detalle: JSON.stringify({ orden_produccion_id: opId, realizado_por: u.usuario }),
+          detalle: JSON.stringify({
+            orden_produccion_id: opId,
+            realizado_por: u.usuario,
+          }),
         },
       });
       return actualizado;
@@ -782,10 +853,14 @@ export class ProductionService {
       });
       if (existente) {
         if (existente.orden_Produccion_id !== opId)
-          throw new BadRequestException('Folio ocupado o lote pendiente sin vincular a esta OP');
+          throw new BadRequestException(
+            'Folio ocupado o lote pendiente sin vincular a esta OP',
+          );
         if (existente.estado !== 'PENDIENTE') return existente;
         if (existente.tanque_id)
-          throw new ConflictException('El lote pendiente ya está asignado a un tanque');
+          throw new ConflictException(
+            'El lote pendiente ya está asignado a un tanque',
+          );
       }
       const tanque = await tx.equipos_tanques.findUnique({
         where: { id_Equipos_Tanques: tanqueId },
@@ -946,7 +1021,16 @@ export class ProductionService {
         where: { id_Lote_Produccion: id },
         include: {
           ordenes_produccion: {
-            include: { crm_ordenes_venta: true, productos_materiales: true },
+            include: {
+              ventas_asignadas: {
+                include: {
+                  orden_venta: {
+                    select: { persona_id: true, tipo_venta: true },
+                  },
+                },
+              },
+              productos_materiales: true,
+            },
           },
         },
       });
@@ -971,7 +1055,10 @@ export class ProductionService {
           'La orden de producción asociada al lote no está disponible',
         );
       }
-      const ov = op.crm_ordenes_venta;
+      const ov = op.ventas_asignadas.find(
+        (asignacion) =>
+          asignacion.orden_venta.tipo_venta === 'SERVICIO_REGENERACION',
+      )?.orden_venta;
       const cliente =
         op.propietario_id ??
         (ov?.tipo_venta === 'SERVICIO_REGENERACION' ? ov.persona_id : null);
@@ -1215,15 +1302,15 @@ export class ProductionService {
           include: {
             reservas_material: { include: { lote: true } },
             lotes_produccion: { include: { inventario_obtenido: true } },
+            ventas_asignadas: {
+              select: { orden_venta_id: true },
+            },
           },
         }),
       ]);
       if (!ov || !op) throw new NotFoundException('Orden no encontrada');
       if (ov.estado !== 'CONFIRMADA' || op.estado_Plan === 'CANCELADA')
         throw new BadRequestException('Orden cancelada');
-      if (op.orden_venta_id === ventaId) return op;
-      if (op.orden_venta_id)
-        throw new BadRequestException('La OP ya tiene venta');
       if (op.producto_id !== ov.producto_id || op.unidad !== ov.unidad)
         throw new BadRequestException('Producto o unidad incompatible');
       const insumos = op.reservas_material.map((r) => r.lote);
@@ -1239,27 +1326,31 @@ export class ProductionService {
         (ov.tipo_venta !== 'SERVICIO_REGENERACION' && propietario != null) ||
         insumos.some(
           (l) =>
-            (l.propiedad === 'DE_CLIENTE' &&
-              l.propietario_id !== propietario) ||
-            (l.orden_venta_id && l.orden_venta_id !== ventaId),
+            l.propiedad === 'DE_CLIENTE' && l.propietario_id !== propietario,
         ) ||
         salidas.some((l) => l.propietario_id !== propietario)
       )
         throw new BadRequestException(
           'La venta no corresponde al propietario del material',
         );
-      const plan = await tx.ordenes_produccion.aggregate({
-        where: { orden_venta_id: ventaId, estado_Plan: { not: 'CANCELADA' } },
-        _sum: { cantidad_Planificada: true },
+
+      const llave = {
+        orden_venta_id_orden_produccion_id: {
+          orden_venta_id: ventaId,
+          orden_produccion_id: id,
+        },
+      };
+      const existente = await tx.crm_ordenes_venta_produccion.findUnique({
+        where: llave,
       });
-      if (
-        op.cantidad_Planificada
-          .add(plan._sum.cantidad_Planificada ?? 0)
-          .gt(ov.cantidad)
-      )
-        throw new BadRequestException(
-          'La OP excede la cantidad pendiente de planificar',
-        );
+      if (existente) return op;
+      await tx.crm_ordenes_venta_produccion.create({
+        data: {
+          orden_venta_id: ventaId,
+          orden_produccion_id: id,
+          creado_por: u.usuario,
+        },
+      });
       await tx.proceso_eventos.create({
         data: {
           entidad: 'OP',
@@ -1273,9 +1364,17 @@ export class ProductionService {
           }),
         },
       });
-      return tx.ordenes_produccion.update({
+      return tx.ordenes_produccion.findUniqueOrThrow({
         where: { id_Orden_Produc: id },
-        data: { orden_venta_id: ventaId },
+        include: {
+          ventas_asignadas: {
+            include: {
+              orden_venta: {
+                include: { cliente: { select: { nombre: true } } },
+              },
+            },
+          },
+        },
       });
     });
     this.eventos.notificar('TANQUE_ACTUALIZADO', {});

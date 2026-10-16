@@ -255,7 +255,12 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
         user,
       )
     ).data;
-    assert.equal(op.orden_venta_id, null);
+    assert.deepEqual(
+      await p.crm_ordenes_venta_produccion.findMany({
+        where: { orden_produccion_id: op.id_Orden_Produc },
+      }),
+      [],
+    );
     assert.equal(op.propietario_id, 2);
     const reserva = await p.inventario_reservas.findFirstOrThrow({
       where: { orden_produccion_id: op.id_Orden_Produc },
@@ -452,13 +457,41 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
       { orden_venta_id: ov.id },
       user,
     );
-    assert.equal(
-      (
-        await p.ordenes_produccion.findUnique({
-          where: { id_Orden_Produc: op2.id_Orden_Produc },
-        })
-      ).orden_venta_id,
-      ov.id,
+    const segundaVenta = await p.crm_ordenes_venta.create({
+      data: {
+        folio: 'OV2',
+        persona_id: 2,
+        vendedor_id: 1,
+        producto_id: producto.id_Produc_Mater,
+        tipo_venta: 'SERVICIO_REGENERACION',
+        servicio: 'Regeneración',
+        cantidad: 1000,
+        unidad: 'Kilogramos',
+        orden_cliente: 'OC2',
+        subtotal: 100,
+        impuestos: 16,
+        importe_total: 116,
+        creado_por: 'operador',
+      },
+    });
+    await prod.vincularVenta(
+      op2.id_Orden_Produc,
+      { orden_venta_id: segundaVenta.id },
+      user,
+    );
+    await prod.vincularVenta(
+      op2.id_Orden_Produc,
+      { orden_venta_id: segundaVenta.id },
+      user,
+    );
+    const asignacionesOP = await p.crm_ordenes_venta_produccion.findMany({
+      where: { orden_produccion_id: op2.id_Orden_Produc },
+      orderBy: { orden_venta_id: 'asc' },
+    });
+    assert.equal(asignacionesOP.length, 2);
+    assert.deepEqual(
+      asignacionesOP.map((a) => a.orden_venta_id),
+      [ov.id, segundaVenta.id],
     );
     await p.lotes_produccion.update({
       where: { id_Lote_Produccion: l2.id_Lote_Produccion },

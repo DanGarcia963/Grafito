@@ -347,7 +347,6 @@ model ordenes_produccion {
   propietario personas? @relation("op_propietario", fields: [propietario_id], references: [id_Persona], onDelete: Restrict)
   id_Orden_Produc         Int                            @id @default(autoincrement())
   no_Orden_Produc         String                         @unique @db.VarChar(50)
-  orden_venta_id          Int?
   producto_id             Int
   /// Trabajo técnico: no duplica servicio/importe comercial.
   tipo_Operacion          String                         @db.VarChar(100)
@@ -366,14 +365,13 @@ model ordenes_produccion {
   actualizado_en          DateTime                       @updatedAt @db.Timestamptz(6)
   motivo_cancelacion      String?                        @db.Text
   observaciones           String?                        @db.Text
-  crm_ordenes_venta       crm_ordenes_venta?             @relation(fields: [orden_venta_id], references: [id], onDelete: Restrict)
   productos_materiales    productos_materiales           @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
   responsable             personas                       @relation("op_responsable", fields: [responsable_id], references: [id_Persona], onDelete: Restrict)
   lotes_produccion        lotes_produccion[]
+  ventas_asignadas        crm_ordenes_venta_produccion[]
   reservas_material       inventario_reservas[]
   no_conformidades        no_conformidades[]
 
-  @@index([orden_venta_id])
   @@index([producto_id])
   @@index([responsable_id])
   @@index([estado_Plan, fecha_Inicio_Plan])
@@ -1007,7 +1005,7 @@ model crm_ordenes_venta {
   cliente              personas                @relation("crm_orden_venta_cliente", fields: [persona_id], references: [id_Persona], onDelete: Restrict)
   vendedor             personas                @relation("crm_orden_venta_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict)
   producto             productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
-  ordenes_produccion   ordenes_produccion[]
+  produccion_asignada  crm_ordenes_venta_produccion[]
   materiales_recibidos lotes_inventario[]
   entregas             entregas_logistica[]
   facturas             facturas_venta[]
@@ -1090,6 +1088,20 @@ model manifiesto_eventos {
 
   @@index([manifiesto_id, creado_en], map: "idx_manifiesto_eventos_manifest_fecha")
   @@index([actor_persona_id, creado_en], map: "idx_manifiesto_eventos_actor_fecha")
+}
+
+/// Trazabilidad muchos-a-muchos entre órdenes de venta y producción.
+/// Las cantidades se controlan en inventario y entregas, no aquí.
+model crm_ordenes_venta_produccion {
+  orden_venta_id       Int
+  orden_produccion_id  Int
+  creado_por           String             @db.VarChar(100)
+  creado_en            DateTime           @default(now()) @db.Timestamptz(6)
+  orden_venta          crm_ordenes_venta  @relation(fields: [orden_venta_id], references: [id], onDelete: Restrict, map: "fk_crm_ov_op_venta")
+  orden_produccion     ordenes_produccion @relation(fields: [orden_produccion_id], references: [id_Orden_Produc], onDelete: Restrict, map: "fk_crm_ov_op_produccion")
+
+  @@id([orden_venta_id, orden_produccion_id], map: "pk_crm_ordenes_venta_produccion")
+  @@index([orden_produccion_id], map: "idx_crm_ov_op_produccion")
 }
 
 model id_ejecuciones {
