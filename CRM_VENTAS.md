@@ -1,7 +1,8 @@
 # CRM: cuentas, oportunidades, muestras y órdenes comerciales
 
 La implementación utiliza el esquema CRM existente de `prisma/schema.prisma`.
-No requiere ejecutar `db push`, reiniciar Supabase ni recrear tablas.
+No ejecutes `prisma db push` para desplegar. Aplica una sola vez la migración SQL
+indicada abajo antes de actualizar Railway; no recrea las tablas existentes.
 
 ## Flujo operativo
 
@@ -12,7 +13,7 @@ No requiere ejecutar `db push`, reiniciar Supabase ni recrear tablas.
 5. Un reporte **Viable** habilita cotizaciones. **No viable** y **Requiere nueva muestra** mantienen la oportunidad en ID para decidir un cierre o registrar otra muestra. Un nuevo ciclo/muestra o la anulación del reporte invalida el reporte vigente y las cotizaciones activas.
 6. Ventas guarda cotizaciones como versiones inmutables, registra el envío y luego la respuesta del cliente. Una revisión cancela la versión activa anterior sin borrar su contenido. Se valida importe, moneda y vigencia.
 7. La aceptación por sí sola no convierte al prospecto. **Confirmar orden de venta** crea `crm_ordenes_venta`, cierra como ganada y convierte la cuenta en la misma transacción. Confirmar nuevamente la misma cotización devuelve la orden existente.
-8. **Órdenes de venta → Enviar a producción** crea una OP vinculada. El esquema de producción admite cantidades enteras; las comerciales conservan cuatro decimales. Se muestran estado de planeación y etapa de flujo de las OP.
+8. **Órdenes de venta → Enviar a producción** crea una OP y su vínculo de trazabilidad con la OV. Una OP puede relacionarse con varias OV y una OV con varias OP. Producción también puede crear OP sin OV y relacionarlas después. No se comparan ni reparten cantidades entre ambas órdenes: la cantidad planificada puede ser material de entrada, mientras la venta y las entregas representan el producto comercial. Se muestran estado de planeación y etapa de flujo de las OP.
 9. La siguiente necesidad de compra abre otra oportunidad para la misma persona. Repeticiones del análisis para la misma necesidad permanecen en su oportunidad original.
 
 ## Continuidad del trabajo de ID
@@ -53,6 +54,27 @@ Ventas sólo consulta y modifica sus oportunidades/órdenes; ID accede al análi
 
 `POST /api/ventas/crear` ahora requiere `oportunidad_id`, `cotizacion_id`, `version` y `orden_cliente`, y confirma una orden comercial. La OP se crea mediante `/api/ventas/crm/ordenes/:id/produccion`. No se mantiene el atajo antiguo que podía crear clientes y producción sin aceptación comercial.
 
+## Relación entre órdenes comerciales y producción
+
+La tabla `crm_ordenes_venta_produccion` guarda cada vínculo y quién/cuándo lo
+registró. No guarda una cantidad repartida entre OV y OP: el plan de producción
+puede representar material de entrada y diferir del producto obtenido por
+merma/rendimiento. La migración
+`supabase/migrations/20261016182946_crm_ov_op_many_to_many.sql` crea la relación
+y copia los vínculos existentes desde `ordenes_produccion.orden_venta_id`, sin
+alterar reservas, consumos, lotes, recepciones ni entregas. El campo anterior se
+conserva temporalmente en PostgreSQL para permitir el despliegue escalonado de
+Railway; el backend actualizado ya no lo consulta. Se debe retirar en una
+migración posterior, cuando Railway esté ejecutando esta versión.
+
+Al vincular una OP, la API bloquea ambas órdenes en una transacción y verifica
+producto, unidad, estado y propiedad del material antes de guardar. La pantalla
+de producción puede relacionar una OP con varias OV; Ventas muestra las OP
+relacionadas a cada OV. Los LP siguen perteneciendo a su OP, mientras que las
+cantidades despachadas/entregadas y los movimientos de inventario siguen
+registrándose por OV. Una asociación adicional no crea movimientos, reservas ni
+duplica existencias.
+
 ## Validación y despliegue
 
 Las pruebas incluyen oportunidades perdidas durante un reanálisis, canceladas
@@ -70,7 +92,7 @@ npm run test:crm
 node tests/investigacion.cjs
 ```
 
-`test:crm` usa Prisma y PostgreSQL en memoria (PGlite), genera el esquema desde cero únicamente en esa base temporal y no usa datos de Supabase. `CRM_TEST_SCHEMA` permite pasar la ruta a SQL generado con `prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script` en entornos que no permiten subprocesos desde Node.
+`test:crm` y `test:inventario` usan Prisma y PostgreSQL en memoria (PGlite), generan el esquema desde cero únicamente en esa base temporal y no usan datos de Supabase. Incluyen vínculo de una OP a dos OV, idempotencia del vínculo y rechazo cuando el propietario del material no corresponde.
 
 Frontend: `npm ci && npm run build`. La exportación adicional inválida de la página de Calidad se eliminó para que pase el chequeo de páginas de Next.js.
 

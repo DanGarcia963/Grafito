@@ -11,10 +11,22 @@ export class VentasService {
         cliente: true,
         vendedor: true,
         producto: true,
-        ordenes_produccion: { include: { lotes_produccion: true } },
+        produccion_asignada: {
+          include: {
+            orden_produccion: { include: { lotes_produccion: true } },
+          },
+        },
       },
       orderBy: { fecha_confirmacion: 'desc' },
     });
-    return { success: true, result };
+    return {
+      success: true,
+      result: result.map(({ produccion_asignada, ...orden }) => ({
+        ...orden,
+        ordenes_produccion: produccion_asignada.map(
+          (asignacion) => asignacion.orden_produccion,
+        ),
+      })),
+    };
   }
 }

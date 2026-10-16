@@ -333,7 +333,15 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       ],
     };
     const op = (await crm.produccion(venta.id, plan, seller)).data;
-    assert.equal(op.orden_venta_id, venta.id);
+    const asignacion = await p.crm_ordenes_venta_produccion.findUnique({
+      where: {
+        orden_venta_id_orden_produccion_id: {
+          orden_venta_id: venta.id,
+          orden_produccion_id: op.id_Orden_Produc,
+        },
+      },
+    });
+    assert.equal(asignacion.orden_produccion_id, op.id_Orden_Produc);
     assert.equal(
       (await crm.produccion(venta.id, plan, seller)).data.id_Orden_Produc,
       op.id_Orden_Produc,
@@ -555,7 +563,12 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
         operario,
       )
     ).data;
-    assert.equal(propia.orden_venta_id, null);
+    assert.deepEqual(
+      await p.crm_ordenes_venta_produccion.findMany({
+        where: { orden_produccion_id: propia.id_Orden_Produc },
+      }),
+      [],
+    );
     await produccion.cerrarOrden(
       propia.id_Orden_Produc,
       { estado: 'CANCELADA', motivo: 'Liberar reserva de prueba' },

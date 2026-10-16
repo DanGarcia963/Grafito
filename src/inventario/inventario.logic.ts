@@ -151,10 +151,14 @@ export async function crearOrdenProduccion(
     where: { no_Orden_Produc: folio },
   });
   if (anterior) {
-    if (
-      anterior.orden_venta_id !== (ventaId ?? null) ||
-      anterior.creado_por !== u.usuario
-    )
+    const asignaciones = await tx.crm_ordenes_venta_produccion.findMany({
+      where: { orden_produccion_id: anterior.id_Orden_Produc },
+      select: { orden_venta_id: true },
+    });
+    const yaVinculada = ventaId
+      ? asignaciones.some((a) => a.orden_venta_id === ventaId)
+      : asignaciones.length === 0;
+    if (!yaVinculada || anterior.creado_por !== u.usuario)
       throw new ConflictException('Folio ocupado');
     return anterior;
   }
@@ -219,14 +223,6 @@ export async function crearOrdenProduccion(
   )
     throw new BadRequestException('Venta incompatible con el propietario');
   if (ov) {
-    const plan = await tx.ordenes_produccion.aggregate({
-      where: { orden_venta_id: ov.id, estado_Plan: { not: 'CANCELADA' } },
-      _sum: { cantidad_Planificada: true },
-    });
-    if (cantidad.add(plan._sum.cantidad_Planificada ?? 0).gt(ov.cantidad))
-      throw new BadRequestException(
-        'Cantidad superior al pendiente de planificar',
-      );
     if (
       ov.tipo_venta === 'SERVICIO_REGENERACION' &&
       !materiales.some((m) =>
@@ -248,7 +244,6 @@ export async function crearOrdenProduccion(
       es_reproceso: reproceso,
       motivo_reproceso: motivo,
       propietario_id: propietario,
-      orden_venta_id: ov?.id,
       producto_id: producto.id_Produc_Mater,
       cantidad_Planificada: cantidad,
       unidad: ov?.unidad ?? producto.UM,
@@ -256,6 +251,16 @@ export async function crearOrdenProduccion(
       linea_Produccion: texto(b.linea_Produccion, 50),
       responsable_id: idValido(b.responsable_id),
       creado_por: u.usuario,
+      ...(ov
+        ? {
+            ventas_asignadas: {
+              create: {
+                orden_venta_id: ov.id,
+                creado_por: u.usuario,
+              },
+            },
+          }
+        : {}),
       reservas_material: {
         create: materiales.map((m) => ({
           lote_inventario_id: m.lote,
