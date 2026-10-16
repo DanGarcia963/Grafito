@@ -504,6 +504,70 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
         user,
       )
     ).data;
+    await prod.cerrarOrden(
+      op2.id_Orden_Produc,
+      { estado: 'FINALIZADA', motivo: 'Producción terminada para validar aporte a OV' },
+      user,
+    );
+    const bandeja = await prod.asignacionesProductoOV();
+    const candidato = bandeja.data.find(
+      (op) => op.id_Orden_Produc === op2.id_Orden_Produc,
+    );
+    assert.equal(candidato.cantidad_producida_liberada.toString(), '2550');
+    assert.equal(
+      candidato.cantidad_producto_terminado_disponible.toString(),
+      '2550',
+    );
+    await prod.asignarProductoTerminadoOV(
+      op2.id_Orden_Produc,
+      { orden_venta_id: ov.id, cantidad_producto_terminado: '1700' },
+      user,
+    );
+    await prod.asignarProductoTerminadoOV(
+      op2.id_Orden_Produc,
+      {
+        orden_venta_id: segundaVenta.id,
+        cantidad_producto_terminado: '850',
+      },
+      user,
+    );
+    await assert.rejects(
+      prod.asignarProductoTerminadoOV(
+        op2.id_Orden_Produc,
+        {
+          orden_venta_id: segundaVenta.id,
+          cantidad_producto_terminado: '851',
+        },
+        user,
+      ),
+      /físicamente disponible/,
+    );
+    const salidaComprometida = (await prod.stock()).data.find(
+      (s) => s.lote_inventario_id === salida.id,
+    );
+    assert.equal(String(salidaComprometida.reservado_producto_venta), '2550');
+    assert.equal(String(salidaComprometida.disponible), '0');
+    await assert.rejects(
+      prod.marcarRezagado(
+        salida.id,
+        { motivo: 'No marcar producto comprometido como rezagado' },
+        user,
+      ),
+      /comprometido con una OV/,
+    );
+    await prod.asignarProductoTerminadoOV(
+      op2.id_Orden_Produc,
+      { orden_venta_id: ov.id, cantidad_producto_terminado: '0' },
+      user,
+    );
+    await prod.asignarProductoTerminadoOV(
+      op2.id_Orden_Produc,
+      {
+        orden_venta_id: segundaVenta.id,
+        cantidad_producto_terminado: '0',
+      },
+      user,
+    );
     await prod.marcarRezagado(
       salida.id,
       { motivo: 'Remanente almacenado' },
