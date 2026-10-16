@@ -213,8 +213,14 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
       },
       user,
     );
-    const material = await p.lotes_inventario.findFirstOrThrow();
+    const material = await p.lotes_inventario.findFirstOrThrow({
+      where: { folio: 'MP-R1' },
+    });
     assert.equal(material.especificaciones.contenedores.length, 3);
+    const saldoEntrada = (await prod.stock()).data.find(
+      (s) => s.lote_inventario_id === material.id,
+    );
+    assert.equal(saldoEntrada.contenedores_restantes.length, 3);
     const base = {
       producto_id: producto.id_Produc_Mater,
       cantidad: '2550',
@@ -239,9 +245,22 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
       data: { estado_calidad_recepcion: 'LIBERADO' },
     });
     const op = (
-      await prod.crearOrden({ ...base, no_Orden_Produc: 'OP1' }, user)
+      await prod.crearOrden(
+        {
+          ...base,
+          no_Orden_Produc: 'OP1',
+          es_reproceso: true,
+          motivo_reproceso: 'Regeneración de material sucio recibido',
+        },
+        user,
+      )
     ).data;
-    assert.equal(op.orden_venta_id, null);
+    assert.deepEqual(
+      await p.crm_ordenes_venta_produccion.findMany({
+        where: { orden_produccion_id: op.id_Orden_Produc },
+      }),
+      [],
+    );
     assert.equal(op.propietario_id, 2);
     const reserva = await p.inventario_reservas.findFirstOrThrow({
       where: { orden_produccion_id: op.id_Orden_Produc },
@@ -306,6 +325,17 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
     );
     assert.equal(String(saldo.disponible), '0');
     assert.equal(String(saldo.disponible_reproceso), '2550');
+    assert.equal(saldo.contenedores_restantes.length, 3);
+    const loteResumen = (
+      await prod.obtenerTodasLasOrdenesGrafito()
+    ).result
+      .flatMap((orden) => orden.lotes_produccion)
+      .find((item) => item.id_Lote_Produccion === lote.id_Lote_Produccion);
+    assert.equal(loteResumen.cantidad_cargada.toString(), '2550');
+    assert.equal(loteResumen.cantidad_producida.toString(), '2550');
+    assert.equal(loteResumen.diferencia_neta.toString(), '0');
+    assert.equal(loteResumen.rendimiento_porcentaje.toString(), '100');
+    assert.equal(loteResumen.contenedores_producidos, 3);
     await assert.rejects(
       calidad.actualizarEstatusMuestra({
         id_Muestra: muestra.id_Muestra,
@@ -427,13 +457,41 @@ test('Inventario cliente sin venta, descarga F.E., reproceso y vinculación post
       { orden_venta_id: ov.id },
       user,
     );
-    assert.equal(
-      (
-        await p.ordenes_produccion.findUnique({
-          where: { id_Orden_Produc: op2.id_Orden_Produc },
-        })
-      ).orden_venta_id,
-      ov.id,
+    const segundaVenta = await p.crm_ordenes_venta.create({
+      data: {
+        folio: 'OV2',
+        persona_id: 2,
+        vendedor_id: 1,
+        producto_id: producto.id_Produc_Mater,
+        tipo_venta: 'SERVICIO_REGENERACION',
+        servicio: 'Regeneración',
+        cantidad: 1000,
+        unidad: 'Kilogramos',
+        orden_cliente: 'OC2',
+        subtotal: 100,
+        impuestos: 16,
+        importe_total: 116,
+        creado_por: 'operador',
+      },
+    });
+    await prod.vincularVenta(
+      op2.id_Orden_Produc,
+      { orden_venta_id: segundaVenta.id },
+      user,
+    );
+    await prod.vincularVenta(
+      op2.id_Orden_Produc,
+      { orden_venta_id: segundaVenta.id },
+      user,
+    );
+    const asignacionesOP = await p.crm_ordenes_venta_produccion.findMany({
+      where: { orden_produccion_id: op2.id_Orden_Produc },
+      orderBy: { orden_venta_id: 'asc' },
+    });
+    assert.equal(asignacionesOP.length, 2);
+    assert.deepEqual(
+      asignacionesOP.map((a) => a.orden_venta_id),
+      [ov.id, segundaVenta.id],
     );
     await p.lotes_produccion.update({
       where: { id_Lote_Produccion: l2.id_Lote_Produccion },

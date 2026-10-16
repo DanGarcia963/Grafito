@@ -361,9 +361,19 @@ export class CrmService {
     if (!persona) throw new NotFoundException('Cuenta no encontrada');
     const ordenes = await this.prisma.crm_ordenes_venta.findMany({
       where: { persona_id: id, ...this.scope(u) },
-      include: { ordenes_produccion: true },
+      include: {
+        produccion_asignada: { include: { orden_produccion: true } },
+      },
       orderBy: { fecha_confirmacion: 'desc' },
     });
+    const ordenesConProduccion = ordenes.map(
+      ({ produccion_asignada, ...orden }) => ({
+        ...orden,
+        ordenes_produccion: produccion_asignada.map(
+          (asignacion) => asignacion.orden_produccion,
+        ),
+      }),
+    );
     const oportunidades = await this.prisma.crm_oportunidades.findMany({
       where: { persona_id: id, ...this.scope(u) },
       orderBy: { id: 'desc' },
@@ -372,7 +382,7 @@ export class CrmService {
       success: true,
       data: {
         persona,
-        ordenes: await this.clasificarCompras(ordenes),
+        ordenes: await this.clasificarCompras(ordenesConProduccion),
         oportunidades,
         recurrencia: recurrencia(
           ordenes
@@ -635,9 +645,10 @@ export class CrmService {
     return { success: true, data };
   }
 
- async enviarFormulaCostos(id: number, b: any, u: Usuario) {
+  async enviarFormulaCostos(id: number, b: any, u: Usuario) {
     const formula = texto(b.formula, 12000);
-    if (!formula) throw new BadRequestException('Captura la fórmula para Costos');
+    if (!formula)
+      throw new BadRequestException('Captura la fórmula para Costos');
     const data = await this.prisma.$transaction(async (tx) => {
       const o = await bloquearOportunidad(tx, id, u);
       versionValida(o, b.version);
@@ -646,12 +657,16 @@ export class CrmService {
         orderBy: { version: 'desc' },
       });
       if (!reporte || reporte.resultado !== 'VIABLE')
-        throw new BadRequestException('Se requiere un reporte viable publicado');
+        throw new BadRequestException(
+          'Se requiere un reporte viable publicado',
+        );
       const enviada = await tx.crm_costos_oportunidad.findFirst({
         where: { reporte_id: reporte.id, oportunidad_id: id },
       });
       if (enviada)
-        throw new ConflictException('Ya se envió una fórmula para este reporte; publica una nueva versión del reporte para reenviarla');
+        throw new ConflictException(
+          'Ya se envió una fórmula para este reporte; publica una nueva versión del reporte para reenviarla',
+        );
       const previa = await tx.crm_costos_oportunidad.findFirst({
         where: { oportunidad_id: id },
         orderBy: { version: 'desc' },
@@ -665,8 +680,12 @@ export class CrmService {
           formula_enviada_por: u.usuario,
         },
         select: {
-          id: true, version: true, formula: true, formula_enviada_por: true,
-          formula_enviada_en: true, reporte: { select: { version: true } },
+          id: true,
+          version: true,
+          formula: true,
+          formula_enviada_por: true,
+          formula_enviada_en: true,
+          reporte: { select: { version: true } },
         },
       });
     });
@@ -760,7 +779,9 @@ export class CrmService {
         where: { reporte_id: reporte.id, oportunidad_id: id },
       });
       if (!costo?.precio_objetivo_litro)
-        throw new BadRequestException('Costos debe emitir el precio objetivo antes de cotizar');
+        throw new BadRequestException(
+          'Costos debe emitir el precio objetivo antes de cotizar',
+        );
       const producto = await tx.productos_materiales.findUnique({
         where: { id_Produc_Mater: idValido(b.producto_id) },
       });
@@ -1159,42 +1180,45 @@ export class CrmService {
       where: this.scope(u),
       include: {
         cliente: { select: { nombre: true } },
-        ordenes_produccion: {
+        produccion_asignada: {
           select: {
-            id_Orden_Produc: true,
-            no_Orden_Produc: true,
-            orden_venta_id: true,
-            producto_id: true,
-            tipo_Operacion: true,
-            linea_Produccion: true,
-            cantidad_Planificada: true,
-            unidad: true,
-            estado_Plan: true,
-            fecha_Inicio_Plan: true,
-            fecha_Termino_Plan: true,
-            fecha_Inicio_Produccion: true,
-            fecha_Termino_Real: true,
-            lotes_produccion: {
-              orderBy: { id_Lote_Produccion: 'asc' },
+            orden_produccion: {
               select: {
-                id_Lote_Produccion: true,
-                no_Lote: true,
-                estado: true,
-                fecha_inicio: true,
-                fecha_fin: true,
-                estado_Calida: true,
-                observaciones_Calidad: true,
-                tanque_id: true,
-                cantidad_Cargada: true,
-                muestras: {
-                  orderBy: { id_Muestra: 'asc' },
+                id_Orden_Produc: true,
+                no_Orden_Produc: true,
+                producto_id: true,
+                tipo_Operacion: true,
+                linea_Produccion: true,
+                cantidad_Planificada: true,
+                unidad: true,
+                estado_Plan: true,
+                fecha_Inicio_Plan: true,
+                fecha_Termino_Plan: true,
+                fecha_Inicio_Produccion: true,
+                fecha_Termino_Real: true,
+                lotes_produccion: {
+                  orderBy: { id_Lote_Produccion: 'asc' },
                   select: {
-                    id_Muestra: true,
-                    no_Muestra: true,
-                    categoria_Muestra: true,
-                    estado_Muestra: true,
-                    fecha_Toma: true,
-                    fecha_ingreso_laboratorio: true,
+                    id_Lote_Produccion: true,
+                    no_Lote: true,
+                    estado: true,
+                    fecha_inicio: true,
+                    fecha_fin: true,
+                    estado_Calida: true,
+                    observaciones_Calidad: true,
+                    tanque_id: true,
+                    cantidad_Cargada: true,
+                    muestras: {
+                      orderBy: { id_Muestra: 'asc' },
+                      select: {
+                        id_Muestra: true,
+                        no_Muestra: true,
+                        categoria_Muestra: true,
+                        estado_Muestra: true,
+                        fecha_Toma: true,
+                        fecha_ingreso_laboratorio: true,
+                      },
+                    },
                   },
                 },
               },
@@ -1267,8 +1291,16 @@ export class CrmService {
       },
       orderBy: { id: 'desc' },
     });
+    const ordenesConProduccion = ordenes.map(
+      ({ produccion_asignada, ...orden }) => ({
+        ...orden,
+        ordenes_produccion: produccion_asignada.map(
+          (asignacion) => asignacion.orden_produccion,
+        ),
+      }),
+    );
     const clasificadas = await this.clasificarCompras(
-      ordenes.map((o) => ({
+      ordenesConProduccion.map((o) => ({
         ...o,
         cantidad_entregada: o.entregas
           .filter((e) => e.estado_entrega === 'ENTREGADA')
@@ -1315,20 +1347,28 @@ export class CrmService {
       });
       if (!previa) throw new NotFoundException('Orden no encontrada');
       if (previa.oportunidad_id == null)
-        throw new NotFoundException('La orden no tiene una oportunidad asociada');
+        throw new NotFoundException(
+          'La orden no tiene una oportunidad asociada',
+        );
       const o = await bloquearOportunidad(tx, previa.oportunidad_id, u);
       await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${id} FOR UPDATE`;
       const orden = await tx.crm_ordenes_venta.findUniqueOrThrow({
         where: { id },
         include: {
-          ordenes_produccion: true,
+          produccion_asignada: {
+            include: { orden_produccion: { select: { estado_Plan: true } } },
+          },
           entregas: true,
           pagos: true,
           facturas: true,
         },
       });
       if (orden.estado === 'CANCELADA') return;
-      if (orden.ordenes_produccion.some((x) => x.estado_Plan !== 'CANCELADA'))
+      if (
+        orden.produccion_asignada.some(
+          (x) => x.orden_produccion.estado_Plan !== 'CANCELADA',
+        )
+      )
         throw new ConflictException(
           'Cancela las órdenes de producción antes de cancelar la venta',
         );
