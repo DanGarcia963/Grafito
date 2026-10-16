@@ -31,6 +31,20 @@ export class ProductionController {
   ordenesVentaDisponibles() {
     return this.productionService.ordenesVentaDisponibles();
   }
+  @Areas('produccion')
+  @Get('asignaciones-producto-ov')
+  asignacionesProductoOV() {
+    return this.productionService.asignacionesProductoOV();
+  }
+  @Areas('produccion')
+  @Post('ordenes/:id/asignar-producto-ov')
+  asignarProductoTerminadoOV(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() b: any,
+    @Req() r: any,
+  ) {
+    return this.productionService.asignarProductoTerminadoOV(id, b, r.usuario);
+  }
   @Areas('produccion') @Post('ordenes') crearOrden(
     @Body() b: any,
     @Req() r: any,

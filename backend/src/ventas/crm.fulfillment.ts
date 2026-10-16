@@ -1,5 +1,10 @@
 type EstadoPaso =
-  'COMPLETADO' | 'EN_PROCESO' | 'PENDIENTE' | 'CON_INCIDENCIAS' | 'NO_APLICA';
+  | 'COMPLETADO'
+  | 'EN_PROCESO'
+  | 'PENDIENTE'
+  | 'PENDIENTE_ASIGNACION'
+  | 'CON_INCIDENCIAS'
+  | 'NO_APLICA';
 
 const numero = (value: unknown) => Number(value ?? 0);
 const suma = (values: unknown[]) =>
@@ -39,6 +44,9 @@ export function calcularCumplimientoOV(orden: any) {
     })),
   );
   const cantidadSolicitada = numero(orden.cantidad);
+  const cantidadProductoTerminadoAsignada = suma(
+    ordenesActivas.map((op) => op.cantidad_producto_terminado),
+  );
   const cantidadDespachada = suma(
     detallesEntrega
       .filter((detalle: any) =>
@@ -130,13 +138,19 @@ export function calcularCumplimientoOV(orden: any) {
         op.estado_Plan === 'PAUSADA' ||
         op.fecha_Inicio_Produccion,
     ) || lotesActivos.some((lote) => lote.estado === 'EN_PROCESO');
-  const produccionCompleta =
+  const procesoProduccionCompleto =
     ordenesActivas.length > 0 &&
     lotesActivos.length > 0 &&
     ordenesActivas.every((op) => op.estado_Plan === 'FINALIZADA') &&
     lotesActivos.every((lote) => lote.estado === 'FINALIZADO');
+  // La carga planificada de las OP no cubre una OV; se mide su producto
+  // terminado real asignado, y aparte se conserva el estado del proceso.
+  const asignacionProductoCompleta =
+    cantidadSolicitada > 0 &&
+    cantidadProductoTerminadoAsignada >= cantidadSolicitada - 0.0001;
   const calidadCompleta =
-    lotesActivos.length > 0 && lotesLiberados === lotesActivos.length;
+    asignacionProductoCompleta ||
+    (lotesActivos.length > 0 && lotesLiberados === lotesActivos.length);
   const hayAvanceParcial =
     lotesLiberados > 0 &&
     (lotesLiberados < lotesActivos.length ||
@@ -157,13 +171,23 @@ export function calcularCumplimientoOV(orden: any) {
   );
 
   let estadoProduccion: EstadoPaso = 'PENDIENTE';
-  if (produccionCompleta) estadoProduccion = 'COMPLETADO';
+  if (procesoProduccionCompleto) estadoProduccion = 'COMPLETADO';
   else if (produccionIniciada) estadoProduccion = 'EN_PROCESO';
 
   let estadoCalidad: EstadoPaso = 'PENDIENTE';
-  if (lotesRechazados > 0) estadoCalidad = 'CON_INCIDENCIAS';
-  else if (calidadCompleta) estadoCalidad = 'COMPLETADO';
-  else if (lotesEnCalidad > 0) estadoCalidad = 'EN_PROCESO';
+  if (asignacionProductoCompleta || calidadCompleta)
+    estadoCalidad = 'COMPLETADO';
+  else if (lotesRechazados > 0)
+    estadoCalidad = 'CON_INCIDENCIAS';
+  else if (lotesEnCalidad > 0 || lotesLiberados > 0)
+    estadoCalidad = 'EN_PROCESO';
+
+  let estadoAsignacion: EstadoPaso = 'PENDIENTE';
+  if (asignacionProductoCompleta) estadoAsignacion = 'COMPLETADO';
+  else if (cantidadProductoTerminadoAsignada > 0)
+    estadoAsignacion = 'EN_PROCESO';
+  else if (procesoProduccionCompleto)
+    estadoAsignacion = 'PENDIENTE_ASIGNACION';
 
   let estadoRecepcion: EstadoPaso = 'NO_APLICA';
   let detalleRecepcion = 'No aplica para esta orden.';
@@ -225,9 +249,9 @@ export function calcularCumplimientoOV(orden: any) {
   ) {
     estadoEntrega = 'EN_PROCESO';
     detalleEntrega = 'Hay una entrega en preparación.';
-  } else if (calidadCompleta && produccionCompleta) {
+  } else if (calidadCompleta && asignacionProductoCompleta) {
     detalleEntrega =
-      'Producción y Calidad finalizaron; falta registrar el despacho.';
+      'La cantidad de producto terminado liberado cubre la OV; falta registrar el despacho.';
   } else {
     detalleEntrega = 'Pendiente de liberar la producción antes del despacho.';
   }
@@ -254,6 +278,12 @@ export function calcularCumplimientoOV(orden: any) {
       estadoCalidad,
       `${lotesLiberados} de ${lotesActivos.length} LP liberados${lotesRechazados ? `; ${lotesRechazados} rechazado(s)` : ''}.`,
     ),
+    paso(
+      'ASIGNACION_PRODUCTO',
+      'Asignación de producto terminado',
+      estadoAsignacion,
+      `${cantidadProductoTerminadoAsignada.toLocaleString('es-MX')} de ${cantidadSolicitada.toLocaleString('es-MX')} ${orden.unidad} asignados desde OP con salida liberada; faltan ${Math.max(0, cantidadSolicitada - cantidadProductoTerminadoAsignada).toLocaleString('es-MX')} ${orden.unidad}.`,
+    ),
     paso('ENTREGA', 'Despacho y entrega', estadoEntrega, detalleEntrega),
   ];
 
@@ -264,10 +294,16 @@ export function calcularCumplimientoOV(orden: any) {
     estado = cantidadEntregada > 0 ? 'ENTREGA_PARCIAL' : 'EN_TRANSITO';
   else if (hayEntregaRegistrada || cantidadEntregada > 0)
     estado = 'ENTREGA_PARCIAL';
-  else if (checklistConIncidencias || lotesRechazados > 0)
+  else if (
+    checklistConIncidencias ||
+    (lotesRechazados > 0 && !asignacionProductoCompleta)
+  )
     estado = 'ATENCION_REQUERIDA';
+  else if (asignacionProductoCompleta) estado = 'LISTA_PARA_ENTREGA';
+  else if (cantidadProductoTerminadoAsignada > 0) estado = 'AVANCE_PARCIAL';
   else if (hayAvanceParcial) estado = 'AVANCE_PARCIAL';
-  else if (calidadCompleta && produccionCompleta) estado = 'LISTA_PARA_ENTREGA';
+  else if (procesoProduccionCompleto)
+    estado = 'PENDIENTE_ASIGNACION';
   else if (lotesEnCalidad > 0) estado = 'CONTROL_DE_CALIDAD';
   else if (produccionIniciada) estado = 'EN_PRODUCCION';
   else if (ordenesActivas.length > 0) estado = 'PRODUCCION_PROGRAMADA';
@@ -287,6 +323,7 @@ export function calcularCumplimientoOV(orden: any) {
     EN_TRANSITO: 'En tránsito',
     ATENCION_REQUERIDA: 'Atención requerida',
     AVANCE_PARCIAL: 'Avance parcial',
+    PENDIENTE_ASIGNACION: 'Producto terminado por asignar',
     LISTA_PARA_ENTREGA: 'Lista para entrega',
     CONTROL_DE_CALIDAD: 'En control de Calidad',
     EN_PRODUCCION: 'En producción',
@@ -303,6 +340,23 @@ export function calcularCumplimientoOV(orden: any) {
       etiqueta: etiquetas[estado] ?? estado,
       pasos,
       cantidad_solicitada: cantidadSolicitada,
+      cantidad_producto_terminado_asignada:
+        cantidadProductoTerminadoAsignada,
+      cantidad_producto_terminado_pendiente: Math.max(
+        0,
+        cantidadSolicitada - cantidadProductoTerminadoAsignada,
+      ),
+      porcentaje_producto_terminado_asignado:
+        cantidadSolicitada > 0
+          ? Math.min(
+              100,
+              Math.round(
+                (cantidadProductoTerminadoAsignada / cantidadSolicitada) *
+                  100,
+              ),
+            )
+          : 0,
+      producto_terminado_asignado_completo: asignacionProductoCompleta,
       cantidad_despachada: cantidadDespachada,
       cantidad_entregada: cantidadEntregada,
       porcentaje_entregado: porcentajeEntregado,

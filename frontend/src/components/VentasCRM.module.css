@@ -589,6 +589,7 @@
   color: #17613e;
 }
 .fulfillmentStatus[data-state="EN_TRANSITO"],
+.fulfillmentStatus[data-state="PENDIENTE_ASIGNACION"],
 .fulfillmentStatus[data-state="CONTROL_DE_CALIDAD"],
 .fulfillmentStatus[data-state="EN_PRODUCCION"],
 .fulfillmentStatus[data-state="PRODUCCION_PROGRAMADA"],

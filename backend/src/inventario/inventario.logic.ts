@@ -33,9 +33,20 @@ export async function existencias(
           ],
         }
       : {},
+    orderBy: { id: 'asc' },
     include: {
       producto: true,
-      lote_produccion: true,
+      lote_produccion: {
+        include: {
+          ordenes_produccion: {
+            include: {
+              ventas_asignadas: {
+                select: { cantidad_producto_terminado: true },
+              },
+            },
+          },
+        },
+      },
       movimientos: true,
       reservas: {
         where: { estado: 'ACTIVA' },
@@ -45,7 +56,9 @@ export async function existencias(
   });
   const ubicaciones = await tx.inventario_ubicaciones.findMany({
     where: { activo: true },
+    orderBy: { id: 'asc' },
   });
+  const productoVentaPendientePorOP = new Map<number, Prisma.Decimal>();
   return lotes
     .flatMap((l) => {
       const saldoFisicoLote = l.movimientos.reduce(
@@ -59,7 +72,7 @@ export async function existencias(
         l.especificaciones,
         saldoFisicoLote,
       );
-      return ubicaciones.map((u) => {
+      const saldosUbicacion = ubicaciones.map((u) => {
         const fisico = l.movimientos.reduce(
           (a, m) =>
             a
@@ -73,6 +86,48 @@ export async function existencias(
             (a, r) => a.add(r.cantidad.sub(consumido(r.movimientos))),
             new Prisma.Decimal(0),
           );
+        return { ubicacion: u, fisico, reservado };
+      });
+
+      const op = l.lote_produccion?.ordenes_produccion;
+      const opId = l.lote_produccion?.orden_Produccion_id;
+      if (op && opId != null && !productoVentaPendientePorOP.has(opId)) {
+        productoVentaPendientePorOP.set(
+          opId,
+          op.ventas_asignadas.reduce(
+            (total, asignacion) =>
+              total.add(asignacion.cantidad_producto_terminado),
+            new Prisma.Decimal(0),
+          ),
+        );
+      }
+      const esProductoAsignable =
+        l.origen === 'PRODUCCION' &&
+        ['REGENERADO', 'TERMINADO'].includes(l.condicion) &&
+        l.lote_produccion?.estado === 'FINALIZADO' &&
+        l.lote_produccion.estado_Calida === 'LIBERADO' &&
+        opId != null;
+      const productoVentaPorUbicacion = new Map<number, Prisma.Decimal>();
+      if (esProductoAsignable) {
+        let pendiente = productoVentaPendientePorOP.get(opId!)!;
+        for (const saldo of saldosUbicacion) {
+          const fisicoNoReservado = Prisma.Decimal.max(
+            saldo.fisico.sub(saldo.reservado),
+            0,
+          );
+          const reservadoVenta = Prisma.Decimal.min(
+            pendiente,
+            fisicoNoReservado,
+          );
+          productoVentaPorUbicacion.set(saldo.ubicacion.id, reservadoVenta);
+          pendiente = pendiente.sub(reservadoVenta);
+        }
+        productoVentaPendientePorOP.set(opId!, pendiente);
+      }
+
+      return saldosUbicacion.map(({ ubicacion: u, fisico, reservado }) => {
+        const reservadoVenta =
+          productoVentaPorUbicacion.get(u.id) ?? new Prisma.Decimal(0);
         const aptitud = aptitudMaterial(l);
         return {
           lote_inventario_id: l.id,
@@ -89,12 +144,13 @@ export async function existencias(
           ubicacion_id: u.id,
           ubicacion: u.nombre,
           fisico,
-          reservado,
+          reservado: reservado.add(reservadoVenta),
+          reservado_producto_venta: reservadoVenta,
           disponible: aptitud.venta
-            ? fisico.sub(reservado)
+            ? fisico.sub(reservado).sub(reservadoVenta)
             : new Prisma.Decimal(0),
           disponible_reproceso: aptitud.reprocesable
-            ? fisico.sub(reservado)
+            ? fisico.sub(reservado).sub(reservadoVenta)
             : new Prisma.Decimal(0),
           liberado: aptitud.liberado,
         };
