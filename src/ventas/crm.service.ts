@@ -370,7 +370,11 @@ export class CrmService {
       ({ produccion_asignada, ...orden }) => ({
         ...orden,
         ordenes_produccion: produccion_asignada.map(
-          (asignacion) => asignacion.orden_produccion,
+          (asignacion) => ({
+            ...asignacion.orden_produccion,
+            cantidad_producto_terminado:
+              asignacion.cantidad_producto_terminado,
+          }),
         ),
       }),
     );
@@ -1182,6 +1186,7 @@ export class CrmService {
         cliente: { select: { nombre: true } },
         produccion_asignada: {
           select: {
+            cantidad_producto_terminado: true,
             orden_produccion: {
               select: {
                 id_Orden_Produc: true,
@@ -1295,7 +1300,11 @@ export class CrmService {
       ({ produccion_asignada, ...orden }) => ({
         ...orden,
         ordenes_produccion: produccion_asignada.map(
-          (asignacion) => asignacion.orden_produccion,
+          (asignacion) => ({
+            ...asignacion.orden_produccion,
+            cantidad_producto_terminado:
+              asignacion.cantidad_producto_terminado,
+          }),
         ),
       }),
     );

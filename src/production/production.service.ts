@@ -31,6 +31,29 @@ import {
   muestras_etapa_Muestra,
 } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
 
+const condicionesProductoTerminado = ['REGENERADO', 'TERMINADO'] as const;
+
+function cantidadSalidaProducida(inventario: any) {
+  return (inventario.movimientos ?? [])
+    .filter((movimiento: any) => movimiento.tipo === 'ENTRADA_PRODUCCION')
+    .reduce(
+      (total: Prisma.Decimal, movimiento: any) =>
+        total
+          .add(movimiento.cantidad)
+          .sub(movimiento.reversion?.cantidad ?? 0),
+      new Prisma.Decimal(0),
+    );
+}
+
+function compatibleConOV(op: any, ov: any) {
+  if (op.producto_id !== ov.producto_id || op.unidad !== ov.unidad)
+    return false;
+  return op.propietario_id
+    ? ov.tipo_venta === 'SERVICIO_REGENERACION' &&
+        ov.persona_id === op.propietario_id
+    : ov.tipo_venta !== 'SERVICIO_REGENERACION';
+}
+
 @Injectable()
 export class ProductionService {
   constructor(
@@ -145,6 +168,300 @@ export class ProductionService {
       },
       orderBy: { fecha_confirmacion: 'desc' },
     });
+    return { success: true, data };
+  }
+
+  /** OP cerradas con salida liberada que aún puede asignarse a ventas. */
+  async asignacionesProductoOV() {
+    const [ordenes, ventas, existenciasActuales] = await Promise.all([
+      this.prisma.ordenes_produccion.findMany({
+        where: { estado_Plan: 'FINALIZADA' },
+        include: {
+          productos_materiales: { select: { nombre_Producto: true } },
+          propietario: { select: { nombre: true } },
+          lotes_produccion: {
+            where: { estado: 'FINALIZADO', estado_Calida: 'LIBERADO' },
+            include: {
+              inventario_obtenido: {
+                where: { condicion: { in: [...condicionesProductoTerminado] } },
+                include: { movimientos: { include: { reversion: true } } },
+              },
+            },
+          },
+          ventas_asignadas: {
+            include: {
+              orden_venta: { include: { cliente: { select: { nombre: true } } } },
+            },
+          },
+        },
+        orderBy: { fecha_Termino_Real: 'desc' },
+      }),
+      this.prisma.crm_ordenes_venta.findMany({
+        where: { estado: 'CONFIRMADA' },
+        include: {
+          cliente: { select: { nombre: true } },
+          producto: { select: { nombre_Producto: true } },
+          produccion_asignada: {
+            select: { cantidad_producto_terminado: true },
+          },
+        },
+        orderBy: { fecha_confirmacion: 'asc' },
+      }),
+      existencias(this.prisma),
+    ]);
+
+    const candidatos = ordenes
+      .map((op) => {
+        const salidaLotes = op.lotes_produccion.flatMap((lote) =>
+          lote.inventario_obtenido
+            .map((inventario) => ({
+              id_Lote_Produccion: lote.id_Lote_Produccion,
+              no_Lote: lote.no_Lote,
+              id_inventario: inventario.id,
+              folio_inventario: inventario.folio,
+              condicion: inventario.condicion,
+              cantidad: cantidadSalidaProducida(inventario),
+            }))
+            .filter((salida) => salida.cantidad.gt(0)),
+        );
+        const cantidadProducida = salidaLotes.reduce(
+          (total, salida) => total.add(salida.cantidad),
+          new Prisma.Decimal(0),
+        );
+        const cantidadAsignada = op.ventas_asignadas.reduce(
+          (total, asignacion) =>
+            total.add(asignacion.cantidad_producto_terminado),
+          new Prisma.Decimal(0),
+        );
+        const idsInventario = new Set(
+          salidaLotes.map((salida) => salida.id_inventario),
+        );
+        const cantidadDisponible = existenciasActuales
+          .filter((stock) => idsInventario.has(stock.lote_inventario_id))
+          .reduce(
+            (total, stock) => total.add(stock.disponible),
+            new Prisma.Decimal(0),
+          );
+        if (cantidadProducida.lte(0)) return null;
+
+        const ventasCompatibles = ventas
+          .filter((ov) => compatibleConOV(op, ov))
+          .map((ov) => {
+            const actual = op.ventas_asignadas.find(
+              (a) => a.orden_venta_id === ov.id,
+            );
+            const asignadoEnOV = ov.produccion_asignada.reduce(
+              (total, asignacion) =>
+                total.add(asignacion.cantidad_producto_terminado),
+              new Prisma.Decimal(0),
+            );
+            return {
+              id: ov.id,
+              folio: ov.folio,
+              persona_id: ov.persona_id,
+              cliente: ov.cliente.nombre,
+              producto_id: ov.producto_id,
+              producto: ov.producto.nombre_Producto,
+              tipo_venta: ov.tipo_venta,
+              cantidad: ov.cantidad,
+              cantidad_asignada: asignadoEnOV,
+              cantidad_pendiente: Prisma.Decimal.max(
+                ov.cantidad.sub(asignadoEnOV),
+                0,
+              ),
+              cantidad_asignada_desde_esta_op:
+                actual?.cantidad_producto_terminado ??
+                new Prisma.Decimal(0),
+              unidad: ov.unidad,
+            };
+          })
+          .filter(
+            (ov) =>
+              (cantidadDisponible.gt(0) && ov.cantidad_pendiente.gt(0)) ||
+              ov.cantidad_asignada_desde_esta_op.gt(0),
+          );
+
+        return {
+          id_Orden_Produc: op.id_Orden_Produc,
+          no_Orden_Produc: op.no_Orden_Produc,
+          linea_Produccion: op.linea_Produccion,
+          producto_id: op.producto_id,
+          producto: op.productos_materiales.nombre_Producto,
+          unidad: op.unidad,
+          propietario_id: op.propietario_id,
+          propietario: op.propietario?.nombre ?? null,
+          fecha_Termino_Real: op.fecha_Termino_Real,
+          cantidad_producida_liberada: cantidadProducida,
+          cantidad_producto_terminado_asignada: cantidadAsignada,
+          cantidad_producto_terminado_disponible: Prisma.Decimal.max(
+            cantidadDisponible,
+            0,
+          ),
+          sobreasignada: cantidadAsignada.gt(cantidadProducida),
+          lotes: salidaLotes,
+          ventas_asignadas: op.ventas_asignadas.map((asignacion) => ({
+            orden_venta_id: asignacion.orden_venta_id,
+            folio: asignacion.orden_venta.folio,
+            cliente: asignacion.orden_venta.cliente.nombre,
+            cantidad_producto_terminado:
+              asignacion.cantidad_producto_terminado,
+            asignada_por: asignacion.cantidad_asignada_por,
+            asignada_en: asignacion.cantidad_asignada_en,
+          })),
+          ventas_compatibles: ventasCompatibles,
+        };
+      })
+      .filter((op): op is NonNullable<typeof op> => op !== null);
+
+    return { success: true, data: candidatos };
+  }
+
+  async asignarProductoTerminadoOV(id: number, b: any, u: Usuario) {
+    const ventaId = idValido(b.orden_venta_id);
+    const cantidad = decimalCrm(b.cantidad_producto_terminado, 4, true);
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id_Orden_Produc" FROM ordenes_produccion WHERE "id_Orden_Produc"=${id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${ventaId} FOR UPDATE`;
+      const [op, ov] = await Promise.all([
+        tx.ordenes_produccion.findUnique({
+          where: { id_Orden_Produc: id },
+          include: {
+            lotes_produccion: {
+              where: { estado: 'FINALIZADO', estado_Calida: 'LIBERADO' },
+              include: { inventario_obtenido: { select: { id: true } } },
+            },
+            ventas_asignadas: {
+              select: {
+                orden_venta_id: true,
+                cantidad_producto_terminado: true,
+              },
+            },
+          },
+        }),
+        tx.crm_ordenes_venta.findUnique({ where: { id: ventaId } }),
+      ]);
+      if (!op || !ov) throw new NotFoundException('Orden no encontrada');
+      if (op.estado_Plan !== 'FINALIZADA')
+        throw new BadRequestException(
+          'Cierra la OP antes de asignar producto terminado a una OV',
+        );
+      if (ov.estado !== 'CONFIRMADA')
+        throw new BadRequestException('La OV debe estar confirmada');
+      if (!compatibleConOV(op, ov))
+        throw new BadRequestException(
+          'Producto, unidad o propietario incompatible con la OV',
+        );
+
+      const idsLotesProduccion = op.lotes_produccion.map(
+        (lote) => lote.id_Lote_Produccion,
+      );
+      if (idsLotesProduccion.length)
+        await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" IN (${Prisma.join(idsLotesProduccion.sort((a, b) => a - b))}) ORDER BY "id_Lote_Produccion" FOR UPDATE`;
+      const idsInventario = op.lotes_produccion.flatMap((lote) =>
+        lote.inventario_obtenido.map((inventario) => inventario.id),
+      );
+      await bloquearMaterial(tx, idsInventario);
+      const inventario = idsInventario.length
+        ? await tx.lotes_inventario.findMany({
+            where: {
+              id: { in: idsInventario },
+              condicion: { in: [...condicionesProductoTerminado] },
+            },
+            include: { movimientos: { include: { reversion: true } } },
+          })
+        : [];
+      const cantidadProducida = inventario.reduce(
+        (total, lote) => total.add(cantidadSalidaProducida(lote)),
+        new Prisma.Decimal(0),
+      );
+      if (cantidadProducida.lte(0))
+        throw new BadRequestException(
+          'La OP no tiene producto terminado liberado disponible para asignar',
+        );
+
+      const llave = {
+        orden_venta_id_orden_produccion_id: {
+          orden_venta_id: ventaId,
+          orden_produccion_id: id,
+        },
+      };
+      const existente = await tx.crm_ordenes_venta_produccion.findUnique({
+        where: llave,
+      });
+      if (cantidad.isZero() && !existente)
+        throw new BadRequestException(
+          'La cantidad debe ser positiva para crear la asignación',
+        );
+
+      const existenciasActuales = await existencias(tx);
+      const cantidadSinAsignar = existenciasActuales
+        .filter((stock) => idsInventario.includes(stock.lote_inventario_id))
+        .reduce(
+          (total, stock) => total.add(stock.disponible),
+          new Prisma.Decimal(0),
+        );
+      const maximoDisponibleOP = cantidadSinAsignar.add(
+        existente?.cantidad_producto_terminado ?? 0,
+      );
+      const asignadoAOtrasOP = await tx.crm_ordenes_venta_produccion.aggregate({
+        where: {
+          orden_venta_id: ventaId,
+          orden_produccion_id: { not: id },
+        },
+        _sum: { cantidad_producto_terminado: true },
+      });
+      const maximoPendienteOV = ov.cantidad.sub(
+        asignadoAOtrasOP._sum.cantidad_producto_terminado ?? 0,
+      );
+      const cantidadActual =
+        existente?.cantidad_producto_terminado ?? new Prisma.Decimal(0);
+      if (cantidad.gt(maximoDisponibleOP) && cantidad.gt(cantidadActual))
+        throw new ConflictException(
+          `La OP solo tiene ${Prisma.Decimal.max(cantidadSinAsignar, 0).toString()} ${op.unidad} de producto terminado físicamente disponible sin asignar`,
+        );
+      if (cantidad.gt(maximoPendienteOV) && cantidad.gt(cantidadActual))
+        throw new ConflictException(
+          `La OV solo requiere ${Prisma.Decimal.max(maximoPendienteOV, 0).toString()} ${ov.unidad} adicionales`,
+        );
+
+      const ahora = new Date();
+      const asignacion = existente
+        ? await tx.crm_ordenes_venta_produccion.update({
+            where: llave,
+            data: {
+              cantidad_producto_terminado: cantidad,
+              cantidad_asignada_por: u.usuario,
+              cantidad_asignada_en: ahora,
+            },
+          })
+        : await tx.crm_ordenes_venta_produccion.create({
+            data: {
+              orden_venta_id: ventaId,
+              orden_produccion_id: id,
+              cantidad_producto_terminado: cantidad,
+              creado_por: u.usuario,
+              cantidad_asignada_por: u.usuario,
+              cantidad_asignada_en: ahora,
+            },
+          });
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'OP',
+          entidad_id: id,
+          ciclo: 1,
+          fecha: ahora,
+          accion: 'ASIGNAR_PRODUCTO_TERMINADO_OV',
+          detalle: JSON.stringify({
+            orden_venta_id: ventaId,
+            cantidad_producto_terminado: cantidad.toString(),
+            unidad: op.unidad,
+            realizado_por: u.usuario,
+          }),
+        },
+      });
+      return asignacion;
+    });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', {});
     return { success: true, data };
   }
 
@@ -1384,11 +1701,73 @@ export class ProductionService {
   async marcarRezagado(id: number, b: any, u: Usuario) {
     const motivo = texto(b.motivo, 4000);
     return this.prisma.$transaction(async (tx) => {
+      let lote = await tx.lotes_inventario.findUnique({ where: { id } });
+      if (!lote) throw new NotFoundException('Material no encontrado');
+      let ordenProduccionId: number | null = null;
+      if (
+        lote.lote_produccion_id &&
+        ['REGENERADO', 'TERMINADO'].includes(lote.condicion)
+      ) {
+        const produccionOrigen = await tx.lotes_produccion.findUnique({
+          where: { id_Lote_Produccion: lote.lote_produccion_id },
+          select: { orden_Produccion_id: true },
+        });
+        if (produccionOrigen?.orden_Produccion_id == null)
+          throw new BadRequestException('El LP no tiene OP de origen');
+        ordenProduccionId = produccionOrigen.orden_Produccion_id;
+        await tx.$queryRaw`SELECT "id_Orden_Produc" FROM ordenes_produccion WHERE "id_Orden_Produc" = ${ordenProduccionId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${lote.lote_produccion_id} FOR UPDATE`;
+      }
       await bloquearMaterial(tx, [id]);
-      const lote = await tx.lotes_inventario.findUnique({ where: { id } });
+      lote = await tx.lotes_inventario.findUnique({ where: { id } });
       if (!lote) throw new NotFoundException('Material no encontrado');
       if (['FUERA_DE_ESPECIFICACION', 'RESIDUO'].includes(lote.condicion))
         throw new BadRequestException('F.E. y residuos conservan su condición');
+      if (
+        lote.lote_produccion_id &&
+        ['REGENERADO', 'TERMINADO'].includes(lote.condicion)
+      ) {
+        if (ordenProduccionId == null)
+          throw new BadRequestException('El LP no tiene OP de origen');
+        const op = await tx.ordenes_produccion.findUnique({
+          where: { id_Orden_Produc: ordenProduccionId },
+          include: {
+            ventas_asignadas: {
+              select: { cantidad_producto_terminado: true },
+            },
+            lotes_produccion: {
+              where: {
+                estado: 'FINALIZADO',
+                estado_Calida: 'LIBERADO',
+                id_Lote_Produccion: { not: lote.lote_produccion_id },
+              },
+              include: {
+                inventario_obtenido: {
+                  where: { condicion: { in: [...condicionesProductoTerminado] } },
+                  include: { movimientos: { include: { reversion: true } } },
+                },
+              },
+            },
+          },
+        });
+        if (!op) throw new NotFoundException('OP de origen no encontrada');
+        const comprometido = op.ventas_asignadas.reduce(
+          (total, asignacion) =>
+            total.add(asignacion.cantidad_producto_terminado),
+          new Prisma.Decimal(0),
+        );
+        const otrasSalidas = op.lotes_produccion
+          .flatMap((lp) => lp.inventario_obtenido)
+          .reduce(
+            (total, inventario) =>
+              total.add(cantidadSalidaProducida(inventario)),
+            new Prisma.Decimal(0),
+          );
+        if (comprometido.gt(otrasSalidas))
+          throw new ConflictException(
+            'Este producto está comprometido con una OV. Reduce la asignación o conserva suficiente producto liberado en esta OP antes de marcarlo como rezagado.',
+          );
+      }
       await tx.proceso_eventos.create({
         data: {
           entidad: 'INVENTARIO',

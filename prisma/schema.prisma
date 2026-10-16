@@ -2,7 +2,7 @@
 // Backend/frontend adaptados al inventario y reproceso; aplicar SQL incremental antes del despliegue.
 // No usar reset/db push sobre la base compartida. Ver prisma/actualizaciones/.
 // Legal y KPI se conservan íntegros; no borrar toda la base para aplicar este rediseño.
-// Una venta = un producto y un servicio. OP opcionalmente ligada a una sola venta.
+// Una venta = un producto y un servicio. Una OP puede aportar producto terminado a varias OV.
 // Existencia = movimientos físicos; reserva != consumo; recepción != producción.
 // Restricciones locales adicionales: restricciones_modelo.sql. Reglas entre tablas,
 // saldo y concurrencia: ver REVISION_MODELO.md; requieren implementación transaccional.
@@ -1091,12 +1091,18 @@ model manifiesto_eventos {
 }
 
 /// Trazabilidad muchos-a-muchos entre órdenes de venta y producción.
-/// Las cantidades se controlan en inventario y entregas, no aquí.
+/// cantidad_producto_terminado registra la salida real de la OP aportada a la OV;
+/// la carga de entrada y el saldo físico siguen controlándose en inventario.
 model crm_ordenes_venta_produccion {
   orden_venta_id       Int
   orden_produccion_id  Int
+  /// Producto terminado real de esta OP reservado para cumplir esta OV.
+  /// No representa la carga ni la cantidad planificada de la OP.
+  cantidad_producto_terminado Decimal            @default(0) @db.Decimal(18, 4)
   creado_por           String             @db.VarChar(100)
   creado_en            DateTime           @default(now()) @db.Timestamptz(6)
+  cantidad_asignada_por String?            @db.VarChar(100)
+  cantidad_asignada_en  DateTime?          @db.Timestamptz(6)
   orden_venta          crm_ordenes_venta  @relation(fields: [orden_venta_id], references: [id], onDelete: Restrict, map: "fk_crm_ov_op_venta")
   orden_produccion     ordenes_produccion @relation(fields: [orden_produccion_id], references: [id_Orden_Produc], onDelete: Restrict, map: "fk_crm_ov_op_produccion")
 
