@@ -63,6 +63,17 @@ type FilaExistenciaResumen = {
     }>;
   } | null;
 };
+type OrdenVentaDisponible = {
+  id: number;
+  folio: string;
+  persona_id: number;
+  producto_id: number;
+  cantidad: string | number;
+  unidad: string;
+  tipo_venta: string;
+  cliente: { nombre: string };
+  producto: { nombre_Producto: string };
+};
 function resumirContenedores(stock: FilaExistenciaResumen[]) {
   const grupos = new Map<
     string,
@@ -162,6 +173,7 @@ export default function TanquesPage() {
     [cat, setCat] = useState<any>({ ubicaciones: [] }),
     [stock, setStock] = useState<any[]>([]),
     [lotesPendientes, setLotesPendientes] = useState<any[]>([]);
+  const [ordenesVenta, setOrdenesVenta] = useState<OrdenVentaDisponible[]>([]);
   const [tab, setTab] = useState("tanques"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -174,18 +186,23 @@ export default function TanquesPage() {
     } | null>(null),
     [plan, setPlan] = useState(false);
   const cargar = useCallback(async () => {
-    const [o, t, m, c, maybeLotes] = await Promise.all([
+    const usuarioActual = sesionActual();
+    const [o, t, m, c, maybeLotes, maybeOrdenesVenta] = await Promise.all([
       pedir("/api/produccion/test", undefined, "GET"),
       pedir("/api/produccion/tanques?tipo=GRAFITO", undefined, "GET"),
       pedir("/api/calidad/obtenerMuestras", undefined, "GET"),
       pedir("/api/produccion/catalogos", undefined, "GET"),
       pedir("/api/produccion/lotes-pendientes", undefined, "GET"),
+      usuarioActual?.area === "produccion"
+        ? pedir("/api/produccion/ordenes-venta-disponibles", undefined, "GET")
+        : Promise.resolve({ data: [] }),
     ]);
     setOrdenes(o.result);
     setBitacora(o.bitacora);
     setTanques(t.result);
     setCat(c);
     setLotesPendientes(maybeLotes.data ?? []);
+    setOrdenesVenta(maybeOrdenesVenta.data ?? []);
     const ids = new Set(
       o.result.flatMap((o: any) =>
         o.lotes_produccion.map((l: any) => l.id_Lote_Produccion),
@@ -252,6 +269,22 @@ export default function TanquesPage() {
     (total, grupo) => total + grupo.envases.size,
     0,
   );
+  const ventasCompatibles =
+    form?.tipo === "vincular"
+      ? ordenesVenta.filter((ov) => {
+          const op = form.dato;
+          if (
+            ov.producto_id !== op.producto_id ||
+            ov.unidad !== op.unidad
+          )
+            return false;
+          const propietario = Number(op.propietario_id ?? 0);
+          return propietario > 0
+            ? ov.tipo_venta === "SERVICIO_REGENERACION" &&
+                ov.persona_id === propietario
+            : ov.tipo_venta !== "SERVICIO_REGENERACION";
+        })
+      : [];
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-5 md:p-8">
       <header className="flex justify-between flex-wrap gap-3 mb-6">
@@ -340,12 +373,15 @@ export default function TanquesPage() {
                         </p>
                         <p>{l.orden.productos_materiales.nombre_Producto}</p>
                         <p className="text-slate-400">
-                          {l.orden.crm_ordenes_venta?.cliente.nombre ??
-                            l.orden.propietario?.nombre ??
-                            "Producción propia"}{" "}
-                          ·{" "}
-                          {l.orden.crm_ordenes_venta?.folio ??
-                            "Sin orden de venta"}
+                          {l.orden.ventas_asignadas?.length
+                            ? l.orden.ventas_asignadas
+                                .map(
+                                  (a: any) =>
+                                    `OV ${a.orden_venta.folio} · ${a.orden_venta.cliente.nombre}`,
+                                )
+                                .join(" | ")
+                            : l.orden.propietario?.nombre ??
+                              "Producción propia"}
                         </p>
                         <p className="mt-2">
                           Carga: {cantidad(l.cantidad_cargada ?? l.cantidad_consumida)}{" "}
@@ -455,21 +491,29 @@ export default function TanquesPage() {
                         Plan: {cantidad(o.cantidad_Planificada)} {o.unidad} ·
                         Responsable: {o.responsable.nombre}
                       </p>
-                      <p>
-                        {o.crm_ordenes_venta?.folio ?? "Sin OV"} ·{" "}
-                        {o.crm_ordenes_venta?.cliente.nombre ??
-                          o.propietario?.nombre ??
-                          "Producción propia"}
-                      </p>
+                      {o.ventas_asignadas?.length ? (
+                        <ul className="mt-2 space-y-1 text-slate-300">
+                          {o.ventas_asignadas.map((a: any) => (
+                            <li key={a.orden_venta_id}>
+                              OV {a.orden_venta.folio} ·{" "}
+                              {a.orden_venta.cliente.nombre}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>
+                          Sin OV asignada ·{" "}
+                          {o.propietario?.nombre ?? "Producción propia"}
+                        </p>
+                      )}
                     </div>
                     {produccion &&
-                      !o.orden_venta_id &&
                       o.estado_Plan !== "CANCELADA" && (
                         <button
                           className={boton}
                           onClick={() => setForm({ tipo: "vincular", dato: o })}
                         >
-                          Vincular con venta
+                          Relacionar con OV
                         </button>
                       )}
                     {produccion &&
@@ -904,7 +948,7 @@ export default function TanquesPage() {
                     iniciar: "Iniciar lote de producción",
                     mover: "Trasladar lote completo",
                     descargar: "Registrar producto obtenido",
-                    vincular: "Vincular OP con orden de venta",
+                    vincular: "Relacionar OP con orden de venta",
                     rezagado: "Marcar material rezagado",
                     estado: "Cambiar proceso del tanque",
                     nota: "Añadir nota a la bitácora",
@@ -1270,14 +1314,28 @@ export default function TanquesPage() {
                 )}
                 {form.tipo === "vincular" && (
                   <label>
-                    ID de la orden de venta
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      name="orden_venta_id"
-                      className={input}
-                    />
+                    Orden de venta activa
+                    <select required name="orden_venta_id" className={input}>
+                      <option value="">Selecciona una OV</option>
+                      {ventasCompatibles.map((ov) => (
+                        <option key={ov.id} value={ov.id}>
+                          {ov.folio} · {ov.cliente.nombre} ·{" "}
+                          {ov.producto.nombre_Producto} · {cantidad(ov.cantidad)}{" "}
+                          {ov.unidad}
+                        </option>
+                      ))}
+                    </select>
+                    {!ventasCompatibles.length && (
+                      <p className="mt-2 text-sm text-amber-300">
+                        No hay órdenes confirmadas compatibles con el producto,
+                        la unidad y el propietario de esta OP.
+                      </p>
+                    )}
+                    <p className="mt-2 text-sm text-slate-400">
+                      Esta acción registra la trazabilidad OV↔OP. No consume ni
+                      mueve inventario; las entregas y sus cantidades se
+                      registran por separado en cada OV.
+                    </p>
                   </label>
                 )}
                 {form.tipo === "rezagado" && (
