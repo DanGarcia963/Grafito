@@ -244,8 +244,13 @@ export class ProductionService {
           );
         if (cantidadProducida.lte(0)) return null;
 
+        const ventasVinculadas = new Set(
+          op.ventas_asignadas.map((asignacion) => asignacion.orden_venta_id),
+        );
         const ventasCompatibles = ventas
-          .filter((ov) => compatibleConOV(op, ov))
+          .filter(
+            (ov) => ventasVinculadas.has(ov.id) && compatibleConOV(op, ov),
+          )
           .map((ov) => {
             const actual = op.ventas_asignadas.find(
               (a) => a.orden_venta_id === ov.id,
@@ -350,6 +355,14 @@ export class ProductionService {
       if (!compatibleConOV(op, ov))
         throw new BadRequestException(
           'Producto, unidad o propietario incompatible con la OV',
+        );
+      if (
+        !op.ventas_asignadas.some(
+          (asignacion) => asignacion.orden_venta_id === ventaId,
+        )
+      )
+        throw new BadRequestException(
+          'Primero vincula esta OV a la OP desde Órdenes y lotes',
         );
 
       const idsLotesProduccion = op.lotes_produccion.map(

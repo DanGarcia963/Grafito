@@ -667,7 +667,7 @@ export default function TanquesPage() {
               <div className="rounded-xl border border-cyan-800 bg-cyan-950/30 p-4">
                 <h2 className="font-bold text-cyan-100">Producto terminado disponible para pedidos</h2>
                 <p className="mt-1 text-sm text-slate-300">
-                  Esta bandeja muestra OP finalizadas y producto descargado con liberación de Calidad. La carga de entrada de la OP no cuenta como cumplimiento; registra cuánto producto terminado real aporta a cada OV. El mismo kg no puede asignarse a dos ventas.
+                  Esta bandeja muestra OP finalizadas y producto descargado con liberación de Calidad. La carga de entrada de la OP no cuenta como cumplimiento; registra cuánto producto terminado real aporta a cada OV. El mismo kg no puede asignarse a dos ventas. Solo aparecen OV previamente vinculadas desde “Órdenes y lotes”.
                 </p>
               </div>
               {asignacionesProductoOV.map((op: any) => (
@@ -702,7 +702,7 @@ export default function TanquesPage() {
                     </table>
                   </div>
                   <div className="space-y-2">
-                    <h4 className="font-semibold">Aportes por orden de venta</h4>
+                    <h4 className="font-semibold">OV vinculadas a esta OP</h4>
                     {op.ventas_compatibles.map((ov: any) => {
                       const actual = Number(ov.cantidad_asignada_desde_esta_op ?? 0);
                       const maximo = Math.min(
@@ -713,7 +713,7 @@ export default function TanquesPage() {
                         <div key={ov.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 p-3">
                           <div>
                             <strong>OV {ov.folio} · {ov.cliente}</strong>
-                            <p className="text-sm text-slate-400">Pedido {cantidad(ov.cantidad)} {ov.unidad} · Aporte de esta OP: {cantidad(actual)} {ov.unidad} · Saldo OV antes de esta OP: {cantidad(ov.cantidad_pendiente)} {ov.unidad}</p>
+                            <p className="text-sm text-slate-400">Pedido {cantidad(ov.cantidad)} {ov.unidad} · Aporte de esta OP: {cantidad(actual)} {ov.unidad} · Pendiente global de la OV: {cantidad(ov.cantidad_pendiente)} {ov.unidad}</p>
                           </div>
                           <button className={boton} onClick={() => setForm({ tipo: "asignar-producto", dato: { op, venta: ov } })}>
                             {actual > 0 ? "Ajustar aporte" : "Asignar producto"}
@@ -722,7 +722,7 @@ export default function TanquesPage() {
                       );
                     })}
                     {!op.ventas_compatibles.length && (
-                      <p className="text-sm text-slate-400">No hay OV confirmadas compatibles con este producto, unidad y propietario.</p>
+                      <p className="text-sm text-slate-400">No hay OV confirmadas vinculadas y compatibles con esta OP. Primero relaciónala desde “Órdenes y lotes” con “Vincular OV”.</p>
                     )}
                   </div>
                 </article>
