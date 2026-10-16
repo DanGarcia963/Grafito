@@ -174,6 +174,7 @@ export default function TanquesPage() {
     [stock, setStock] = useState<any[]>([]),
     [lotesPendientes, setLotesPendientes] = useState<any[]>([]);
   const [ordenesVenta, setOrdenesVenta] = useState<OrdenVentaDisponible[]>([]);
+  const [asignacionesProductoOV, setAsignacionesProductoOV] = useState<any[]>([]);
   const [tab, setTab] = useState("tanques"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -187,7 +188,7 @@ export default function TanquesPage() {
     [plan, setPlan] = useState(false);
   const cargar = useCallback(async () => {
     const usuarioActual = sesionActual();
-    const [o, t, m, c, maybeLotes, maybeOrdenesVenta] = await Promise.all([
+    const [o, t, m, c, maybeLotes, maybeOrdenesVenta, maybeAsignaciones] = await Promise.all([
       pedir("/api/produccion/test", undefined, "GET"),
       pedir("/api/produccion/tanques?tipo=GRAFITO", undefined, "GET"),
       pedir("/api/calidad/obtenerMuestras", undefined, "GET"),
@@ -196,6 +197,9 @@ export default function TanquesPage() {
       usuarioActual?.area === "produccion"
         ? pedir("/api/produccion/ordenes-venta-disponibles", undefined, "GET")
         : Promise.resolve({ data: [] }),
+      usuarioActual?.area === "produccion"
+        ? pedir("/api/produccion/asignaciones-producto-ov", undefined, "GET")
+        : Promise.resolve({ data: [] }),
     ]);
     setOrdenes(o.result);
     setBitacora(o.bitacora);
@@ -203,6 +207,7 @@ export default function TanquesPage() {
     setCat(c);
     setLotesPendientes(maybeLotes.data ?? []);
     setOrdenesVenta(maybeOrdenesVenta.data ?? []);
+    setAsignacionesProductoOV(maybeAsignaciones.data ?? []);
     const ids = new Set(
       o.result.flatMap((o: any) =>
         o.lotes_produccion.map((l: any) => l.id_Lote_Produccion),
@@ -323,11 +328,16 @@ export default function TanquesPage() {
         {[
           ["tanques", "Tanques"],
           ["ordenes", "Órdenes y lotes"],
+          ["asignaciones", "Asignar producto a OV"],
           ["muestras", "Muestras de Calidad"],
           ["inventario", "Existencias"],
           ["bitacora", "Bitácora"],
         ]
-          .filter(([key]) => key !== "inventario" || produccion)
+          .filter(([key]) =>
+            ["inventario", "asignaciones"].includes(String(key))
+              ? produccion
+              : true,
+          )
           .map(([key, label]) => (
             <button
               key={key}
@@ -496,7 +506,7 @@ export default function TanquesPage() {
                           {o.ventas_asignadas.map((a: any) => (
                             <li key={a.orden_venta_id}>
                               OV {a.orden_venta.folio} ·{" "}
-                              {a.orden_venta.cliente.nombre}
+                              {a.orden_venta.cliente.nombre} · Aporta {cantidad(a.cantidad_producto_terminado)} {o.unidad} de producto terminado
                             </li>
                           ))}
                         </ul>
@@ -513,7 +523,7 @@ export default function TanquesPage() {
                           className={boton}
                           onClick={() => setForm({ tipo: "vincular", dato: o })}
                         >
-                          Relacionar con OV
+                          Vincular OV (trazabilidad)
                         </button>
                       )}
                     {produccion &&
@@ -650,6 +660,76 @@ export default function TanquesPage() {
                 </article>
               ))}
               {!ordenes.length && <p>No hay órdenes de la línea GRAFITO.</p>}
+            </section>
+          )}
+          {tab === "asignaciones" && produccion && (
+            <section className="space-y-4">
+              <div className="rounded-xl border border-cyan-800 bg-cyan-950/30 p-4">
+                <h2 className="font-bold text-cyan-100">Producto terminado disponible para pedidos</h2>
+                <p className="mt-1 text-sm text-slate-300">
+                  Esta bandeja muestra OP finalizadas y producto descargado con liberación de Calidad. La carga de entrada de la OP no cuenta como cumplimiento; registra cuánto producto terminado real aporta a cada OV. El mismo kg no puede asignarse a dos ventas.
+                </p>
+              </div>
+              {asignacionesProductoOV.map((op: any) => (
+                <article key={op.id_Orden_Produc} className="rounded-xl border border-slate-700 bg-slate-900 p-5 space-y-3">
+                  <div className="flex flex-wrap justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold">OP {op.no_Orden_Produc} · {op.producto}</h3>
+                      <p className="text-slate-400">{op.linea_Produccion ?? "Sin línea"} · {op.propietario ?? "Producción propia"} · Cerrada {op.fecha_Termino_Real ? new Date(op.fecha_Termino_Real).toLocaleDateString("es-MX") : ""}</p>
+                    </div>
+                    <div className="text-sm">
+                      <p>Producto liberado: <strong>{cantidad(op.cantidad_producida_liberada)} {op.unidad}</strong></p>
+                      <p>Ya asignado: {cantidad(op.cantidad_producto_terminado_asignada)} {op.unidad}</p>
+                      <p className={op.sobreasignada ? "text-red-300" : "text-emerald-300"}>
+                        Disponible: {cantidad(op.cantidad_producto_terminado_disponible)} {op.unidad}
+                        {op.sobreasignada ? " · revisar sobreasignación" : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="overflow-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead><tr className="text-slate-400"><th className="p-2">Lote de producción</th><th>Inventario terminado</th><th>Condición</th><th>Cantidad liberada</th></tr></thead>
+                      <tbody>
+                        {op.lotes.map((l: any) => (
+                          <tr className="border-t border-slate-700" key={l.id_inventario}>
+                            <td className="p-2">{l.no_Lote ?? `LP #${l.id_Lote_Produccion}`}</td>
+                            <td>{l.folio_inventario}</td>
+                            <td>{etiquetaCondicion[l.condicion] ?? l.condicion}</td>
+                            <td>{cantidad(l.cantidad)} {op.unidad}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-semibold">Aportes por orden de venta</h4>
+                    {op.ventas_compatibles.map((ov: any) => {
+                      const actual = Number(ov.cantidad_asignada_desde_esta_op ?? 0);
+                      const maximo = Math.min(
+                        Number(op.cantidad_producto_terminado_disponible ?? 0) + actual,
+                        Number(ov.cantidad_pendiente ?? 0) + actual,
+                      );
+                      return (
+                        <div key={ov.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 p-3">
+                          <div>
+                            <strong>OV {ov.folio} · {ov.cliente}</strong>
+                            <p className="text-sm text-slate-400">Pedido {cantidad(ov.cantidad)} {ov.unidad} · Aporte de esta OP: {cantidad(actual)} {ov.unidad} · Saldo OV antes de esta OP: {cantidad(ov.cantidad_pendiente)} {ov.unidad}</p>
+                          </div>
+                          <button className={boton} onClick={() => setForm({ tipo: "asignar-producto", dato: { op, venta: ov } })}>
+                            {actual > 0 ? "Ajustar aporte" : "Asignar producto"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {!op.ventas_compatibles.length && (
+                      <p className="text-sm text-slate-400">No hay OV confirmadas compatibles con este producto, unidad y propietario.</p>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {!asignacionesProductoOV.length && (
+                <p className="rounded-xl border border-slate-700 p-5 text-slate-300">Todavía no hay OP cerradas con producto terminado liberado para asignar.</p>
+              )}
             </section>
           )}
           {tab === "muestras" && (
@@ -899,6 +979,11 @@ export default function TanquesPage() {
                         </td>
                         <td>
                           {cantidad(s.reservado)} {s.unidad}
+                          {Number(s.reservado_producto_venta ?? 0) > 0 && (
+                            <p className="text-xs text-amber-300">
+                              {cantidad(s.reservado_producto_venta)} {s.unidad} comprometidos a OV
+                            </p>
+                          )}
                         </td>
                         <td>
                           {cantidad(s.disponible)} {s.unidad}
@@ -949,6 +1034,7 @@ export default function TanquesPage() {
                     mover: "Trasladar lote completo",
                     descargar: "Registrar producto obtenido",
                     vincular: "Relacionar OP con orden de venta",
+                    "asignar-producto": "Asignar producto terminado a OV",
                     rezagado: "Marcar material rezagado",
                     estado: "Cambiar proceso del tanque",
                     nota: "Añadir nota a la bitácora",
@@ -1028,6 +1114,15 @@ export default function TanquesPage() {
                     await pedir(
                       `/api/produccion/ordenes/${d.id_Orden_Produc}/vincular-venta`,
                       b,
+                    );
+                  if (form.tipo === "asignar-producto")
+                    await pedir(
+                      `/api/produccion/ordenes/${d.op.id_Orden_Produc}/asignar-producto-ov`,
+                      {
+                        orden_venta_id: d.venta.id,
+                        cantidad_producto_terminado:
+                          b.cantidad_producto_terminado,
+                      },
                     );
                   if (form.tipo === "rezagado")
                     await pedir(
@@ -1332,12 +1427,43 @@ export default function TanquesPage() {
                       </p>
                     )}
                     <p className="mt-2 text-sm text-slate-400">
-                      Esta acción registra la trazabilidad OV↔OP. No consume ni
-                      mueve inventario; las entregas y sus cantidades se
-                      registran por separado en cada OV.
+                      Esto solo enlaza la trazabilidad OV↔OP para planear el
+                      trabajo y registrar propiedad. No cuenta kg de
+                      cumplimiento; el aporte se captura cuando la OP está
+                      finalizada y su producto terminado fue liberado.
                     </p>
                   </label>
                 )}
+                {form.tipo === "asignar-producto" && (() => {
+                  const { op, venta } = form.dato;
+                  const actual = Number(
+                    venta.cantidad_asignada_desde_esta_op ?? 0,
+                  );
+                  const maximo = Math.min(
+                    Number(op.cantidad_producto_terminado_disponible ?? 0) + actual,
+                    Number(venta.cantidad_pendiente ?? 0) + actual,
+                  );
+                  return (
+                    <>
+                      <input type="hidden" name="orden_venta_id" value={venta.id} />
+                      <p>OP <strong>{op.no_Orden_Produc}</strong> → OV <strong>{venta.folio}</strong> · {venta.cliente}</p>
+                      <p className="text-sm text-slate-300">La cantidad es producto terminado real de esta OP. Disponible en la OP para esta actualización: hasta {cantidad(maximo)} {op.unidad}. Captura 0 para retirar el aporte existente.</p>
+                      <label>
+                        Producto terminado aportado a esta OV ({op.unidad})
+                        <input
+                          required
+                          name="cantidad_producto_terminado"
+                          type="number"
+                          min="0"
+                          max={maximo}
+                          step="0.0001"
+                          defaultValue={actual || ""}
+                          className={input}
+                        />
+                      </label>
+                    </>
+                  );
+                })()}
                 {form.tipo === "rezagado" && (
                   <label>
                     Motivo

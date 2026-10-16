@@ -90,6 +90,7 @@ type OrdenProduccionVista = {
   tipo_Operacion: string;
   linea_Produccion: string | null;
   cantidad_Planificada: string;
+  cantidad_producto_terminado?: string | number;
   unidad: string;
   estado_Plan: string;
   fecha_Inicio_Plan: string | null;
@@ -124,6 +125,9 @@ type CumplimientoVista = {
   etiqueta: string;
   pasos: { key: string; label: string; estado: string; detalle: string }[];
   cantidad_solicitada: number;
+  cantidad_producto_terminado_asignada: number;
+  cantidad_producto_terminado_pendiente: number;
+  porcentaje_producto_terminado_asignado: number;
   cantidad_despachada: number;
   cantidad_entregada: number;
   porcentaje_entregado: number;
@@ -1239,6 +1243,22 @@ export default function VentasCRM() {
                                   {cantidad(c?.cantidad_solicitada, o.unidad)}
                                 </span>
                                 <span>
+                                  Producto terminado asignado:{" "}
+                                  {cantidad(
+                                    c?.cantidad_producto_terminado_asignada,
+                                    o.unidad,
+                                  )}
+                                  {" · "}
+                                  {c?.porcentaje_producto_terminado_asignado ?? 0}%
+                                </span>
+                                <span>
+                                  Pendiente de asignar:{" "}
+                                  {cantidad(
+                                    c?.cantidad_producto_terminado_pendiente,
+                                    o.unidad,
+                                  )}
+                                </span>
+                                <span>
                                   Entregado:{" "}
                                   {cantidad(c?.cantidad_entregada, o.unidad)}
                                 </span>
@@ -1340,6 +1360,11 @@ export default function VentasCRM() {
                                           <small>
                                             {cantidad(
                                               p.cantidad_Planificada,
+                                              p.unidad,
+                                            )}{" "}
+                                            planificados · Producto terminado aportado:{" "}
+                                            {cantidad(
+                                              p.cantidad_producto_terminado,
                                               p.unidad,
                                             )}{" "}
                                             ·{" "}
