@@ -926,6 +926,10 @@ export class CalidadService {
 
   async finalizarAnalisis(payload: any) {
     const id = this.tiempos.id(payload?.idMuestra);
+        if (
+      !Object.values(muestras_categoria_Muestra).includes(payload?.tipoMuestra)
+    )
+      throw new BadRequestException('Tipo de muestra inválido');
     if (!['APROBADO', 'RECHAZADO'].includes(payload?.dictamen))
       throw new BadRequestException('Dictamen inválido');
     if (!Array.isArray(payload?.mediciones) || !payload.mediciones.length)
@@ -978,6 +982,7 @@ export class CalidadService {
         const dictamen = await worker.actualizarEstadoMuestra({
           idMuestra: id,
           dictamen: payload.dictamen,
+          tipoMuestra: payload.tipoMuestra,
           observaciones: String(payload.observaciones ?? ''),
           analistaNombre: payload.analistaNombre,
         });
@@ -1009,7 +1014,7 @@ export class CalidadService {
         await this.tiempos.transicion(tx, ctx, null);
         await this.tiempos.evento(tx, ctx, tramo.ciclo, 'FIN_ANALISIS', {
           dictamen: payload.dictamen,
-          tipoMuestra: muestra.categoria_Muestra,
+          tipoMuestra: payload.tipoMuestra,
           analistaDeclarado: payload.analistaNombre ?? null,
           observaciones: payload.observaciones ?? null,
         });
