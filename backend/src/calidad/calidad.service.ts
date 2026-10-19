@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma.service';
 import {
   Prisma,
   lotes_produccion_estado_Calida,
+  muestras_categoria_Muestra,
   muestras_estado_Muestra,
 } from '@prisma/client';
 
@@ -619,11 +620,13 @@ export class CalidadService {
   private async actualizarEstadoMuestra({
     idMuestra,
     dictamen,
+    tipoMuestra,
     observaciones,
     analistaNombre,
   }: {
     idMuestra: number;
     dictamen: string;
+    tipoMuestra: string;
     observaciones: string;
     analistaNombre?: string;
   }) {
@@ -680,6 +683,7 @@ export class CalidadService {
         },
         data: {
           estado_Muestra: dictamen as muestras_estado_Muestra,
+          categoria_Muestra: tipoMuestra as muestras_categoria_Muestra,
           observaciones: observaciones,
           analista_id: idAnalista, // <--- Asignamos la llave foránea
         },
