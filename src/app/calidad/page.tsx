@@ -615,7 +615,7 @@ const guardarResultados = async (e: React.FormEvent) => {
     const respuesta = await fetch(`${API_URL}/api/calidad/finalizarAnalisis`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idMuestra: Number(idMuestra), mediciones: listaMediciones,
-        dictamen, observaciones, analistaNombre: analistaNombre.trim() }),
+        dictamen, tipoMuestra, observaciones, analistaNombre: analistaNombre.trim() }),
     });
     const resultado = await respuesta.json();
     if (!respuesta.ok || !resultado.success) throw new Error(resultado.message || resultado.error || 'No se pudo finalizar');
@@ -1531,9 +1531,16 @@ return (
                       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                         Tipo de Muestra
                       </label>
-                      <p className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm font-medium text-slate-200">
-                        {tipoMuestra.replaceAll('_', ' ')}
-                      </p>
+                      <select
+                        value={tipoMuestra}
+                        onChange={(e) => setTipoMuestra(e.target.value)}
+                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
+                      >
+                        <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
+                        <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
+                        <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
+                        <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
+                      </select>
                     </div>
 
                     {/* Buscador / Creador de Analista */}
