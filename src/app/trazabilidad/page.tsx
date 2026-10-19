@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { API_URL, apiFetch as fetch } from '@/utils/api';
+import { API_URL, apiFetch as fetch, sesionActual } from '@/utils/api';
 export default function TrazabilidadPage() {
  const [entidad,setEntidad]=useState(''), [id,setId]=useState(''), [lote,setLote]=useState('');
  const [desde,setDesde]=useState(''), [hasta,setHasta]=useState(''), [datos,setDatos]=useState<any[]>([]);
@@ -22,7 +22,8 @@ export default function TrazabilidadPage() {
   const csv=filas.map(f=>f.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
   const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='tiempos_procesos.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
- return <main className="max-w-6xl mx-auto p-6 space-y-5 text-slate-800 bg-white min-h-screen"><h1 className="text-2xl font-bold">Tiempos de procesos</h1><a href="/tanques" className="underline">Tanques</a> · <a href="/calidad" className="underline">Calidad</a>
+ const mostrarCalidad = sesionActual()?.area === 'calidad';
+ return <main className="max-w-6xl mx-auto p-6 space-y-5 text-slate-800 bg-white min-h-screen"><h1 className="text-2xl font-bold">Tiempos de procesos</h1><a href="/tanques" className="underline">Tanques</a>{mostrarCalidad&&<> · <a href="/calidad" className="underline">Calidad</a></>}
  <p>Selecciona una cohorte por fecha de inicio. El límite final es exclusivo. Los tiempos abiertos y los registros históricos sin hora no entran en las estadísticas. Las fechas de captura se interpretan en la zona horaria de tu navegador; el CSV usa UTC.</p>
  <form onSubmit={e=>{e.preventDefault();void consultar();}} className="flex flex-wrap gap-3 items-end">
  <label>Entidad<select className="block border p-2" value={entidad} onChange={e=>setEntidad(e.target.value)}><option value="">Todas</option><option>MUESTRA</option><option>TANQUE</option></select></label>

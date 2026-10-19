@@ -33,8 +33,9 @@ export default function PlanProduccion({
       .catch((e) => setError(e.message));
   }, [venta]);
   return (
-    <section className="p-5 border rounded-xl bg-white text-slate-900">
-      <h2 className="font-bold">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="presentation">
+    <section role="dialog" aria-modal="true" aria-labelledby="titulo-crear-op" className="my-auto max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-300 bg-white p-5 text-slate-900 shadow-2xl">
+      <h2 id="titulo-crear-op" className="font-bold">
         Crear orden de producción{" "}
         {venta ? `para OV #${venta.id}` : "independiente"}
       </h2>
@@ -211,5 +212,6 @@ export default function PlanProduccion({
         </fieldset>
       </form>
     </section>
+    </div>
   );
 }

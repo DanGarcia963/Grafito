@@ -148,9 +148,9 @@ function resumirContenedores(stock: FilaExistenciaResumen[]) {
   }
   const ordenCondiciones = [
     "SUCIO",
+    "REGENERADO",
     "NUEVO",
     "FUERA_DE_ESPECIFICACION",
-    "REGENERADO",
     "TERMINADO",
     "INTERMEDIO",
     "INSUMO",
@@ -163,6 +163,22 @@ function resumirContenedores(stock: FilaExistenciaResumen[]) {
     return (ai < 0 ? ordenCondiciones.length : ai) - (bi < 0 ? ordenCondiciones.length : bi);
   });
 }
+const compararFolio = (a: unknown, b: unknown) =>
+  String(a ?? "").localeCompare(String(b ?? ""), "es-MX", {
+    numeric: true,
+    sensitivity: "base",
+  });
+const prioridadEstadoOP = (op: any) => {
+  const estado = String(op?.estado_Plan ?? "").toUpperCase();
+  if (estado === "CANCELADA") return 2;
+  return ["FINALIZADA", "FINALIZADO"].includes(estado) ? 1 : 0;
+};
+const pendienteOVs = (op: any) =>
+  (op?.ventas_compatibles ?? []).reduce(
+    (total: number, venta: any) =>
+      total + Number(venta.cantidad_pendiente ?? 0),
+    0,
+  );
 export default function TanquesPage() {
   const socket = useSocket();
   const [productoEspec, setProductoEspec] = useState("");
@@ -270,6 +286,20 @@ export default function TanquesPage() {
       !lotes.some((l) => l.tanque_id === t.id_Equipos_Tanques),
   );
   const resumenContenedores = resumirContenedores(stock);
+  const ordenesOrdenadas = [...ordenes].sort((a, b) => {
+    const prioridad = prioridadEstadoOP(a) - prioridadEstadoOP(b);
+    if (prioridad) return prioridad;
+    const folio = compararFolio(a.no_Orden_Produc, b.no_Orden_Produc);
+    if (folio) return folio;
+    return (
+      Number(!a.ventas_asignadas?.length) -
+      Number(!b.ventas_asignadas?.length)
+    );
+  });
+  const asignacionesOrdenadas = [...asignacionesProductoOV].sort((a, b) => {
+    const folio = compararFolio(a.no_Orden_Produc, b.no_Orden_Produc);
+    return folio || pendienteOVs(b) - pendienteOVs(a);
+  });
   const totalContenedores = resumenContenedores.reduce(
     (total, grupo) => total + grupo.envases.size,
     0,
@@ -304,9 +334,11 @@ export default function TanquesPage() {
           <Link className={boton} href="/">
             Inicio
           </Link>
-          <Link className={boton} href="/calidad">
-            Calidad
-          </Link>
+          {!produccion && (
+            <Link className={boton} href="/calidad">
+              Calidad
+            </Link>
+          )}
           <button
             className={boton}
             disabled={busy}
@@ -483,7 +515,7 @@ export default function TanquesPage() {
                   }}
                 />
               )}
-              {ordenes.map((o) => (
+              {ordenesOrdenadas.map((o) => (
                 <article
                   key={o.id_Orden_Produc}
                   className="p-5 border border-slate-700 bg-slate-900 rounded-xl"
@@ -629,28 +661,6 @@ export default function TanquesPage() {
                               >
                                 Añadir nota
                               </button>
-                              {user?.area === "calidad" &&
-                                l.estado_Calida === "APROBADO" && (
-                                  <button
-                                    className={boton}
-                                    disabled={busy}
-                                    onClick={() =>
-                                      void ejecutar(() =>
-                                        pedir(
-                                          "/api/produccion/actualizarEstatusCalidad",
-                                          {
-                                            idLoteProduccion:
-                                              l.id_Lote_Produccion,
-                                            estadoCalidad: "LIBERADO",
-                                          },
-                                          "PUT",
-                                        ),
-                                      )
-                                    }
-                                  >
-                                    Liberar lote
-                                  </button>
-                                )}
                             </td>
                           </tr>
                         ))}
@@ -670,7 +680,7 @@ export default function TanquesPage() {
                   Esta bandeja muestra OP finalizadas y producto descargado con liberación de Calidad. La carga de entrada de la OP no cuenta como cumplimiento; registra cuánto producto terminado real aporta a cada OV. El mismo kg no puede asignarse a dos ventas. Solo aparecen OV previamente vinculadas desde “Órdenes y lotes”.
                 </p>
               </div>
-              {asignacionesProductoOV.map((op: any) => (
+              {asignacionesOrdenadas.map((op: any) => (
                 <article key={op.id_Orden_Produc} className="rounded-xl border border-slate-700 bg-slate-900 p-5 space-y-3">
                   <div className="flex flex-wrap justify-between gap-3">
                     <div>
@@ -703,7 +713,14 @@ export default function TanquesPage() {
                   </div>
                   <div className="space-y-2">
                     <h4 className="font-semibold">OV vinculadas a esta OP</h4>
-                    {op.ventas_compatibles.map((ov: any) => {
+                    {[...op.ventas_compatibles]
+                      .sort(
+                        (a: any, b: any) =>
+                          Number(b.cantidad_pendiente ?? 0) -
+                            Number(a.cantidad_pendiente ?? 0) ||
+                          compararFolio(a.folio, b.folio),
+                      )
+                      .map((ov: any) => {
                       const actual = Number(ov.cantidad_asignada_desde_esta_op ?? 0);
                       const maximo = Math.min(
                         Number(op.cantidad_producto_terminado_disponible ?? 0) + actual,
@@ -741,11 +758,10 @@ export default function TanquesPage() {
           {tab === "muestras" && (
             <section className="space-y-3">
               <p>
-                La recepción, los análisis y el dictamen se registran en{" "}
-                <Link href="/calidad" className="underline text-cyan-300">
-                  Calidad
-                </Link>
-                .
+                {produccion
+                  ? "Seguimiento de las muestras asociadas a los lotes de Grafito. El análisis y el dictamen los realiza Calidad."
+                  : <>La recepción, los análisis y el dictamen se registran en{" "}
+                    <Link href="/calidad" className="underline text-cyan-300">Calidad</Link>.</>}
               </p>
               {muestras.map((m) => (
                 <article
@@ -755,6 +771,11 @@ export default function TanquesPage() {
                   <h2 className="font-bold">
                     {m.no_Muestra} · {m.productos_materiales?.nombre_Producto}
                   </h2>
+                  {m.categoria_Muestra === "MUESTRA_AJUSTADO" && (
+                    <span className={`mt-2 inline-flex rounded-full border px-2 py-1 text-xs ${m.certificado_calidad ? "border-emerald-700 bg-emerald-950/50 text-emerald-300" : "border-amber-700 bg-amber-950/40 text-amber-200"}`}>
+                      {m.certificado_calidad ? "Certificado cargado" : "Sin certificado"}
+                    </span>
+                  )}
                   <p>
                     Lote {m.lotes_produccion?.no_Lote} · {m.estado_Muestra} ·{" "}
                     {m.categoria_Muestra}
@@ -769,7 +790,27 @@ export default function TanquesPage() {
                     Tiempos y análisis
                   </button>
                   {m.estado_Muestra === "RECHAZADO" &&
-                    user?.area === "calidad" && (
+                    m.categoria_Muestra === "MUESTRA_AJUSTADO" &&
+                    user?.area === "produccion" &&
+                    Number(m.tiempoActual?.ciclo ?? 1) === 1 && (
+                      <button
+                        className={boton}
+                        disabled={busy}
+                        onClick={() =>
+                          void ejecutar(() =>
+                            pedir(
+                              `/api/calidad/${m.id_Muestra}/segundo-ciclo`,
+                              {},
+                            ),
+                          )
+                        }
+                      >
+                        Solicitar segundo ciclo de análisis
+                      </button>
+                    )}
+                  {m.estado_Muestra === "RECHAZADO" &&
+                    user?.area === "calidad" &&
+                    m.categoria_Muestra !== "MUESTRA_AJUSTADO" && (
                       <>
                         <button
                           className={boton}
@@ -781,24 +822,6 @@ export default function TanquesPage() {
                           }
                         >
                           Reabrir análisis / segundo ajuste
-                        </button>
-                        <button
-                          className={boton}
-                          disabled={busy}
-                          onClick={() =>
-                            void ejecutar(() =>
-                              pedir(
-                                "/api/calidad/actualizarEstatusMuestra",
-                                {
-                                  id_Muestra: m.id_Muestra,
-                                  estatus_Muestra: "APROBADO",
-                                },
-                                "PUT",
-                              ),
-                            )
-                          }
-                        >
-                          Liberación manual de muestra
                         </button>
                       </>
                     )}
