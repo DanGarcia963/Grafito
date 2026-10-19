@@ -62,9 +62,10 @@ const CalidadMuestrasScreen: React.FC = () => {
   const [erroresCarga, setErroresCarga] = useState<Record<string, string>>({});
   useEffect(() => {
     const comprobar = () => {
-      const valida = Boolean(sesionActual()?.token);
+      const sesion = sesionActual();
+      const valida = Boolean(sesion?.token && sesion.area === 'calidad');
       setSesionLista(valida);
-      if (!valida) router.replace('/');
+      if (!valida) router.replace(sesion?.area === 'produccion' ? '/tanques' : '/');
     };
     comprobar();
     window.addEventListener('sesion-cambiada', comprobar);
@@ -78,6 +79,10 @@ const CalidadMuestrasScreen: React.FC = () => {
   const [loadingMuestras, setLoadingMuestras] = useState<boolean>(true);
   const [loadingMuestrasDictaminadas, setLoadingMuestrasDictaminadas] = useState<boolean>(true);
   const [muestrasDictaminadas, setMuestrasDictaminadas] = useState<any[]>([]);
+  const [muestrasCertificadoPendiente, setMuestrasCertificadoPendiente] = useState<any[]>([]);
+  const [loadingCertificados, setLoadingCertificados] = useState(false);
+  const [subiendoCertificado, setSubiendoCertificado] = useState<number | null>(null);
+  const [errorCertificado, setErrorCertificado] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<string>('TODOS'); // Cambiado a TODOS por defecto
   const [tipoMuestra, setTipoMuestra] = useState<string>('MUESTRA_INICIAL');
@@ -105,8 +110,8 @@ const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
 
   const [contenedores, setContenedores] = useState<ContenedorState[]>([])
 
-// Pestaña activa: 'MUESTRAS' o 'CHECKLIST'
-  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CHECKLIST'>('MUESTRAS');
+// Pestañas de muestras, certificados y checklist de recepción.
+  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CERTIFICADOS' | 'CHECKLIST'>('MUESTRAS');
 
   // Estado del Modal de Captura
   const [muestraSeleccionada, setMuestraSeleccionada] = useState<any | null>(null);
@@ -297,6 +302,7 @@ const cargarLotesLlegada = async () => {
   // 1. Cargar Muestras desde la API
   const versionMuestras = useRef(0);
   const versionDictaminadas = useRef(0);
+const versionCertificados = useRef(0);
   const fetchMuestras = useCallback(async () => {
     const version = ++versionMuestras.current;
     setLoadingMuestras(true);
@@ -364,6 +370,27 @@ const fetchMuestrasDictaminadas = useCallback(async () => {
   }
 }, []);
 
+const fetchCertificadosPendientes = useCallback(async () => {
+  const version = ++versionCertificados.current;
+  setLoadingCertificados(true);
+  try {
+    setErroresCarga(prev => ({ ...prev, 'Certificados pendientes': '' }));
+    const res = await fetch(`${API_URL}/api/calidad/certificados/pendientes`);
+    const data = await res.json();
+    if (!res.ok || !data.success)
+      throw new Error(data.message || data.error || 'No se pudieron cargar los certificados pendientes');
+    if (version === versionCertificados.current)
+      setMuestrasCertificadoPendiente(Array.isArray(data.result) ? data.result : []);
+  } catch (error) {
+    setErroresCarga(prev => ({
+      ...prev,
+      'Certificados pendientes': error instanceof Error ? error.message : 'Error de conexión',
+    }));
+  } finally {
+    if (version === versionCertificados.current) setLoadingCertificados(false);
+  }
+}, []);
+
 const obtenerTipoMuestra = (muestra: any): string => {
   const valor =
     muestra?.tipo_Muestra ||
@@ -415,14 +442,18 @@ const obtenerTipoMuestra = (muestra: any): string => {
 
 useEffect(() => {
     if (!sesionLista) return;
-    const refrescar = () => { void fetchMuestras(); void fetchMuestrasDictaminadas(); };
+    const refrescar = () => {
+      void fetchMuestras();
+      void fetchMuestrasDictaminadas();
+      void fetchCertificadosPendientes();
+    };
     refrescar();
     fetchParametros();
     if (!socket) return;
     const eventos = ['connect', 'ESTATUS_TANQUE_CAMBIADO', 'MUESTRA_CREADA', 'MUESTRA_ACTUALIZADA'];
     eventos.forEach(evento => socket.on(evento, refrescar));
     return () => { eventos.forEach(evento => socket.off(evento, refrescar)); };
-  }, [sesionLista, socket, fetchMuestras, fetchMuestrasDictaminadas, fetchParametros]);
+  }, [sesionLista, socket, fetchMuestras, fetchMuestrasDictaminadas, fetchCertificadosPendientes, fetchParametros]);
 
   const [accionTiempo, setAccionTiempo] = useState<number | null>(null);
   const [errorTiempo, setErrorTiempo] = useState('');
@@ -433,9 +464,49 @@ useEffect(() => {
       const res = await fetch(`${API_URL}/api/calidad/${id}/${accion}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || data.error || 'No se pudo guardar');
-      await Promise.all([fetchMuestras(), fetchMuestrasDictaminadas()]);
+      await Promise.all([fetchMuestras(), fetchMuestrasDictaminadas(), fetchCertificadosPendientes()]);
     } catch (error) { setErrorTiempo(error instanceof Error ? error.message : 'Error de conexión'); }
     finally { setAccionTiempo(null); }
+  };
+
+  const subirCertificado = async (muestraId: number, form: HTMLFormElement) => {
+    setSubiendoCertificado(muestraId);
+    setErrorCertificado('');
+    try {
+      const body = new FormData(form);
+      const res = await fetch(`${API_URL}/api/calidad/muestras/${muestraId}/certificado`, {
+        method: 'POST',
+        body,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success)
+        throw new Error(data.message || data.error || 'No se pudo guardar el certificado');
+      form.reset();
+      await Promise.all([fetchMuestras(), fetchMuestrasDictaminadas(), fetchCertificadosPendientes()]);
+    } catch (error) {
+      setErrorCertificado(error instanceof Error ? error.message : 'Error al cargar el certificado');
+    } finally {
+      setSubiendoCertificado(null);
+    }
+  };
+
+  const descargarCertificado = async (muestraId: number, nombre: string) => {
+    setErrorCertificado('');
+    try {
+      const res = await fetch(`${API_URL}/api/calidad/muestras/${muestraId}/certificado`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || data?.error || 'No se pudo descargar el certificado');
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = nombre || `certificado-muestra-${muestraId}.pdf`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setErrorCertificado(error instanceof Error ? error.message : 'Error al descargar el certificado');
+    }
   };
 
 // Al abrir el modal, inicializamos los parámetros seleccionados con los que vienen de la BD
@@ -544,7 +615,7 @@ const guardarResultados = async (e: React.FormEvent) => {
     const respuesta = await fetch(`${API_URL}/api/calidad/finalizarAnalisis`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idMuestra: Number(idMuestra), mediciones: listaMediciones,
-        dictamen, tipoMuestra, observaciones, analistaNombre: analistaNombre.trim() }),
+        dictamen, observaciones, analistaNombre: analistaNombre.trim() }),
     });
     const resultado = await respuesta.json();
     if (!respuesta.ok || !resultado.success) throw new Error(resultado.message || resultado.error || 'No se pudo finalizar');
@@ -685,14 +756,25 @@ return (
             >
               <Truck className="w-4 h-4" /> Checklist Recepción
             </button>
+            <button
+              onClick={() => setVistaActiva('CERTIFICADOS')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                vistaActiva === 'CERTIFICADOS'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <PackageCheck className="w-4 h-4" /> Certificados pendientes
+              <span className="rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px]">{muestrasCertificadoPendiente.length}</span>
+            </button>
           </div>
 
       <button 
-        onClick={fetchMuestras}
-        disabled={loadingMuestras}
+        onClick={() => void Promise.all([fetchMuestras(), fetchMuestrasDictaminadas(), fetchCertificadosPendientes()])}
+        disabled={loadingMuestras || loadingCertificados}
         className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
       >
-        <RefreshCw className={`w-4 h-4 ${loadingMuestras ? 'animate-spin' : ''}`} /> Actualizar Lista
+        <RefreshCw className={`w-4 h-4 ${loadingMuestras || loadingCertificados ? 'animate-spin' : ''}`} /> Actualizar Lista
       </button>
     </div>
     {vistaActiva === 'MUESTRAS' && (
@@ -793,6 +875,20 @@ return (
                       {renderBadgeEstado(data.estado)}
                     </div>
 
+                    {data.tipoMuestra === 'MUESTRA_AJUSTADO' && (
+                      <div className="mb-3">
+                        {muestra.certificado_calidad ? (
+                          <span className="inline-flex items-center rounded-full border border-emerald-700 bg-emerald-950/60 px-2 py-1 text-[11px] font-medium text-emerald-300">
+                            Certificado cargado · {muestra.certificado_calidad.folio_Certificado}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full border border-amber-700 bg-amber-950/50 px-2 py-1 text-[11px] font-medium text-amber-200">
+                            Sin certificado
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                     <div className="space-y-2.5 text-sm border-t border-slate-800/80 pt-4 mb-4">
                       <div className="flex items-center justify-between text-slate-300">
                         <span className="text-slate-500 flex items-center gap-1.5">
@@ -843,7 +939,16 @@ return (
                     {!esFinalizada && muestra.tiempoActual?.etapa === 'ESPERA_ANALISIS' && !muestra.tiempoActual.fin && (
                       <button type="button" disabled={accionTiempo !== null} onClick={() => ejecutarTiempo(Number(data.id), 'iniciar')} className="w-full rounded bg-cyan-700 p-2 text-white disabled:opacity-50">Iniciar análisis</button>
                     )}
-                    {esFinalizada && <button type="button" disabled={accionTiempo !== null} onClick={() => ejecutarTiempo(Number(data.id), 'reabrir')} className="w-full rounded border border-amber-500 p-2 text-amber-300">Solicitar nuevo ciclo de análisis</button>}
+                    {esFinalizada && data.tipoMuestra !== 'MUESTRA_AJUSTADO' && <button type="button" disabled={accionTiempo !== null} onClick={() => ejecutarTiempo(Number(data.id), 'reabrir')} className="w-full rounded border border-amber-500 p-2 text-amber-300">Solicitar nuevo ciclo de análisis</button>}
+                    {muestra.certificado_calidad && (
+                      <button
+                        type="button"
+                        onClick={() => void descargarCertificado(Number(data.id), muestra.certificado_calidad.documento_nombre)}
+                        className="w-full rounded border border-emerald-700 p-2 text-emerald-300"
+                      >
+                        Descargar certificado de calidad
+                      </button>
+                    )}
                     <button type="button" onClick={() => setMuestraHistorial(Number(data.id))} className="w-full rounded border p-2 text-slate-300">Ver tiempos e historial</button>
                     <button
                       onClick={() => abrirModalCaptura(muestra)}
@@ -878,6 +983,41 @@ return (
           </div>
         )}
     </>
+    )}
+    {vistaActiva === 'CERTIFICADOS' && (
+      <section className="space-y-5">
+        <div className="rounded-xl border border-cyan-900 bg-cyan-950/30 p-4">
+          <h2 className="font-semibold text-cyan-100">Certificados de muestras Ajustado aprobadas</h2>
+          <p className="mt-1 text-sm text-slate-300">Al guardar el PDF, el lote cambia de Aprobado a Liberado. Solo aparecen muestras aprobadas que aún no tienen certificado.</p>
+        </div>
+        {errorCertificado && <p role="alert" className="rounded-lg border border-red-800 bg-red-950/50 p-3 text-red-200">{errorCertificado}</p>}
+        {loadingCertificados ? (
+          <p className="text-slate-400">Cargando muestras pendientes de certificado…</p>
+        ) : muestrasCertificadoPendiente.length === 0 ? (
+          <p className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-slate-300">No hay muestras Ajustado aprobadas pendientes de certificado.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {muestrasCertificadoPendiente.map((muestra) => (
+              <article key={muestra.id_Muestra} className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-5">
+                <div>
+                  <h3 className="font-semibold text-white">Muestra {muestra.no_Muestra} · Lote {muestra.lotes_produccion?.no_Lote}</h3>
+                  <p className="mt-1 text-sm text-slate-400">{muestra.productos_materiales?.nombre_Producto} · {muestra.equipos_tanques?.nombre_Equipo ?? 'Sin tanque'} · {muestra.fecha_Toma ? new Date(muestra.fecha_Toma).toLocaleDateString('es-MX') : 'Sin fecha'}</p>
+                  {muestra.observaciones && <p className="mt-2 text-sm text-slate-300">{muestra.observaciones}</p>}
+                </div>
+                <form onSubmit={(event) => { event.preventDefault(); void subirCertificado(muestra.id_Muestra, event.currentTarget); }} className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs text-slate-400">Folio del certificado<input required name="folio_Certificado" maxLength={50} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
+                  <label className="text-xs text-slate-400">Número de certificado<input required name="no_Certificado" maxLength={50} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
+                  <label className="text-xs text-slate-400">Fecha de emisión<input required type="date" name="fecha_Emision" defaultValue={new Date().toISOString().slice(0, 10)} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
+                  <label className="text-xs text-slate-400">Documento PDF (máximo 10 MB)<input required type="file" name="documento" accept="application/pdf,.pdf" className="mt-1 block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white" /></label>
+                  <button type="submit" disabled={subiendoCertificado !== null} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2">
+                    {subiendoCertificado === muestra.id_Muestra ? 'Guardando certificado…' : 'Guardar certificado y liberar lote'}
+                  </button>
+                </form>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     )}
     {/* ==================================================================== */}
       {/* VISTA 2: CHECKLIST MANTENIMIENTO (LOTES DE GRAFITO SUCIO) */}
@@ -1386,21 +1526,14 @@ return (
                       )}
                     </div>
 
-                    {/* Tipo de muestra */}
+                    {/* El tipo está definido al crear la muestra; Calidad no puede cambiarlo al dictaminar. */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                         Tipo de Muestra
                       </label>
-                      <select
-                        value={tipoMuestra}
-                        onChange={(e) => setTipoMuestra(e.target.value)}
-                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
-                      >
-                        <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
-                        <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
-                        <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
-                        <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
-                      </select>
+                      <p className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm font-medium text-slate-200">
+                        {tipoMuestra.replaceAll('_', ' ')}
+                      </p>
                     </div>
 
                     {/* Buscador / Creador de Analista */}

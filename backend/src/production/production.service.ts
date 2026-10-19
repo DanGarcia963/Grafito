@@ -619,57 +619,6 @@ export class ProductionService {
     return { idLoteProduccion: id, tanqueId: destino };
   }
 
-  async actualizarEstatusCalidad({
-    idLoteProduccion,
-  }: {
-    idLoteProduccion: number;
-    estadoCalidad: 'LIBERADO';
-  }) {
-    const id = this.tiempos.id(idLoteProduccion);
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${id} FOR UPDATE`;
-      const lote = await tx.lotes_produccion.findUnique({
-        where: { id_Lote_Produccion: id },
-      });
-      if (!lote) throw new NotFoundException('Lote no encontrado');
-      if (lote.estado_Calida === 'FUERA_DE_ESPECIFICACION')
-        throw new BadRequestException(
-          'F.E. descargado requiere una nueva OP de reproceso',
-        );
-      await tx.$queryRaw`SELECT id FROM lotes_inventario WHERE lote_produccion_id=${id} ORDER BY id FOR UPDATE`;
-      const ultima = await tx.muestras.findFirst({
-        where: { lote_id: id, area_Muestra: 'CALIDAD' },
-        orderBy: { id_Muestra: 'desc' },
-      });
-      if (!ultima || ultima.estado_Muestra !== 'APROBADO')
-        throw new BadRequestException(
-          'La última muestra debe estar aprobada por Calidad',
-        );
-      if (lote.estado_Calida !== 'LIBERADO' && lote.tanque_id) {
-        const ctx = {
-          entidad: 'TANQUE' as const,
-          entidad_id: lote.tanque_id,
-          tanque_id: lote.tanque_id,
-          lote_id: id,
-        };
-        const ultimo = await this.tiempos.ultimo(tx, ctx);
-        await this.tiempos.evento(
-          tx,
-          ctx,
-          ultimo?.ciclo ?? 1,
-          'LIBERACION_LOTE',
-          { anterior: lote.estado_Calida },
-        );
-      }
-      return tx.lotes_produccion.update({
-        where: { id_Lote_Produccion: id },
-        data: { estado_Calida: 'LIBERADO' },
-      });
-    });
-    this.eventos.notificar('TANQUE_ACTUALIZADO', { idLoteProduccion });
-    return result;
-  }
-
   async agregarRegistroBitacora({
     idLoteProduccion,
     registro,

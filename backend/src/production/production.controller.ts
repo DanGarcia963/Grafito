@@ -154,19 +154,6 @@ export class ProductionController {
     };
   }
 
-  @Areas('calidad')
-  @Put('actualizarEstatusCalidad')
-  async actualizarEstatusCalidad(
-    @Body() body: { idLoteProduccion: number; estadoCalidad: 'LIBERADO' },
-  ) {
-    const result = await this.productionService.actualizarEstatusCalidad(body);
-
-    return {
-      success: true,
-      data: result,
-    };
-  }
-
   // NUEVO ENDPOINT
   @Post('guardarBitacora')
   async guardarBitacora(

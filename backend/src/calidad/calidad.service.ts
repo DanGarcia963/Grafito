@@ -4,13 +4,13 @@ import { EventsGateway } from '../events.gateway';
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import {
   Prisma,
-  muestras_categoria_Muestra,
   lotes_produccion_estado_Calida,
   muestras_estado_Muestra,
 } from '@prisma/client';
@@ -91,6 +91,18 @@ export class CalidadService {
             },
           },
 
+          certificado_calidad: {
+            select: {
+              id_Certif_Calidad: true,
+              folio_Certificado: true,
+              no_Certificado: true,
+              fecha_Emision: true,
+              estatus: true,
+              documento_nombre: true,
+              documento_mime: true,
+            },
+          },
+
           productos_materiales: {
             select: {
               id_Produc_Mater: true,
@@ -136,6 +148,191 @@ export class CalidadService {
     } catch (error: any) {
       return { success: false, error: error.message };
     }
+  }
+
+  async obtenerMuestrasPendientesCertificado() {
+    const result = await this.prisma.muestras.findMany({
+      where: {
+        area_Muestra: 'CALIDAD',
+        categoria_Muestra: 'MUESTRA_AJUSTADO',
+        estado_Muestra: 'APROBADO',
+        lote_id: { not: null },
+        certificado_calidad: { is: null },
+        lotes_produccion: { is: { estado_Calida: 'APROBADO' } },
+      },
+      select: {
+        id_Muestra: true,
+        no_Muestra: true,
+        fecha_Toma: true,
+        observaciones: true,
+        lote_id: true,
+        tanque_id: true,
+        productos_materiales: { select: { nombre_Producto: true } },
+        equipos_tanques: { select: { nombre_Equipo: true } },
+        lotes_produccion: {
+          select: {
+            id_Lote_Produccion: true,
+            no_Lote: true,
+            estado_Calida: true,
+            ordenes_produccion: {
+              select: { unidad: true, cantidad_Planificada: true },
+            },
+          },
+        },
+      },
+      orderBy: { id_Muestra: 'desc' },
+    });
+    return { success: true, result };
+  }
+
+  async subirCertificadoCalidad(
+    idEntrada: unknown,
+    body: Record<string, unknown>,
+    documento: Express.Multer.File | undefined,
+    usuario?: { personaId?: number },
+  ) {
+    const muestraId = this.tiempos.id(idEntrada);
+    if (
+      !documento?.buffer?.length ||
+      documento.mimetype !== 'application/pdf' ||
+      documento.buffer.subarray(0, 5).toString() !== '%PDF-'
+    )
+      throw new BadRequestException('Adjunta un certificado PDF válido.');
+    if (documento.size > 10 * 1024 * 1024)
+      throw new BadRequestException('El certificado no puede superar 10 MB.');
+
+    const folio = String(body.folio_Certificado ?? '').trim();
+    const numero = String(body.no_Certificado ?? '').trim();
+    const fechaTexto = String(body.fecha_Emision ?? '').trim();
+    if (!folio || folio.length > 50 || !numero || numero.length > 50)
+      throw new BadRequestException(
+        'El folio y el número del certificado son obligatorios (máximo 50 caracteres).',
+      );
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaTexto))
+      throw new BadRequestException('La fecha de emisión no es válida.');
+    const fechaEmision = new Date(`${fechaTexto}T12:00:00.000Z`);
+    if (
+      Number.isNaN(fechaEmision.getTime()) ||
+      fechaEmision.toISOString().slice(0, 10) !== fechaTexto
+    )
+      throw new BadRequestException('La fecha de emisión no es válida.');
+    const nombreDocumento = String(
+      documento.originalname || 'certificado-calidad.pdf',
+    )
+      .replace(/[\\/]/g, '_')
+      .trim()
+      .slice(0, 255);
+
+    const certificado = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${muestraId} FOR UPDATE`;
+      const muestra = await tx.muestras.findUnique({
+        where: { id_Muestra: muestraId },
+      });
+      if (!muestra || muestra.area_Muestra !== 'CALIDAD')
+        throw new NotFoundException('Muestra de Calidad no encontrada.');
+      if (
+        muestra.categoria_Muestra !== 'MUESTRA_AJUSTADO' ||
+        muestra.estado_Muestra !== 'APROBADO' ||
+        !muestra.lote_id
+      )
+        throw new BadRequestException(
+          'El certificado solo se puede cargar para una muestra Ajustado aprobada y ligada a un lote de producción.',
+        );
+      await this.bloquearOrigen(tx, muestra);
+      await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${muestra.lote_id} FOR UPDATE`;
+      const lote = await tx.lotes_produccion.findUnique({
+        where: { id_Lote_Produccion: muestra.lote_id },
+      });
+      if (!lote) throw new NotFoundException('Lote de producción no encontrado.');
+      if (lote.estado_Calida !== 'APROBADO')
+        throw new BadRequestException(
+          'El lote debe estar aprobado por la muestra Ajustado antes de cargar el certificado.',
+        );
+      const existente = await tx.certificado_calidad.findUnique({
+        where: { muestra_id: muestraId },
+        select: { id_Certif_Calidad: true },
+      });
+      if (existente)
+        throw new ConflictException('Esta muestra ya tiene un certificado.');
+
+      const ahora = new Date();
+      const creado = await tx.certificado_calidad.create({
+        data: {
+          folio_Certificado: folio,
+          no_Certificado: numero,
+          lote_id: muestra.lote_id,
+          muestra_id: muestra.id_Muestra,
+          cliente_id: muestra.cliente_id,
+          aprobado_Por_id: usuario?.personaId ?? null,
+          solicitante_id: usuario?.personaId ?? null,
+          fecha_Emision: fechaEmision,
+          fecha_Liberacion: ahora,
+          hora_Liberacion: ahora,
+          estatus: 'EMITIDO',
+          estatus_Calidad: 'APROBADO',
+          documento_nombre: nombreDocumento,
+          documento_mime: 'application/pdf',
+          documento_contenido: new Uint8Array(documento.buffer),
+        },
+        select: {
+          id_Certif_Calidad: true,
+          folio_Certificado: true,
+          no_Certificado: true,
+          fecha_Emision: true,
+          documento_nombre: true,
+          documento_mime: true,
+        },
+      });
+      await tx.lotes_produccion.update({
+        where: { id_Lote_Produccion: muestra.lote_id },
+        data: { estado_Calida: 'LIBERADO' },
+      });
+      const contexto = {
+        entidad: 'MUESTRA' as const,
+        entidad_id: muestra.id_Muestra,
+        lote_id: muestra.lote_id,
+        tanque_id: muestra.tanque_id,
+      };
+      const ultimo = await this.tiempos.ultimo(tx, contexto);
+      await this.tiempos.evento(
+        tx,
+        contexto,
+        ultimo?.ciclo ?? 1,
+        'CERTIFICADO_CALIDAD_EMITIDO',
+        {
+          loteId: muestra.lote_id,
+          certificadoId: creado.id_Certif_Calidad,
+          folio: creado.folio_Certificado,
+        },
+      );
+      return creado;
+    });
+    this.eventos.notificar('MUESTRA_ACTUALIZADA', { id_Muestra: muestraId });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', { muestraId });
+    return { success: true, result: certificado };
+  }
+
+  async obtenerDocumentoCertificado(idEntrada: unknown) {
+    const muestraId = this.tiempos.id(idEntrada);
+    const certificado = await this.prisma.certificado_calidad.findUnique({
+      where: { muestra_id: muestraId },
+      select: {
+        documento_nombre: true,
+        documento_mime: true,
+        documento_contenido: true,
+      },
+    });
+    if (
+      !certificado?.documento_contenido?.length ||
+      !certificado.documento_nombre ||
+      !certificado.documento_mime
+    )
+      throw new NotFoundException('Certificado no encontrado.');
+    return {
+      nombre: certificado.documento_nombre,
+      mime: certificado.documento_mime,
+      buffer: Buffer.from(certificado.documento_contenido),
+    };
   }
 
   async buscarEspecificacionesMuestra(muestraID: number) {
@@ -422,13 +619,11 @@ export class CalidadService {
   private async actualizarEstadoMuestra({
     idMuestra,
     dictamen,
-    tipoMuestra,
     observaciones,
     analistaNombre,
   }: {
     idMuestra: number;
     dictamen: string;
-    tipoMuestra: string;
     observaciones: string;
     analistaNombre?: string;
   }) {
@@ -485,7 +680,6 @@ export class CalidadService {
         },
         data: {
           estado_Muestra: dictamen as muestras_estado_Muestra,
-          categoria_Muestra: tipoMuestra as muestras_categoria_Muestra,
           observaciones: observaciones,
           analista_id: idAnalista, // <--- Asignamos la llave foránea
         },
@@ -567,11 +761,19 @@ export class CalidadService {
           throw new BadRequestException(
             'Solo se puede reabrir una muestra dictaminada',
           );
-        if (muestra.lote_id)
-          await tx.lotes_produccion.update({
-            where: { id_Lote_Produccion: muestra.lote_id },
-            data: { estado_Calida: 'EN_ANALISIS' },
-          });
+        if (muestra.categoria_Muestra === 'MUESTRA_AJUSTADO')
+          throw new BadRequestException(
+            muestra.estado_Muestra === 'RECHAZADO'
+              ? 'Producción debe decidir si solicita el segundo ciclo; también puede tomarse otra muestra del tanque.'
+              : 'Una muestra Ajustado aprobada debe continuar al certificado de calidad.',
+          );
+        const certificadoExistente = await tx.certificado_calidad.count({
+          where: { muestra_id: id },
+        });
+        if (certificadoExistente)
+          throw new BadRequestException(
+            'La muestra ya tiene certificado; no se puede reabrir su análisis.',
+          );
         if (muestra.lote_inventario_id)
           await tx.lotes_inventario.update({
             where: { id: muestra.lote_inventario_id },
@@ -640,12 +842,86 @@ export class CalidadService {
     return resultado;
   }
 
+  async solicitarSegundoCiclo(idEntrada: unknown) {
+    const id = this.tiempos.id(idEntrada);
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id_Muestra" FROM muestras WHERE "id_Muestra" = ${id} FOR UPDATE`;
+      const muestra = await tx.muestras.findUnique({
+        where: { id_Muestra: id },
+      });
+      if (!muestra || muestra.area_Muestra !== 'CALIDAD')
+        throw new NotFoundException('Muestra de Calidad no encontrada.');
+      if (
+        muestra.categoria_Muestra !== 'MUESTRA_AJUSTADO' ||
+        muestra.estado_Muestra !== 'RECHAZADO' ||
+        !muestra.lote_id
+      )
+        throw new BadRequestException(
+          'Solo se puede solicitar un segundo ciclo para una muestra Ajustado rechazada de un lote de producción.',
+        );
+      await this.bloquearOrigen(tx, muestra);
+      await tx.$queryRaw`SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion" = ${muestra.lote_id} FOR UPDATE`;
+      const lote = await tx.lotes_produccion.findUnique({
+        where: { id_Lote_Produccion: muestra.lote_id },
+        select: { estado_Calida: true },
+      });
+      if (lote?.estado_Calida !== 'RECHAZADO')
+        throw new BadRequestException(
+          'El lote debe estar rechazado por la muestra Ajustado para solicitar un segundo ciclo.',
+        );
+      const certificado = await tx.certificado_calidad.count({
+        where: { muestra_id: id },
+      });
+      if (certificado)
+        throw new BadRequestException(
+          'La muestra ya tiene certificado de calidad.',
+        );
+      const ultimo = await this.tiempos.ultimo(tx, {
+        entidad: 'MUESTRA',
+        entidad_id: id,
+        lote_id: muestra.lote_id,
+        tanque_id: muestra.tanque_id,
+      });
+      if (!ultimo || !ultimo.fin || ultimo.ciclo !== 1)
+        throw new BadRequestException(
+          'El segundo ciclo ya fue utilizado o el primer análisis no ha concluido.',
+        );
+      const contexto = {
+        entidad: 'MUESTRA' as const,
+        entidad_id: id,
+        lote_id: muestra.lote_id,
+        tanque_id: muestra.tanque_id,
+      };
+      const tramo = await this.tiempos.transicion(
+        tx,
+        contexto,
+        'REANALISIS_PENDIENTE',
+        true,
+      );
+      await tx.muestras.update({
+        where: { id_Muestra: id },
+        data: { estado_Muestra: 'PENDIENTE' },
+      });
+      await tx.lotes_produccion.update({
+        where: { id_Lote_Produccion: muestra.lote_id },
+        data: { estado_Calida: 'EN_ANALISIS' },
+      });
+      await this.tiempos.evento(
+        tx,
+        contexto,
+        tramo!.ciclo,
+        'SEGUNDO_CICLO_AUTORIZADO_PRODUCCION',
+        { estadoAnterior: muestra.estado_Muestra },
+      );
+      return { success: true, ciclo: tramo!.ciclo };
+    });
+    this.eventos.notificar('MUESTRA_ACTUALIZADA', { id_Muestra: id });
+    this.eventos.notificar('TANQUE_ACTUALIZADO', { muestraId: id });
+    return resultado;
+  }
+
   async finalizarAnalisis(payload: any) {
     const id = this.tiempos.id(payload?.idMuestra);
-    if (
-      !Object.values(muestras_categoria_Muestra).includes(payload?.tipoMuestra)
-    )
-      throw new BadRequestException('Tipo de muestra inválido');
     if (!['APROBADO', 'RECHAZADO'].includes(payload?.dictamen))
       throw new BadRequestException('Dictamen inválido');
     if (!Array.isArray(payload?.mediciones) || !payload.mediciones.length)
@@ -668,6 +944,8 @@ export class CalidadService {
         });
         if (!muestra || muestra.area_Muestra !== 'CALIDAD')
           throw new NotFoundException('Muestra de Calidad no encontrada');
+        if (muestra.estado_Muestra === 'APROBADO' || muestra.estado_Muestra === 'RECHAZADO')
+          throw new BadRequestException('La muestra ya cuenta con dictamen.');
         await this.bloquearOrigen(tx, muestra);
         const ctx = {
           entidad: 'MUESTRA' as const,
@@ -694,14 +972,19 @@ export class CalidadService {
         if (!resultados.success)
           throw new BadRequestException(resultados.error);
         const dictamen = await worker.actualizarEstadoMuestra({
-          ...payload,
           idMuestra: id,
+          dictamen: payload.dictamen,
+          observaciones: String(payload.observaciones ?? ''),
+          analistaNombre: payload.analistaNombre,
         });
         if (!dictamen.success || !dictamen.count)
           throw new BadRequestException(
             dictamen.error || 'No se guardó el dictamen',
           );
-        if (muestra.lote_id)
+        if (
+          muestra.lote_id &&
+          muestra.categoria_Muestra === 'MUESTRA_AJUSTADO'
+        )
           await tx.lotes_produccion.update({
             where: { id_Lote_Produccion: muestra.lote_id },
             data: { estado_Calida: payload.dictamen },
@@ -722,7 +1005,7 @@ export class CalidadService {
         await this.tiempos.transicion(tx, ctx, null);
         await this.tiempos.evento(tx, ctx, tramo.ciclo, 'FIN_ANALISIS', {
           dictamen: payload.dictamen,
-          tipoMuestra: payload.tipoMuestra,
+          tipoMuestra: muestra.categoria_Muestra,
           analistaDeclarado: payload.analistaNombre ?? null,
           observaciones: payload.observaciones ?? null,
         });
@@ -753,6 +1036,10 @@ export class CalidadService {
       if (!muestra || muestra.area_Muestra !== 'CALIDAD')
         throw new NotFoundException('Muestra de Calidad no encontrada');
       await this.bloquearOrigen(tx, muestra);
+      if (muestra.categoria_Muestra === 'MUESTRA_AJUSTADO')
+        throw new BadRequestException(
+          'Una muestra Ajustado rechazada no se libera manualmente; Producción puede solicitar el segundo ciclo o tomar otra muestra del tanque.',
+        );
       if (muestra.estado_Muestra === 'APROBADO') return muestra;
       if (muestra.estado_Muestra !== 'RECHAZADO')
         throw new BadRequestException(
@@ -772,11 +1059,6 @@ export class CalidadService {
         'LIBERACION_MANUAL',
         { anterior: muestra.estado_Muestra, nuevo: estado },
       );
-      if (muestra.lote_id)
-        await tx.lotes_produccion.update({
-          where: { id_Lote_Produccion: muestra.lote_id },
-          data: { estado_Calida: 'APROBADO' },
-        });
       if (muestra.lote_inventario_id)
         await tx.lotes_inventario.update({
           where: { id: muestra.lote_inventario_id },

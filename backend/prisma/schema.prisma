@@ -23,6 +23,7 @@ model certificado_calidad {
   folio_Certificado                                      String                               @db.VarChar(50)
   no_Certificado                                         String                               @db.VarChar(50)
   lote_id                                                Int
+  muestra_id                                             Int?                                 @unique(map: "uq_certificado_calidad_muestra")
   cliente_id                                             Int?
   solicitante_id                                         Int?
   aprobado_Por_id                                        Int?
@@ -35,9 +36,13 @@ model certificado_calidad {
   hora_Liberacion                                        DateTime?                            @db.Time(0)
   estatus_Calidad                                        certificado_calidad_estatus_Calidad? @default(APROBADO)
   observaciones_Calidad                                  String?                              @db.Text
+  documento_nombre                                       String?                              @db.VarChar(255)
+  documento_mime                                         String?                              @db.VarChar(150)
+  documento_contenido                                    Bytes?                               @db.ByteA
   personas_certificado_calidad_aprobado_Por_idTopersonas personas?                            @relation("certificado_calidad_aprobado_Por_idTopersonas", fields: [aprobado_Por_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_aprobado")
   personas_certificado_calidad_cliente_idTopersonas      personas?                            @relation("certificado_calidad_cliente_idTopersonas", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_cliente")
   lotes_produccion                                       lotes_produccion                     @relation(fields: [lote_id], references: [id_Lote_Produccion], onUpdate: Restrict, map: "fk_cert_lote")
+  muestras                                               muestras?                            @relation(fields: [muestra_id], references: [id_Muestra], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_muestra")
   personas_certificado_calidad_revisado_Por_idTopersonas personas?                            @relation("certificado_calidad_revisado_Por_idTopersonas", fields: [revisado_Por_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_revisado")
   personas_certificado_calidad_solicitante_idTopersonas  personas?                            @relation("certificado_calidad_solicitante_idTopersonas", fields: [solicitante_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict, map: "fk_cert_solicitante")
 
@@ -274,6 +279,7 @@ model muestras {
   id_viabilidades                          id_viabilidades?           @relation(fields: [viabilidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
   crm_oportunidades                        crm_oportunidades?         @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_muestra_oportunidad")
   resultado_analisis                       resultado_analisis[]
+  certificado_calidad                      certificado_calidad?
 
   /// Calidad puede muestrear material recibido antes de existir una OP.
   lote_inventario_id Int?
