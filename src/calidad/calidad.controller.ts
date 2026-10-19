@@ -1,4 +1,5 @@
-import { UseGuards } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { AuthGuard, Areas } from '../auth/auth.guard';
 import {
   BadRequestException,
@@ -10,6 +11,13 @@ import {
   Query,
   Param,
   ParseIntPipe,
+  UploadedFile,
+  UseInterceptors,
+  Req,
+  Res,
+  StreamableFile,
+  Header,
+  UseGuards,
 } from '@nestjs/common';
 import { CalidadService } from './calidad.service';
 
@@ -44,6 +52,61 @@ export class CalidadController {
       await this.calidadService.obtenerTodasMuestrasConDictamen();
 
     return { success: true, data: result };
+  }
+
+  @Areas('calidad')
+  @Get('certificados/pendientes')
+  certificadosPendientes() {
+    return this.calidadService.obtenerMuestrasPendientesCertificado();
+  }
+
+  @Areas('calidad')
+  @Post('muestras/:id/certificado')
+  @UseInterceptors(
+    FileInterceptor('documento', {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      fileFilter: (_request, file, callback) => {
+        if (file.mimetype !== 'application/pdf')
+          return callback(
+            new BadRequestException('Solo se permiten certificados PDF.'),
+            false,
+          );
+        callback(null, true);
+      },
+    }),
+  )
+  subirCertificado(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, unknown>,
+    @UploadedFile() documento: Express.Multer.File | undefined,
+    @Req() request: any,
+  ) {
+    return this.calidadService.subirCertificadoCalidad(
+      id,
+      body,
+      documento,
+      request.usuario,
+    );
+  }
+
+  @Areas('calidad')
+  @Get('muestras/:id/certificado')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async descargarCertificado(
+    @Param('id', ParseIntPipe) id: number,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const documento = await this.calidadService.obtenerDocumentoCertificado(id);
+    response.setHeader('Content-Type', documento.mime);
+    response.setHeader(
+      'Content-Disposition',
+      `inline; filename*=UTF-8''${encodeURIComponent(documento.nombre)}`,
+    );
+    return new StreamableFile(documento.buffer, {
+      type: documento.mime,
+      length: documento.buffer.length,
+    });
   }
 
   @Post('crearResultado')
@@ -112,4 +175,6 @@ export class CalidadController {
   iniciar(@Param('id', ParseIntPipe) id: number) { return this.calidadService.cambiarEtapaMuestra(id, 'INICIAR'); }
   @Areas('calidad') @Post(':id/reabrir')
   reabrir(@Param('id', ParseIntPipe) id: number) { return this.calidadService.cambiarEtapaMuestra(id, 'REABRIR'); }
+  @Areas('produccion') @Post(':id/segundo-ciclo')
+  segundoCiclo(@Param('id', ParseIntPipe) id: number) { return this.calidadService.solicitarSegundoCiclo(id); }
 }
