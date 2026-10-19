@@ -21,10 +21,10 @@ const usuarios: UsuarioConfig[] = [
     personaId: 13,
   },
   {
-    usuario: 'usuario_id',
-    password: 'Id123!',
+    usuario: 'Gabriel_Escamilla',
+    password: 'EscamillaG123!',
     areas: ['id'],
-    personaId: 3,
+    personaId: 19,
   },
     {
     usuario: 'Mauricio_Garcia',
@@ -61,7 +61,23 @@ const usuarios: UsuarioConfig[] = [
     password: 'VargasM123!',
     areas: ['seguridad'],
     personaId: 20,
+  },
+    {  usuario: 'almacen_UST',
+    password: 'UstA123!',
+    areas: ['almacen'],
+    personaId: 24,
+  },
+    {  usuario: 'logistica_UST',
+    password: 'UstL123!',
+    areas: ['logistica'],
+    personaId: 23,
+  },
+    {  usuario: 'contabilidad_UST',
+    password: 'UstC123!',
+    areas: ['contaduria'],
+    personaId: 22,
   }
+
 ];
 
 const cuentas = usuarios.map(({ usuario, password, areas, personaId }) => {
