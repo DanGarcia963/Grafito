@@ -67,6 +67,17 @@ test('La OV queda parcialmente cubierta hasta asignar toda la cantidad pedida', 
   assert.equal(cumplimiento.estado, 'AVANCE_PARCIAL');
 });
 
+test('Una OV en borrador no refleja avance operativo antes de confirmarse', () => {
+  const resultado = calcularCumplimientoOV({
+    ...orden('8031', 2550, [op('32185', 2550)]),
+    estado: 'BORRADOR',
+  });
+  assert.deepEqual(resultado.ordenes_produccion, []);
+  assert.equal(resultado.cumplimiento.estado, 'BORRADOR');
+  assert.equal(resultado.cumplimiento.cantidad_producto_terminado_asignada, 0);
+  assert.equal(resultado.cumplimiento.cantidad_producto_terminado_pendiente, 2550);
+});
+
 test('Una OP cerrada con salida liberada aparece como pendiente de asignación', () => {
   const cumplimiento = calcularCumplimientoOV(
     orden('8023', 3400, [op('32183', 0, 3400)]),

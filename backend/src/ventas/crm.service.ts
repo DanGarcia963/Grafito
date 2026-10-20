@@ -223,6 +223,7 @@ export class CrmService {
             moneda: true,
             precio_emitido_por: true,
             precio_emitido_en: true,
+            reutilizado_de_id: true,
             reporte: { select: { version: true } },
           }
         : {
@@ -231,6 +232,7 @@ export class CrmService {
             precio_objetivo_litro: true,
             moneda: true,
             precio_emitido_en: true,
+            reutilizado_de_id: true,
             reporte: { select: { version: true } },
           };
 
@@ -453,13 +455,234 @@ export class CrmService {
         oportunidades,
         recurrencia: recurrencia(
           ordenes
-            .filter((x) => !['CANCELADA'].includes(x.estado))
-            .map((x) => x.fecha_confirmacion),
+            .filter((x) => x.estado === 'CONFIRMADA' && x.fecha_confirmacion)
+            .map((x) => x.fecha_confirmacion!),
           persona.crm_perfil_comercial?.frecuencia_esperada_dias ?? null,
         ),
       },
     };
   }
+  /** Cotizaciones de esta cuenta cuyo reporte viable y precio de Costos pueden servir como base. */
+  async plantillasVenta(id: number, u: Usuario) {
+    const persona = await this.prisma.personas.findFirst({
+      where: { id_Persona: id, ...this.cuentaScope(u) },
+      select: {
+        id_Persona: true,
+        crm_perfil_comercial: {
+          select: { estado_comercial: true, vendedor_responsable_id: true },
+        },
+      },
+    });
+    if (!persona) throw new NotFoundException('Cuenta no encontrada');
+    if (persona.crm_perfil_comercial?.estado_comercial !== 'CLIENTE')
+      throw new BadRequestException('La recompra directa requiere una cuenta ganada.');
+    const vendedorId = persona.crm_perfil_comercial.vendedor_responsable_id;
+    if (vendedorId == null || (u.area === 'ventas' && vendedorId !== u.personaId))
+      throw new NotFoundException('Cuenta no encontrada');
+
+    const cotizaciones = await this.prisma.crm_cotizaciones.findMany({
+      where: {
+        oportunidad: {
+          is: {
+            persona_id: id,
+            vendedor_id: vendedorId,
+          },
+        },
+        reporte: { is: { estado: 'PUBLICADO', resultado: 'VIABLE' } },
+      },
+      select: {
+        id: true,
+        folio: true,
+        estado: true,
+        tipo_venta: true,
+        producto_id: true,
+        servicio: true,
+        cantidad: true,
+        unidad: true,
+        moneda: true,
+        subtotal: true,
+        impuestos: true,
+        total: true,
+        condiciones_comerciales: true,
+        notas: true,
+        producto: {
+          select: {
+            id_Produc_Mater: true,
+            nombre_Producto: true,
+            UM: true,
+            configuracion_operativa: true,
+          },
+        },
+        oportunidad: { select: { id: true, titulo: true } },
+        reporte: {
+          select: {
+            id: true,
+            version: true,
+            estado: true,
+            resultado: true,
+            reutilizado_de_id: true,
+            costos: {
+              where: {
+                precio_objetivo_litro: { not: null },
+                precio_emitido_en: { not: null },
+              },
+              orderBy: { version: 'desc' },
+              take: 1,
+              select: {
+                id: true,
+                precio_objetivo_litro: true,
+                moneda: true,
+                precio_emitido_en: true,
+                reutilizado_de_id: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ creado_en: 'desc' }, { version: 'desc' }],
+      take: 100,
+    });
+    return {
+      success: true,
+      data: cotizaciones
+        .filter((cotizacion) => cotizacion.reporte.costos.length > 0)
+        .map((cotizacion) => ({
+          ...cotizacion,
+          precio_objetivo: cotizacion.reporte.costos[0],
+        })),
+    };
+  }
+
+  /** Abre una oportunidad para un cliente y clona reporte/precio como snapshot rastreable. */
+  async crearRecompra(id: number, b: any, u: Usuario) {
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id_Persona" FROM personas WHERE "id_Persona"=${id} FOR UPDATE`;
+      const persona = await tx.personas.findFirst({
+        where: { id_Persona: id, ...this.cuentaScope(u) },
+        include: { crm_perfil_comercial: true },
+      });
+      if (!persona) throw new NotFoundException('Cuenta no encontrada');
+      const perfil = persona.crm_perfil_comercial;
+      if (persona.tipo_persona.toUpperCase() !== 'CLIENTE' && perfil?.estado_comercial !== 'CLIENTE')
+        throw new BadRequestException('La recompra directa requiere una cuenta ganada.');
+      if (perfil?.vendedor_responsable_id !== u.personaId)
+        throw new NotFoundException('Cuenta no encontrada');
+
+      const cotizacionId = idValido(b.cotizacion_origen_id);
+      const origen = await tx.crm_cotizaciones.findFirst({
+        where: {
+          id: cotizacionId,
+          oportunidad: {
+            is: { persona_id: id, vendedor_id: u.personaId },
+          },
+          reporte: { is: { estado: 'PUBLICADO', resultado: 'VIABLE' } },
+        },
+        include: {
+          oportunidad: true,
+          reporte: true,
+          producto: true,
+        },
+      });
+      if (!origen) throw new NotFoundException('Análisis/cotización anterior no disponible para esta cuenta.');
+      const costoOrigen = await tx.crm_costos_oportunidad.findFirst({
+        where: {
+          oportunidad_id: origen.oportunidad_id,
+          reporte_id: origen.reporte_id,
+          precio_objetivo_litro: { not: null },
+          precio_emitido_en: { not: null },
+        },
+        orderBy: { version: 'desc' },
+      });
+      if (!costoOrigen?.precio_objetivo_litro)
+        throw new BadRequestException('El análisis seleccionado no tiene precio objetivo emitido por Costos.');
+      if (origen.producto.UM !== b.unidad)
+        throw new BadRequestException('La unidad debe coincidir con la del producto de la cotización anterior.');
+
+      const oportunidad = await tx.crm_oportunidades.create({
+        data: {
+          folio: `OP-${randomUUID()}`,
+          persona_id: id,
+          vendedor_id: u.personaId,
+          producto_id: origen.producto_id,
+          titulo: texto(b.titulo || `Recompra · ${origen.producto.nombre_Producto}`, 180),
+          necesidad: opc(b.necesidad),
+          cantidad_estimada: decimalCrm(b.cantidad_estimada, 4),
+          unidad: origen.unidad,
+          etapa: 'COTIZACION',
+          estado_tecnico: 'VIABLE',
+          creado_por: u.usuario,
+        },
+      });
+      const reporte = await tx.id_reportes_oportunidad.create({
+        data: {
+          oportunidad_id: oportunidad.id,
+          reutilizado_de_id: origen.reporte.id,
+          reutilizado_de_cotizacion_id: origen.id,
+          version: 1,
+          estado: 'PUBLICADO',
+          resultado: origen.reporte.resultado,
+          resumen: origen.reporte.resumen,
+          observaciones: origen.reporte.observaciones,
+          nombre_archivo: origen.reporte.nombre_archivo,
+          tipo_mime: origen.reporte.tipo_mime,
+          // El archivo se resuelve al reporte fuente al descargarlo; no duplicamos el binario.
+          contenido: null,
+          creado_por: u.usuario,
+          publicado_por: origen.reporte.publicado_por,
+          publicado_en: origen.reporte.publicado_en,
+          muestras_ciclos: origen.reporte.muestras_ciclos as Prisma.InputJsonValue,
+        },
+      });
+      await tx.crm_costos_oportunidad.create({
+        data: {
+          oportunidad_id: oportunidad.id,
+          reporte_id: reporte.id,
+          reutilizado_de_id: costoOrigen.id,
+          version: 1,
+          formula: costoOrigen.formula,
+          formula_enviada_por: costoOrigen.formula_enviada_por,
+          formula_enviada_en: costoOrigen.formula_enviada_en,
+          precio_objetivo_litro: costoOrigen.precio_objetivo_litro,
+          moneda: costoOrigen.moneda,
+          precio_emitido_por: costoOrigen.precio_emitido_por,
+          precio_emitido_en: costoOrigen.precio_emitido_en,
+        },
+      });
+      await tx.crm_oportunidad_historial.create({
+        data: {
+          oportunidad_id: oportunidad.id,
+          accion: 'REPORTE_ID_REUTILIZADO',
+          etapa_nueva: 'COTIZACION',
+          estado_tecnico_nuevo: 'VIABLE',
+          nota: `Se reutilizaron como base el reporte ID v${origen.reporte.version} y la cotización ${origen.folio}. No se generó una muestra ni un análisis nuevo.`,
+          realizado_por: u.usuario,
+        },
+      });
+      return {
+        ...oportunidad,
+        cotizacion_plantilla: {
+          id: origen.id,
+          folio: origen.folio,
+          tipo_venta: origen.tipo_venta,
+          producto_id: origen.producto_id,
+          servicio: origen.servicio,
+          cantidad: origen.cantidad,
+          unidad: origen.unidad,
+          moneda: origen.moneda,
+          subtotal: origen.subtotal,
+          impuestos: origen.impuestos,
+          total: origen.total,
+          condiciones_comerciales: origen.condiciones_comerciales,
+          notas: origen.notas,
+          producto: origen.producto,
+          reporte_origen_id: origen.reporte.id,
+        },
+      };
+    });
+    this.avisar(data.id);
+    return { success: true, data };
+  }
+
   async subirDocumentoCuenta(id: number, tipoEntrada: unknown, file: ArchivoCuenta, u: Usuario) {
     if (!Object.values(crm_documento_cliente_tipo).includes(tipoEntrada as crm_documento_cliente_tipo))
       throw new BadRequestException('Tipo de documento comercial inválido.');
@@ -976,6 +1199,23 @@ export class CrmService {
       });
       if (!producto || producto.UM !== b.unidad)
         throw new BadRequestException('Producto o unidad incompatible');
+      const servicio = texto(b.servicio, 100);
+      if (reporte.reutilizado_de_cotizacion_id != null) {
+        const plantilla = await tx.crm_cotizaciones.findUnique({
+          where: { id: reporte.reutilizado_de_cotizacion_id },
+          select: { producto_id: true, tipo_venta: true, servicio: true },
+        });
+        if (
+          !plantilla ||
+          plantilla.producto_id !== producto.id_Produc_Mater ||
+          plantilla.tipo_venta !== b.tipo_venta ||
+          plantilla.servicio !== servicio ||
+          costo.moneda !== b.moneda
+        )
+          throw new BadRequestException(
+            'El análisis reutilizado sólo puede cotizar el mismo producto, servicio, tipo de venta y moneda de la cotización base. Para cambiarlo, inicia un análisis nuevo.',
+          );
+      }
       if (
         vigencia!.toISOString().slice(0, 10) <
         new Date().toISOString().slice(0, 10)
@@ -1000,7 +1240,7 @@ export class CrmService {
           reporte_id: reporte.id,
           tipo_venta: b.tipo_venta,
           producto_id: producto.id_Produc_Mater,
-          servicio: texto(b.servicio, 100),
+          servicio,
           cantidad: decimalCrm(b.cantidad, 4),
           unidad: b.unidad,
           moneda: b.moneda,
@@ -1312,22 +1552,10 @@ export class CrmService {
         throw new ConflictException(
           'La cuenta y la oportunidad deben pertenecer al mismo vendedor',
         );
-      const productoOrden = await tx.productos_materiales.findUniqueOrThrow({
-        where: { id_Produc_Mater: c.producto_id },
-      });
-      const especificaciones =
-        b.especificaciones == null
-          ? undefined
-          : especificacionesValidas(
-              b.especificaciones,
-              productoOrden.configuracion_operativa,
-              c.unidad,
-              c.cantidad,
-            );
+      const aceptacionEn = c.aceptado_en ?? new Date();
       const orden = await tx.crm_ordenes_venta.create({
         data: {
           folio: `OV-${randomUUID()}`,
-          especificaciones,
           oportunidad_id: id,
           cotizacion_id: c.id,
           persona_id: o.persona_id,
@@ -1335,31 +1563,100 @@ export class CrmService {
           producto_id: c.producto_id,
           tipo_venta: c.tipo_venta,
           servicio: c.servicio,
-          orden_cliente: texto(b.orden_cliente, 100),
+          estado: 'BORRADOR',
+          orden_cliente: null,
           cantidad: c.cantidad,
           unidad: c.unidad,
           moneda: c.moneda,
           subtotal: c.subtotal,
           impuestos: c.impuestos,
           importe_total: c.total,
-          fecha_compromiso: fechaCrm(b.fecha_compromiso),
-          observaciones: opc(b.observaciones),
+          fecha_confirmacion: null,
           creado_por: u.usuario,
         },
       });
+      await tx.crm_perfiles_comerciales.upsert({
+        where: { persona_id: o.persona_id },
+        create: {
+          persona_id: o.persona_id,
+          estado_comercial: 'CLIENTE',
+          vendedor_responsable_id: o.vendedor_id,
+          fecha_primera_conversion: aceptacionEn,
+        },
+        update: {
+          estado_comercial: 'CLIENTE',
+          ...(!perfil?.fecha_primera_conversion &&
+          perfil?.estado_comercial !== 'CLIENTE'
+            ? { fecha_primera_conversion: aceptacionEn }
+            : {}),
+        },
+      });
+      await tx.personas.update({
+        where: { id_Persona: o.persona_id },
+        data: { tipo_persona: 'CLIENTE' },
+      });
+      await eventoCrm(tx, o, u, 'CIERRE_GANADA', `Orden ${orden.folio}`, {
+        etapa: 'GANADA',
+        fecha_cierre: aceptacionEn,
+        proximo_contacto: null,
+      });
+      return orden;
+    });
+    this.avisar(id);
+    return { success: true, data };
+  }
+
+  /** Completa y confirma una OV creada como borrador al aceptar la cotización. */
+  async confirmarOrdenVenta(id: number, b: any, u: Usuario) {
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id=${id} FOR UPDATE`;
+      const orden = await tx.crm_ordenes_venta.findFirst({
+        where: { id, ...this.scope(u) },
+        include: { producto: { select: { configuracion_operativa: true } } },
+      });
+      if (!orden) throw new NotFoundException('Orden no encontrada');
+      if (orden.estado === 'CONFIRMADA') return { orden, confirmada: false };
+      if (orden.estado !== 'BORRADOR')
+        throw new ConflictException('Sólo se pueden confirmar órdenes en borrador.');
+      if (await tx.manifiestos.findFirst({ where: { orden_venta_id: id }, select: { id: true } }))
+        throw new ConflictException('La orden ya tiene un manifiesto asociado. Revisa el registro antes de confirmarla.');
+
+      const ordenCliente = texto(b.orden_cliente, 100);
+      const especificaciones = b.especificaciones == null
+        ? undefined
+        : especificacionesValidas(
+            b.especificaciones,
+            orden.producto.configuracion_operativa,
+            orden.unidad,
+            orden.cantidad,
+          );
+      const confirmadaEn = new Date();
+      const actualizada = await tx.crm_ordenes_venta.update({
+        where: { id },
+        data: {
+          orden_cliente: ordenCliente,
+          estado: 'CONFIRMADA',
+          fecha_confirmacion: confirmadaEn,
+          fecha_compromiso: fechaCrm(b.fecha_compromiso),
+          observaciones: opc(b.observaciones),
+          ...(especificaciones === undefined ? {} : { especificaciones }),
+        },
+      });
       const cliente = await tx.personas.findUniqueOrThrow({
-        where: { id_Persona: orden.persona_id },
+        where: { id_Persona: actualizada.persona_id },
         select: { nombre: true },
       });
       const manifiesto = await tx.manifiestos.create({
         data: {
-          orden_venta_id: orden.id,
-          cliente_id: orden.persona_id,
+          orden_venta_id: actualizada.id,
+          cliente_id: actualizada.persona_id,
           estado: 'PEDIDO',
           es_gkn: false,
           razon_social_generadora: cliente.nombre,
-          numero_compra: orden.orden_cliente,
-          ...(orden.unidad === 'Kilogramos' ? { peso_pedido: orden.cantidad } : {}),
+          numero_compra: actualizada.orden_cliente,
+          ...(actualizada.unidad === 'Kilogramos'
+            ? { peso_pedido: actualizada.cantidad }
+            : {}),
           creado_por: u.usuario,
         },
       });
@@ -1370,46 +1667,38 @@ export class CrmService {
           accion: 'CREADO_DESDE_ORDEN_VENTA',
           actor_persona_id: u.personaId,
           actor_usuario: u.usuario,
-          datos: { orden_venta_id: orden.id, folio_orden: orden.folio },
+          datos: { orden_venta_id: actualizada.id, folio_orden: actualizada.folio },
         },
       });
-      await tx.crm_perfiles_comerciales.upsert({
-        where: { persona_id: o.persona_id },
-        create: {
-          persona_id: o.persona_id,
-          estado_comercial: 'CLIENTE',
-          vendedor_responsable_id: o.vendedor_id,
-          fecha_primera_conversion: orden.fecha_confirmacion,
-        },
-        update: {
-          estado_comercial: 'CLIENTE',
-          ...(!perfil?.fecha_primera_conversion &&
-          perfil?.estado_comercial !== 'CLIENTE'
-            ? { fecha_primera_conversion: orden.fecha_confirmacion }
-            : {}),
-        },
-      });
-      await tx.personas.update({
-        where: { id_Persona: o.persona_id },
-        data: { tipo_persona: 'CLIENTE' },
-      });
-      await eventoCrm(tx, o, u, 'CIERRE_GANADA', `Orden ${orden.folio}`, {
-        etapa: 'GANADA',
-        fecha_cierre: orden.fecha_confirmacion,
-        proximo_contacto: null,
-      });
-      return orden;
+      if (actualizada.oportunidad_id != null) {
+        const oportunidad = await tx.crm_oportunidades.findUnique({
+          where: { id: actualizada.oportunidad_id },
+        });
+        if (oportunidad)
+          await eventoCrm(
+            tx,
+            oportunidad,
+            u,
+            'ORDEN_VENTA_CONFIRMADA',
+            `OV ${actualizada.folio} confirmada con la referencia ${ordenCliente}.`,
+          );
+      }
+      return { orden: actualizada, confirmada: true };
     });
-    this.avisar(id);
-    this.eventos.notificar('MANIFIESTO_ACTUALIZADO', { ordenVentaId: data.id });
-    return { success: true, data };
+    this.avisar(resultado.orden.oportunidad_id ?? undefined);
+    if (resultado.confirmada)
+      this.eventos.notificar('MANIFIESTO_ACTUALIZADO', {
+        ordenVentaId: resultado.orden.id,
+      });
+    return { success: true, data: resultado.orden };
   }
+
   private async clasificarCompras<
     T extends {
       id: number;
       persona_id: number;
       estado: string;
-      fecha_confirmacion: Date;
+      fecha_confirmacion: Date | null;
     },
   >(ordenes: T[]) {
     const primeras = await this.prisma.crm_ordenes_venta.findMany({
@@ -1426,7 +1715,7 @@ export class CrmService {
     return ordenes.map((o) => ({
       ...o,
       tipo_compra:
-        o.estado === 'CANCELADA'
+        o.estado !== 'CONFIRMADA' || !o.fecha_confirmacion
           ? null
           : ids.get(o.persona_id) === o.id
             ? 'PRIMERA_COMPRA'
@@ -1438,6 +1727,12 @@ export class CrmService {
       where: this.scope(u),
       include: {
         cliente: { select: { nombre: true } },
+        producto: {
+          select: {
+            nombre_Producto: true,
+            configuracion_operativa: true,
+          },
+        },
         produccion_asignada: {
           select: {
             cantidad_producto_terminado: true,
@@ -1584,13 +1879,13 @@ export class CrmService {
   }
   async produccion(id: number, b: any, u: Usuario) {
     const data = await this.prisma.$transaction(async (tx) => {
-      if (u.area === 'ventas') {
-        const orden = await tx.crm_ordenes_venta.findFirst({
-          where: { id, ...this.scope(u) },
-          select: { id: true },
-        });
-        if (!orden) throw new NotFoundException('Orden no encontrada');
-      }
+      const orden = await tx.crm_ordenes_venta.findFirst({
+        where: { id, ...this.scope(u) },
+        select: { id: true, estado: true },
+      });
+      if (!orden) throw new NotFoundException('Orden no encontrada');
+      if (orden.estado !== 'CONFIRMADA')
+        throw new BadRequestException('Confirma la orden de venta antes de vincular producción.');
       return crearOrdenProduccion(tx, b, u, id);
     });
     this.avisar();
@@ -1601,6 +1896,8 @@ export class CrmService {
       where: { id, ...this.scope(u) },
     });
     if (!ov) throw new NotFoundException('Orden no encontrada');
+    if (ov.estado !== 'CONFIRMADA')
+      throw new BadRequestException('Confirma la orden de venta antes de consultar o reservar materiales.');
     return { success: true, data: await existencias(this.prisma, ov) };
   }
   async cancelarOrden(id: number, b: any, u: Usuario) {
@@ -1668,7 +1965,7 @@ export class CrmService {
     return { success: true };
   }
   async documento(tipo: 'cotizacion' | 'reporte', id: number, u: Usuario) {
-    const f =
+    let f =
       tipo === 'cotizacion'
         ? await this.prisma.crm_cotizaciones.findFirst({
             where: { id, oportunidad: this.scope(u) },
@@ -1676,6 +1973,22 @@ export class CrmService {
         : await this.prisma.id_reportes_oportunidad.findFirst({
             where: { id, oportunidad: this.scope(u) },
           });
+    if (
+      tipo === 'reporte' &&
+      f &&
+      !f.contenido &&
+      'reutilizado_de_id' in f &&
+      f.reutilizado_de_id
+    ) {
+      const origen = await this.prisma.id_reportes_oportunidad.findFirst({
+        where: {
+          id: f.reutilizado_de_id,
+          oportunidad: this.scope(u),
+        },
+        select: { contenido: true },
+      });
+      f = { ...f, contenido: origen?.contenido ?? null };
+    }
     if (!f?.contenido) throw new NotFoundException('Documento no disponible');
     return f;
   }
@@ -1695,22 +2008,25 @@ export class CrmService {
       this.prisma.crm_ordenes_venta.findMany({
         where: {
           ...this.scope(u),
-          estado: { notIn: ['CANCELADA'] },
+          estado: 'CONFIRMADA',
         },
         orderBy: { fecha_confirmacion: 'asc' },
       }),
     ]);
+    const ordenesConfirmadas = ordenes.filter(
+      (orden): orden is typeof orden & { fecha_confirmacion: Date } =>
+        orden.fecha_confirmacion !== null,
+    );
     const cohorte = perfiles.filter(
       (p) =>
         dentro(p.fecha_alta_prospecto) &&
         !(p.estado_comercial === 'CLIENTE' && !p.fecha_primera_conversion),
     );
-    const convertidos = cohorte.filter((p) =>
-      ordenes.some(
-        (o) =>
-          o.persona_id === p.persona_id &&
-          (!hasta || o.fecha_confirmacion < hasta),
-      ),
+    const convertidos = cohorte.filter(
+      (perfil) =>
+        perfil.estado_comercial === 'CLIENTE' &&
+        perfil.fecha_primera_conversion != null &&
+        (!hasta || perfil.fecha_primera_conversion < hasta),
     ).length;
     const ganadas = ops.filter(
         (o) => o.etapa === 'GANADA' && dentro(o.fecha_cierre),
@@ -1719,7 +2035,7 @@ export class CrmService {
         (o) => o.etapa === 'PERDIDA' && dentro(o.fecha_cierre),
       ).length;
     const porCliente = new Map<number, Date[]>();
-    ordenes
+    ordenesConfirmadas
       .filter((o) => !hasta || o.fecha_confirmacion < hasta)
       .forEach((o) =>
         porCliente.set(o.persona_id, [
@@ -1748,7 +2064,7 @@ export class CrmService {
         canceladas: ops.filter(
           (o) => o.etapa === 'CANCELADA' && dentro(o.fecha_cierre),
         ).length,
-        ordenes_periodo: ordenes.filter((o) => dentro(o.fecha_confirmacion))
+        ordenes_periodo: ordenesConfirmadas.filter((o) => dentro(o.fecha_confirmacion))
           .length,
         clientes_recompra: [...porCliente.values()].filter((x) => x.length >= 2)
           .length,
