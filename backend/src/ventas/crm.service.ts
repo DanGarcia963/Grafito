@@ -9,13 +9,16 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import {
   Prisma,
   crm_oportunidad_etapa,
   crm_moneda,
   id_reporte_resultado,
+  crm_tipo_contacto,
+  crm_documento_cliente_tipo,
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
@@ -38,6 +41,47 @@ type Archivo = Parameters<typeof fichaValida>[0];
 const opc = (v: unknown, max = 4000) =>
   v == null || v === '' ? null : texto(v, max);
 const sinArchivo = { contenido: true } as const;
+type ArchivoCuenta = { buffer: Buffer; originalname: string; size: number; mimetype?: string };
+const correoValido = (value: unknown): value is string =>
+  typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+function datosArchivoCuenta(file?: ArchivoCuenta) {
+  if (!file || file.size < 1 || file.size > 10 * 1024 * 1024)
+    throw new BadRequestException('Adjunta un documento de hasta 10 MB.');
+  const nombre = file.originalname.toLowerCase();
+  const bytes = file.buffer;
+  const pdf = nombre.endsWith('.pdf') && bytes.subarray(0, 5).toString() === '%PDF-';
+  const jpg = /\.jpe?g$/.test(nombre) && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const png = nombre.endsWith('.png') && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const doc = nombre.endsWith('.doc') && bytes.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex'));
+  const docx = nombre.endsWith('.docx') && bytes.subarray(0, 2).toString() === 'PK' && bytes.includes(Buffer.from('word/document.xml'));
+  if (!pdf && !jpg && !png && !doc && !docx)
+    throw new BadRequestException('Formato no admitido. Usa PDF, Word, JPG o PNG.');
+  const mime = pdf ? 'application/pdf' : jpg ? 'image/jpeg' : png ? 'image/png' : doc ? 'application/msword' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  return { nombre: file.originalname.replace(/[\r\n\\/]/g, '_').slice(0, 255), mime };
+}
+function correoVendedorConfigurado(personaId: number): string | null {
+  try {
+    const users = JSON.parse(process.env.UST_USUARIOS_JSON || '[]');
+    if (!Array.isArray(users)) return null;
+    const user = users.find((item: any) => Number(item?.personaId) === personaId && Array.isArray(item?.areas) && item.areas.includes('ventas'));
+    return correoValido(user?.correo) ? user.correo.trim() : null;
+  } catch {
+    return null;
+  }
+}
+function origenFrontend(): string {
+  const configured = process.env.FRONTEND_URL?.split(',')[0]?.trim();
+  const fallback = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000';
+  const raw = configured || fallback;
+  if (!raw) throw new ServiceUnavailableException('Configura FRONTEND_URL en Railway para crear enlaces de respuesta a cotizaciones.');
+  try {
+    const url = new URL(raw);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('protocol');
+    return url.origin;
+  } catch {
+    throw new ServiceUnavailableException('FRONTEND_URL debe ser una URL HTTP/HTTPS válida.');
+  }
+}
 const incluir = {
   cliente: { select: { id_Persona: true, nombre: true } },
   producto: { select: { id_Produc_Mater: true, nombre_Producto: true } },
@@ -203,6 +247,10 @@ export class CrmService {
             fecha_recoleccion: true,
             fecha_ingreso_laboratorio: true,
             producto_id: true,
+            id_flujo_estructurado: true,
+            id_analisis_preliminar: true,
+            id_procesamiento: true,
+            id_analisis_final: true,
             id_ejecuciones: true,
           },
         },
@@ -359,6 +407,20 @@ export class CrmService {
       include: { crm_perfil_comercial: true },
     });
     if (!persona) throw new NotFoundException('Cuenta no encontrada');
+    const documentos = await this.prisma.crm_documentos_cliente.findMany({
+      where: { persona_id: id },
+      select: {
+        id: true,
+        tipo_documento: true,
+        version: true,
+        nombre_archivo: true,
+        tipo_mime: true,
+        vigente: true,
+        subido_por: true,
+        subido_en: true,
+      },
+      orderBy: [{ tipo_documento: 'asc' }, { version: 'desc' }],
+    });
     const ordenes = await this.prisma.crm_ordenes_venta.findMany({
       where: { persona_id: id, ...this.scope(u) },
       include: {
@@ -386,6 +448,7 @@ export class CrmService {
       success: true,
       data: {
         persona,
+        documentos,
         ordenes: await this.clasificarCompras(ordenesConProduccion),
         oportunidades,
         recurrencia: recurrencia(
@@ -396,6 +459,53 @@ export class CrmService {
         ),
       },
     };
+  }
+  async subirDocumentoCuenta(id: number, tipoEntrada: unknown, file: ArchivoCuenta, u: Usuario) {
+    if (!Object.values(crm_documento_cliente_tipo).includes(tipoEntrada as crm_documento_cliente_tipo))
+      throw new BadRequestException('Tipo de documento comercial inválido.');
+    const a = datosArchivoCuenta(file);
+    const data = await this.prisma.$transaction(async (tx) => {
+      const persona = await tx.personas.findFirst({
+        where: { id_Persona: id, ...this.cuentaScope(u) },
+        select: { id_Persona: true },
+      });
+      if (!persona) throw new NotFoundException('Cuenta no encontrada.');
+      await tx.$queryRaw`SELECT "id_Persona" FROM personas WHERE "id_Persona"=${id} FOR UPDATE`;
+      const previo = await tx.crm_documentos_cliente.findFirst({
+        where: { persona_id: id, tipo_documento: tipoEntrada as crm_documento_cliente_tipo },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+      await tx.crm_documentos_cliente.updateMany({
+        where: { persona_id: id, tipo_documento: tipoEntrada as crm_documento_cliente_tipo, vigente: true },
+        data: { vigente: false },
+      });
+      return tx.crm_documentos_cliente.create({
+        data: {
+          persona_id: id,
+          tipo_documento: tipoEntrada as crm_documento_cliente_tipo,
+          version: (previo?.version ?? 0) + 1,
+          vigente: true,
+          nombre_archivo: a.nombre,
+          tipo_mime: a.mime,
+          contenido: new Uint8Array(file.buffer),
+          subido_por: u.usuario,
+        },
+        select: { id: true, tipo_documento: true, version: true, nombre_archivo: true, subido_en: true },
+      });
+    });
+    return { success: true, data };
+  }
+  async documentoCuenta(id: number, u: Usuario) {
+    const doc = await this.prisma.crm_documentos_cliente.findUnique({
+      where: { id },
+      select: { persona_id: true, nombre_archivo: true, tipo_mime: true, contenido: true },
+    });
+    if (!doc || !(await this.prisma.personas.findFirst({
+      where: { id_Persona: doc.persona_id, ...this.cuentaScope(u) },
+      select: { id_Persona: true },
+    }))) throw new NotFoundException('Documento de cuenta no encontrado.');
+    return doc;
   }
   async crear(body: any, u: Usuario) {
     const data = await this.prisma.$transaction(async (tx) => {
@@ -475,13 +585,23 @@ export class CrmService {
           'Las etapas de análisis, cotización y ganada se actualizan por sus eventos',
         );
       const cierre = b.etapa === 'PERDIDA' || b.etapa === 'CANCELADA';
+      const tipoContacto = b.tipo_contacto == null || b.tipo_contacto === ''
+        ? null
+        : String(b.tipo_contacto);
+      if (tipoContacto && !Object.values(crm_tipo_contacto).includes(tipoContacto as crm_tipo_contacto))
+        throw new BadRequestException('Tipo de seguimiento inválido.');
+      const fechaContacto = b.fecha_contacto
+        ? fechaCrm(b.fecha_contacto, true)
+        : tipoContacto
+          ? new Date()
+          : null;
       if (cierre)
         await tx.crm_cotizaciones.updateMany({
           where: {
             oportunidad_id: id,
             estado: { in: ['BORRADOR', 'ENVIADA', 'ACEPTADA'] },
           },
-          data: { estado: 'CANCELADA' },
+          data: { estado: 'CANCELADA', token_respuesta_hash: null, token_respuesta_expira: null },
         });
       return eventoCrm(
         tx,
@@ -513,6 +633,12 @@ export class CrmService {
               }
             : {}),
         },
+        tipoContacto
+          ? {
+              tipo_contacto: tipoContacto as crm_tipo_contacto,
+              fecha_contacto: fechaContacto,
+            }
+          : {},
       );
     });
     this.avisar(id);
@@ -578,6 +704,8 @@ export class CrmService {
         throw new BadRequestException(
           'Finaliza los análisis de todas las muestras asociadas',
         );
+      if (muestras.some((m) => m.id_flujo_estructurado && (!m.id_analisis_preliminar || !m.id_procesamiento || !m.id_analisis_final)))
+        throw new BadRequestException('Completa el análisis preliminar, procesamiento y análisis final de I+D antes de publicar el reporte.');
       // Toda muestra asociada es requerida. Rechazos previos pueden quedar resueltos por una nueva muestra aprobada.
       if (
         b.resultado === 'VIABLE' &&
@@ -603,7 +731,7 @@ export class CrmService {
           oportunidad_id: id,
           estado: { in: ['BORRADOR', 'ENVIADA', 'ACEPTADA'] },
         },
-        data: { estado: 'CANCELADA' },
+        data: { estado: 'CANCELADA', token_respuesta_hash: null, token_respuesta_expira: null },
       });
       const r = await tx.id_reportes_oportunidad.create({
         data: {
@@ -615,8 +743,12 @@ export class CrmService {
           observaciones: opc(b.observaciones),
           muestras_ciclos: muestras.map((m) => ({
             muestra_id: m.id_Muestra,
+            ficha_nombre: m.ficha_nombre,
             ciclo: Math.max(...m.id_ejecuciones.map((e) => e.ciclo)),
             dictamen: m.estado_Muestra,
+            analisis_preliminar: m.id_analisis_preliminar,
+            procesamiento: m.id_procesamiento,
+            analisis_final: m.id_analisis_final,
           })),
           ...this.archivo(f),
           creado_por: u.usuario,
@@ -724,7 +856,7 @@ export class CrmService {
           oportunidad_id: id,
           estado: { in: ['BORRADOR', 'ENVIADA', 'ACEPTADA'] },
         },
-        data: { estado: 'CANCELADA' },
+        data: { estado: 'CANCELADA', token_respuesta_hash: null, token_respuesta_expira: null },
       });
       await eventoCrm(tx, o, u, 'REPORTE_ID_ANULADO', motivo, {
         estado_tecnico: 'PENDIENTE',
@@ -735,6 +867,59 @@ export class CrmService {
     });
     this.avisar(id);
     return { success: true };
+  }
+  async enviarReporteAVentas(id: number, rid: number, u: Usuario) {
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      const oportunidad = await bloquearOportunidad(tx, id, u);
+      const reporte = await tx.id_reportes_oportunidad.findFirst({
+        where: { id: rid, oportunidad_id: id, estado: 'PUBLICADO' },
+      });
+      if (!reporte) throw new NotFoundException('Reporte publicado no encontrado.');
+      const perfilVendedor = await tx.crm_perfiles_comerciales.findUnique({
+        where: { persona_id: oportunidad.vendedor_id },
+        select: { correo: true },
+      });
+      const destinatario = correoVendedorConfigurado(oportunidad.vendedor_id) ?? perfilVendedor?.correo?.trim() ?? '';
+      if (!correoValido(destinatario))
+        throw new BadRequestException('Agrega el correo del vendedor en UST_USUARIOS_JSON para poder enviarle el reporte.');
+      const muestras = Array.isArray(reporte.muestras_ciclos) ? reporte.muestras_ciclos as any[] : [];
+      const resumenMediciones = muestras.map((m) => {
+        const valores = (analisis: any) => Array.isArray(analisis?.metricas)
+          ? analisis.metricas.map((x: any) => `${x.nombre}: ${x.valor}${x.unidad ? ` ${x.unidad}` : ''}`).join('; ')
+          : 'Sin datos';
+        return `Muestra #${m.muestra_id} · preliminar: ${valores(m.analisis_preliminar)} · final: ${valores(m.analisis_final)}`;
+      });
+      const cliente = await tx.personas.findUnique({
+        where: { id_Persona: oportunidad.persona_id },
+        select: { nombre: true },
+      });
+      const lineas = [
+        `Oportunidad: ${oportunidad.folio} · ${oportunidad.titulo}`,
+        `Cliente: ${cliente?.nombre ?? '—'}`,
+        `Resultado: ${reporte.resultado}`,
+        `Resumen: ${reporte.resumen ?? '—'}`,
+        ...resumenMediciones,
+      ];
+      const html = `<div style="margin:0;background:#f1f5f9;padding:28px 12px;font-family:Arial,sans-serif;color:#0f172a"><div style="max-width:640px;margin:auto;background:#fff;border:1px solid #dbe4ee;border-radius:14px;overflow:hidden"><header style="background:#082f49;padding:22px 26px;color:#ecfeff"><small style="color:#67e8f9;letter-spacing:2px">US Technologies · Investigación y Desarrollo</small><h1 style="margin:8px 0 0;font-size:22px">Reporte de análisis · v${reporte.version}</h1></header><div style="padding:26px"><p>Se publicó un reporte de I+D para la oportunidad <b>${escaparHtmlCorreo(oportunidad.folio)}</b>.</p><p><b>Cliente:</b> ${escaparHtmlCorreo(cliente?.nombre ?? '—')}</p><p><b>Resultado:</b> ${escaparHtmlCorreo(reporte.resultado)}</p><p>${escaparHtmlCorreo(reporte.resumen ?? '—')}</p>${resumenMediciones.length ? `<h2 style="font-size:15px">Resultados de caracterización</h2><ul>${resumenMediciones.map((x) => `<li style="margin:8px 0">${escaparHtmlCorreo(x)}</li>`).join('')}</ul>` : ''}<p>${reporte.nombre_archivo ? 'El reporte se adjunta a este correo.' : 'Consulta el resumen anterior; este reporte no incluye un archivo adjunto.'}</p><p style="font-size:12px;color:#64748b">Este envío fue solicitado manualmente por I+D.</p></div></div></div>`;
+      await this.correo.enviar({
+        destinatario,
+        asunto: `Reporte de I+D v${reporte.version} · ${oportunidad.folio}`,
+        texto: lineas.join('\n\n'),
+        html,
+        ...(reporte.contenido && reporte.nombre_archivo
+          ? { adjuntos: [{ nombre: reporte.nombre_archivo, mime: reporte.tipo_mime ?? 'application/pdf', contenido: reporte.contenido }] }
+          : {}),
+      });
+      const enviado = new Date();
+      await tx.id_reportes_oportunidad.update({
+        where: { id: rid },
+        data: { enviado_ventas_en: enviado, enviado_ventas_por: u.usuario, enviado_ventas_correo: destinatario },
+      });
+      await eventoCrm(tx, oportunidad, u, 'REPORTE_ID_ENVIADO_VENTAS', `Reporte v${reporte.version} enviado manualmente a ${destinatario}`);
+      return { destinatario, version: reporte.version };
+    }, { maxWait: 5_000, timeout: 30_000 });
+    this.avisar(id);
+    return { success: true, mensaje: `Reporte v${resultado.version} enviado a ${resultado.destinatario}.`, ...resultado };
   }
   private async habilitada(
     tx: Prisma.TransactionClient,
@@ -805,7 +990,7 @@ export class CrmService {
           oportunidad_id: id,
           estado: { in: ['BORRADOR', 'ENVIADA', 'ACEPTADA'] },
         },
-        data: { estado: 'CANCELADA' },
+        data: { estado: 'CANCELADA', token_respuesta_hash: null, token_respuesta_expira: null },
       });
       const c = await tx.crm_cotizaciones.create({
         data: {
@@ -871,6 +1056,7 @@ export class CrmService {
         where: { id: cid },
         data: {
           estado: b.estado,
+          ...(b.estado === 'ENVIADA' ? {} : { token_respuesta_hash: null, token_respuesta_expira: null }),
           ...(b.estado === 'ENVIADA'
             ? { enviado_en: new Date() }
             : b.estado === 'ACEPTADA'
@@ -901,6 +1087,9 @@ export class CrmService {
   }
 
   async enviarCotizacion(id: number, cid: number, b: any, u: Usuario) {
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const frontend = origenFrontend();
     const resultado = await this.prisma.$transaction(
       async (tx) => {
         const oportunidad = await bloquearOportunidad(tx, id, u);
@@ -935,6 +1124,18 @@ export class CrmService {
         const cantidad = `${cotizacion.cantidad.toString()} ${cotizacion.unidad}`;
         const condiciones = cotizacion.condiciones_comerciales;
         const contacto = perfil?.nombre_contacto?.trim() || 'cliente';
+        const respuesta = (accion: 'ACEPTAR' | 'RECHAZAR') => {
+          const url = new URL('/cotizacion/respuesta', frontend);
+          url.searchParams.set('token', token);
+          url.searchParams.set('accion', accion);
+          return url.toString();
+        };
+        const finVigencia = new Date(Date.UTC(
+          cotizacion.vigencia_hasta.getUTCFullYear(),
+          cotizacion.vigencia_hasta.getUTCMonth(),
+          cotizacion.vigencia_hasta.getUTCDate(),
+          23, 59, 59, 999,
+        ));
         const html = `
           <div style="margin:0;background:#f1f5f9;padding:32px 12px;font-family:Arial,sans-serif;color:#0f172a">
             <div style="max-width:640px;margin:0 auto;overflow:hidden;border:1px solid #dbe4ee;border-radius:16px;background:#fff">
@@ -954,6 +1155,9 @@ export class CrmService {
                 </table>
                 <h2 style="margin:22px 0 8px;font-size:15px">Condiciones comerciales</h2>
                 <div style="white-space:pre-line;border-radius:10px;background:#f8fafc;padding:14px;font-size:13px;line-height:1.6">${escaparHtmlCorreo(condiciones)}</div>
+                <h2 style="margin:24px 0 10px;font-size:15px">Respuesta a la propuesta</h2>
+                <p style="font-size:13px;color:#475569">Abre el enlace correspondiente y confirma tu respuesta en la página segura.</p>
+                <p style="margin:18px 0"><a href="${escaparHtmlCorreo(respuesta('ACEPTAR'))}" style="display:inline-block;background:#047857;color:#fff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700">Aceptar cotización</a> <a href="${escaparHtmlCorreo(respuesta('RECHAZAR'))}" style="display:inline-block;background:#475569;color:#fff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700">Rechazar cotización</a></p>
                 ${cotizacion.nombre_archivo ? '<p style="font-size:13px;color:#475569">El documento PDF de la cotización se adjunta a este correo.</p>' : '<p style="font-size:13px;color:#475569">Esta cotización se incluye en el cuerpo del correo; no tiene un archivo adjunto.</p>'}
                 <p style="margin-top:22px;font-size:13px;color:#475569">Responde a este correo o contacta a tu vendedor para confirmar o comentar la propuesta.</p>
               </div>
@@ -976,7 +1180,9 @@ export class CrmService {
           cotizacion.nombre_archivo
             ? 'El documento de la cotización se adjunta a este correo.'
             : 'La cotización no tiene un archivo adjunto.',
-          'Responde a este correo o contacta a tu vendedor para confirmar o comentar la propuesta.',
+          `Para aceptar, visita: ${respuesta('ACEPTAR')}`,
+          `Para rechazar, visita: ${respuesta('RECHAZAR')}`,
+          'El enlace abre una página que solicita confirmar la acción; no registra una respuesta al abrirlo.',
         ].join('\n');
 
         await this.correo.enviar({
@@ -997,7 +1203,7 @@ export class CrmService {
 
         await tx.crm_cotizaciones.update({
           where: { id: cotizacion.id },
-          data: { estado: 'ENVIADA', enviado_en: new Date() },
+          data: { estado: 'ENVIADA', enviado_en: new Date(), token_respuesta_hash: tokenHash, token_respuesta_expira: finVigencia },
         });
         await eventoCrm(
           tx,
@@ -1017,6 +1223,54 @@ export class CrmService {
       destinatario: resultado.destinatario,
       mensaje: `Cotización ${resultado.folio} ${resultado.reenvio ? 'reenviada' : 'enviada'} manualmente a ${resultado.destinatario}.`,
     };
+  }
+  async responderCotizacion(body: any) {
+    const token = String(body?.token ?? '').trim();
+    const accion = String(body?.accion ?? '').toUpperCase();
+    if (!/^[A-Za-z0-9_-]{40,60}$/.test(token) || !['ACEPTAR', 'RECHAZAR'].includes(accion))
+      throw new BadRequestException('Enlace de respuesta inválido.');
+    const hash = createHash('sha256').update(token).digest('hex');
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      // Use the same lock order as sales operations: opportunity first, then quote.
+      // The first lookup is non-locking and only discovers which opportunity to lock.
+      const referencia = await tx.crm_cotizaciones.findUnique({
+        where: { token_respuesta_hash: hash },
+        select: { id: true, oportunidad_id: true },
+      });
+      if (!referencia) throw new ConflictException('Este enlace ya fue utilizado o dejó de estar vigente.');
+      await tx.$queryRaw`SELECT id FROM crm_oportunidades WHERE id=${referencia.oportunidad_id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM crm_cotizaciones WHERE id=${referencia.id} AND token_respuesta_hash=${hash} FOR UPDATE`;
+      const cotizacion = await tx.crm_cotizaciones.findUnique({ where: { token_respuesta_hash: hash } });
+      if (!cotizacion || cotizacion.estado !== 'ENVIADA' || !cotizacion.token_respuesta_expira)
+        throw new ConflictException('Este enlace ya fue utilizado o dejó de estar vigente.');
+      if (cotizacion.token_respuesta_expira.getTime() < Date.now())
+        throw new ConflictException('La vigencia de esta cotización terminó. Contacta a tu vendedor.');
+      const oportunidad = await tx.crm_oportunidades.findUnique({ where: { id: cotizacion.oportunidad_id } });
+      if (!oportunidad || cerradas.includes(oportunidad.etapa))
+        throw new ConflictException('La oportunidad ya no está disponible para responder.');
+      const estado = accion === 'ACEPTAR' ? 'ACEPTADA' : 'RECHAZADA';
+      await tx.crm_cotizaciones.update({
+        where: { id: cotizacion.id },
+        data: {
+          estado,
+          ...(estado === 'ACEPTADA' ? { aceptado_en: new Date() } : { rechazado_en: new Date() }),
+          token_respuesta_hash: null,
+          token_respuesta_expira: null,
+        },
+      });
+      const interno: Usuario = { usuario: 'RESPUESTA_CLIENTE', area: 'id', personaId: oportunidad.vendedor_id, expira: 0 };
+      await eventoCrm(
+        tx,
+        oportunidad,
+        interno,
+        estado === 'ACEPTADA' ? 'COTIZACION_ACEPTADA' : 'COTIZACION_RECHAZADA',
+        `El cliente ${estado === 'ACEPTADA' ? 'aceptó' : 'rechazó'} la cotización ${cotizacion.folio} desde el enlace de correo.`,
+        { etapa: 'SEGUIMIENTO_COTIZACION' },
+      );
+      return { id: cotizacion.id, folio: cotizacion.folio, estado, oportunidad_id: oportunidad.id };
+    });
+    this.avisar(resultado.oportunidad_id);
+    return { success: true, folio: resultado.folio, estado: resultado.estado };
   }
   async confirmar(id: number, b: any, u: Usuario) {
     const data = await this.prisma.$transaction(async (tx) => {
@@ -1402,7 +1656,7 @@ export class CrmService {
         throw new NotFoundException('Cotización no encontrada');
       await tx.crm_cotizaciones.update({
         where: { id: orden.cotizacion_id },
-        data: { estado: 'CANCELADA' },
+        data: { estado: 'CANCELADA', token_respuesta_hash: null, token_respuesta_expira: null },
       });
       await eventoCrm(tx, o, u, 'CANCELACION', motivo, {
         etapa: 'CANCELADA',

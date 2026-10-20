@@ -125,6 +125,14 @@ Antes de desplegar el backend:
 
 El historial guarda el trámite, la fecha de vencimiento observada, el hito, el destinatario, el estado y los reintentos. La tabla tiene RLS habilitado sin políticas de acceso desde la API Data; el servicio del backend la consulta mediante Prisma.
 
+## Documentación y seguimiento CRM de ventas
+
+Antes de desplegar esta versión, ejecuta una vez `supabase/migrations/20261020170255_crm_ventas_documentos_analisis_respuestas.sql` en el SQL Editor del proyecto Supabase. Crea el versionado de documentos fiscales/comerciales, los datos estructurados de I+D, los tipos de contacto y los tokens de respuesta de cotización. La tabla de documentos de cliente tiene RLS habilitado sin políticas para la Data API; solo el backend accede por Prisma.
+
+En Railway configura `FRONTEND_URL=https://siust.netlify.app` y agrega el campo `correo` a cada vendedor en `UST_USUARIOS_JSON`. I+D usa ese correo para enviar manualmente un reporte al vendedor; Ventas usa el correo del perfil comercial del prospecto para enviar la cotización. El cliente confirma aceptar o rechazar en una página pública con token de un solo uso, y el vendedor crea la orden de venta desde el panel después de la aceptación.
+
+El registro de muestra deja la oportunidad en `MUESTRA_RECOLECTADA`; cuando I+D confirma recepción y valida los datos de la muestra, pasa a `EN_ANALISIS_ID`. Las caracterizaciones preliminar y final permiten capturar parámetros configurables y observaciones; el procesamiento registra el método de filtración o regeneración aplicado. Cada seguimiento comercial conserva tipo y fecha de contacto.
+
 ## Manifiestos
 
 Las órdenes de venta vigentes generan automáticamente una tarjeta en **Pedido**. SHyMA también puede registrar manifiestos GKN sin OV. El avance está restringido al área de cada etapa: Logística, Almacén, SHyMA (acceso `seguridad`) y Contaduría.

@@ -258,6 +258,11 @@ model muestras {
   area_Muestra                             String                     @default("CALIDAD") @db.VarChar(24)
   vendedor_id                              Int?
   caracterizacion                          String?                    @db.VarChar(20)
+  /// Marca los registros CRM nuevos que deben completar el formato técnico estructurado.
+  id_flujo_estructurado                    Boolean                    @default(false)
+  id_analisis_preliminar                   Json?                      @db.JsonB
+  id_procesamiento                         Json?                      @db.JsonB
+  id_analisis_final                        Json?                      @db.JsonB
   cantidad_proyecto                        Decimal?                   @db.Decimal(14, 4)
   unidad_proyecto                          String?                    @db.VarChar(30)
   viabilidad_id                            Int?
@@ -431,6 +436,7 @@ model personas {
   crm_oportunidades_vendedor                                             crm_oportunidades[]        @relation("crm_oportunidad_vendedor")
   crm_ordenes_venta_cliente                                              crm_ordenes_venta[]        @relation("crm_orden_venta_cliente")
   crm_ordenes_venta_vendedor                                             crm_ordenes_venta[]        @relation("crm_orden_venta_vendedor")
+  crm_documentos_cliente                                                 crm_documentos_cliente[]
   manifiestos_como_operador                                               manifiestos[]              @relation("manifiesto_operador")
   manifiestos_como_cliente                                               manifiestos[]              @relation("manifiesto_cliente")
   manifiestos_firmados                                                    manifiestos[]              @relation("manifiesto_firmado_por")
@@ -882,12 +888,33 @@ model crm_oportunidad_historial {
   estado_tecnico_nuevo    crm_oportunidad_estado_id?
   nota                    String?                          @db.Text
   proximo_contacto        DateTime?
+  tipo_contacto           crm_tipo_contacto?
+  fecha_contacto          DateTime?                        @db.Timestamptz(6)
   realizado_por           String                           @db.VarChar(100)
   realizado_en            DateTime                         @default(now())
   oportunidad             crm_oportunidades                @relation(fields: [oportunidad_id], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@index([oportunidad_id, realizado_en], map: "idx_crm_oportunidad_historial")
+  @@index([oportunidad_id, fecha_contacto], map: "idx_crm_historial_ultimo_contacto")
   @@index([accion, realizado_en], map: "idx_crm_historial_accion")
+}
+
+/// Documentación de alta comercial por cuenta. Las versiones sustituidas se conservan.
+model crm_documentos_cliente {
+  id             Int                        @id @default(autoincrement())
+  persona_id     Int
+  tipo_documento crm_documento_cliente_tipo
+  version        Int                        @default(1)
+  vigente        Boolean                    @default(true)
+  nombre_archivo String                     @db.VarChar(255)
+  tipo_mime      String                     @db.VarChar(150)
+  contenido      Bytes                      @db.ByteA
+  subido_por     String                     @db.VarChar(100)
+  subido_en      DateTime                   @default(now()) @db.Timestamptz(6)
+  persona        personas                   @relation(fields: [persona_id], references: [id_Persona], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([persona_id, tipo_documento, version], map: "uq_crm_documento_cliente_version")
+  @@index([persona_id, tipo_documento, vigente], map: "idx_crm_documento_cliente_actual")
 }
 
 model id_reportes_oportunidad {
@@ -905,6 +932,9 @@ model id_reportes_oportunidad {
   creado_en        DateTime             @default(now())
   publicado_por    String?              @db.VarChar(100)
   publicado_en     DateTime?
+  enviado_ventas_en     DateTime?            @db.Timestamptz(6)
+  enviado_ventas_por    String?              @db.VarChar(100)
+  enviado_ventas_correo String?              @db.VarChar(180)
   anulado_en       DateTime?
   motivo_anulacion String?              @db.Text
   oportunidad      crm_oportunidades    @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -966,6 +996,8 @@ model crm_cotizaciones {
   enviado_en              DateTime?               @db.Timestamptz(6)
   aceptado_en             DateTime?               @db.Timestamptz(6)
   rechazado_en            DateTime?               @db.Timestamptz(6)
+  token_respuesta_hash    String?                 @unique(map: "uq_crm_cotizacion_token_respuesta") @db.Char(64)
+  token_respuesta_expira  DateTime?               @db.Timestamptz(6)
   oportunidad             crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
   reporte                 id_reportes_oportunidad @relation(fields: [reporte_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
   producto                productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
@@ -1196,6 +1228,24 @@ enum crm_oportunidad_historial_accion {
   CIERRE_PERDIDA
   CANCELACION
   REAPERTURA
+  REPORTE_ID_ENVIADO_VENTAS
+}
+
+enum crm_tipo_contacto {
+  VISITA_PLANTA
+  VISITA_CLIENTE
+  PRESENTACION
+  LLAMADA
+  CORREO
+  OTRO
+}
+
+enum crm_documento_cliente_tipo {
+  CONSTANCIA_FISCAL
+  OPINION_CUMPLIMIENTO
+  COMPROBANTE_DOMICILIO
+  CARATULA_BANCARIA
+  OTRO
 }
 
 enum id_reporte_estado {

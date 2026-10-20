@@ -57,17 +57,18 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     const original = a.queryRaw.bind(a);
     a.queryRaw = (q) => {
       const match = q.sql.match(
-        /INSERT INTO "public"\."muestras" \((.*?)\) VALUES/,
+        /INSERT INTO "public"\."(muestras|certificado_calidad)" \((.*?)\) VALUES/,
       );
       if (match) {
-        const index = match[1]
+        const timeColumn = match[1] === 'muestras' ? '"Hora_Toma"' : '"hora_Liberacion"';
+        const index = match[2]
           .split(',')
-          .findIndex((c) => c.trim() === '"Hora_Toma"');
+          .findIndex((c) => c.trim() === timeColumn);
         if (index >= 0 && q.args[index])
           q = {
             ...q,
             args: q.args.map((v, i) =>
-              i === index ? String(v).slice(11, 23) : v,
+              i === index ? String(v).slice(11, 19) : v,
             ),
           };
       }
@@ -82,7 +83,12 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
   factory.connect = async () => wrap(await connect());
   const p = new PrismaClient({ adapter: factory });
   const ev = { notificar: () => {} };
-  const correo = { enviar: async () => {} };
+  const enviados = [];
+  const correo = { enviar: async (mensaje) => { enviados.push(mensaje); } };
+  process.env.FRONTEND_URL = 'https://siust.netlify.app';
+  process.env.UST_USUARIOS_JSON = JSON.stringify([
+    { usuario: 'vendedor', personaId: 1, areas: ['ventas'], correo: 'vendedor@example.com' },
+  ]);
   const crm = new CrmService(p, ev, correo),
     id = new InvestigacionService(p, ev, new TrazabilidadService(p));
   try {
@@ -104,6 +110,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
         {
           nombre: 'Alfa',
           nombre_contacto: 'Contacto',
+          correo: 'contacto@alfa.example',
           frecuencia_esperada_dias: '30',
         },
         seller,
@@ -111,6 +118,27 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     ).data;
     const same = (await crm.guardarCuenta({ nombre: 'ALFA' }, seller)).data;
     assert.equal(same.persona_id, account.persona_id);
+    const productoRegistrado = await id.crearProducto({ nombre: 'Producto por texto', UM: 'Litros' }, seller);
+    const productoDuplicado = await id.crearProducto({ nombre: 'PRODUCTO POR TEXTO', UM: 'Litros' }, seller);
+    assert.equal(productoRegistrado.data.id_Produc_Mater, productoDuplicado.data.id_Produc_Mater);
+    const documento = await crm.subirDocumentoCuenta(
+      account.persona_id,
+      'CONSTANCIA_FISCAL',
+      { ...pdf, originalname: 'constancia.pdf' },
+      seller,
+    );
+    assert.equal(documento.data.version, 1);
+    const reemplazo = await crm.subirDocumentoCuenta(
+      account.persona_id,
+      'CONSTANCIA_FISCAL',
+      { ...pdf, originalname: 'constancia-actualizada.pdf' },
+      seller,
+    );
+    assert.equal(reemplazo.data.version, 2);
+    const documentosCuenta = (await crm.cuenta(account.persona_id, seller)).data.documentos;
+    assert.equal(documentosCuenta.length, 2);
+    assert.equal(documentosCuenta.filter((doc) => doc.vigente).length, 1);
+    assert.equal((await crm.documentoCuenta(reemplazo.data.id, seller)).nombre_archivo, 'constancia-actualizada.pdf');
     const open = async () =>
       (
         await crm.crear(
@@ -148,7 +176,19 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       await id.planificar(mid, { procesos: [proc.id] }, lab);
       await id.recibir(mid, lab);
       const m = (await id.detalle(mid, lab)).data;
-      const eid = m.procesos_id.at(-1).id;
+      if (m.id_flujo_estructurado) {
+        const structured = async (etapa, datos) =>
+          id.guardarAnalisisEstructurado(mid, { etapa, datos }, lab);
+        await structured('PRELIMINAR', {
+          metricas: [{ clave: 'viscosidad_40', nombre: 'Viscosidad a 40°', valor: '42', unidad: 'cSt' }],
+        });
+        await structured('PROCESAMIENTO', { tipo: 'FILTRACION', filtracion: 'ESTANDAR' });
+        await structured('FINAL', {
+          metricas: [{ clave: 'viscosidad_40', nombre: 'Viscosidad a 40°', valor: '40', unidad: 'cSt' }],
+        });
+      }
+      const analizada = (await id.detalle(mid, lab)).data;
+      const eid = analizada.procesos_id.at(-1).id;
       await id.proceso(mid, eid, 'iniciar', {}, lab);
       await id.proceso(mid, eid, 'terminar', { resultado: 'Conforme' }, lab);
       await id.finalizar(mid, { dictamen: 'APROBADO' }, lab);
@@ -228,6 +268,15 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     };
     const o = await open();
     assert.equal(o.etapa, 'RECOLECCION_AGENDADA');
+    await crm.guardar(o.id, {
+      version: await version(o.id),
+      nota: 'Visita de presentación con el cliente',
+      tipo_contacto: 'PRESENTACION',
+      fecha_contacto: new Date().toISOString(),
+    }, seller);
+    const seguimiento = (await crm.detalle(o.id, seller)).data.historial[0];
+    assert.equal(seguimiento.tipo_contacto, 'PRESENTACION');
+    assert.ok(seguimiento.fecha_contacto);
     assert.equal(await p.muestras.count(), 0);
     await assert.rejects(
       crm.detalle(o.id, { ...seller, personaId: 999 }),
@@ -238,7 +287,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       m2 = await sample(o.id);
     assert.equal(
       (await crm.detalle(o.id, seller)).data.etapa,
-      'EN_ANALISIS_ID',
+      'MUESTRA_RECOLECTADA',
     );
     assert.equal(
       (await p.muestras.findUnique({ where: { id_Muestra: m1 } }))
@@ -255,9 +304,20 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       'PROSPECTO',
     );
     await finish(m1);
+    assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'EN_ANALISIS_ID');
+    await assert.rejects(
+      id.guardarAnalisisEstructurado(m1, {
+        etapa: 'FINAL',
+        datos: { metricas: [{ clave: 'viscosidad_40', nombre: 'Viscosidad a 40°', valor: '99', unidad: 'cSt' }] },
+      }, lab),
+    );
     await assert.rejects(report(o.id), (e) => e.status === 400);
     await finish(m2);
-    await report(o.id);
+    const reportePublicado = await report(o.id);
+    await crm.enviarReporteAVentas(o.id, reportePublicado.data.id, lab);
+    assert.equal(enviados.length, 1);
+    assert.equal(enviados[0].destinatario, 'vendedor@example.com');
+    assert.equal((await p.id_reportes_oportunidad.findUnique({ where: { id: reportePublicado.data.id } })).enviado_ventas_correo, 'vendedor@example.com');
     assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'COTIZACION');
     await objetivo(o.id);
     const c1 = await quote(o.id),
@@ -267,7 +327,12 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       (await p.crm_cotizaciones.findUnique({ where: { id: c1.id } })).estado,
       'CANCELADA',
     );
-    await accept(o.id, c2.id);
+    await crm.enviarCotizacion(o.id, c2.id, { version: await version(o.id) }, seller);
+    assert.equal(enviados.length, 2);
+    const token = enviados.at(-1).html.match(/token=([A-Za-z0-9_-]+)/)?.[1];
+    assert.ok(token, 'el enlace de correo debe incluir el token de un solo uso');
+    assert.equal((await crm.responderCotizacion({ token, accion: 'ACEPTAR' })).estado, 'ACEPTADA');
+    await assert.rejects(crm.responderCotizacion({ token, accion: 'ACEPTAR' }));
     const body = {
       version: await version(o.id),
       cotizacion_id: c2.id,
@@ -421,11 +486,15 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     assert.equal(muestra.producto_id, prod.id_Produc_Mater);
     assert.equal(muestra.cliente_id, account.persona_id);
     await assert.rejects(
-      produccion.actualizarEstatusCalidad({
-        idLoteProduccion: lote1.id_Lote_Produccion,
-        estadoCalidad: 'LIBERADO',
+      produccion.actualizarEstatusTanque({
+        tanqueId: tanque.id_Equipos_Tanques,
+        estatus_proceso: 'LIBERADO_CALIDAD',
       }),
     );
+    await p.muestras.update({
+      where: { id_Muestra: muestra.id_Muestra },
+      data: { categoria_Muestra: 'MUESTRA_AJUSTADO' },
+    });
     const parametro = await p.parametros_laboratorio.create({
       data: { nombre_Parametro: 'Densidad', tipo_Dato: 'NUMERICO' },
     });
@@ -438,9 +507,15 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       analistaNombre: 'Laboratorio',
       mediciones: [{ id_Parametro: parametro.id_Parametro, valor: '1.1' }],
     });
-    await produccion.actualizarEstatusCalidad({
-      idLoteProduccion: lote1.id_Lote_Produccion,
-      estadoCalidad: 'LIBERADO',
+    await calidad.subirCertificadoCalidad(
+      muestra.id_Muestra,
+      { folio_Certificado: 'CERT-1', no_Certificado: 'N-1', fecha_Emision: new Date().toISOString().slice(0, 10) },
+      { ...pdf, mimetype: 'application/pdf', originalname: 'certificado.pdf' },
+      { personaId: 2 },
+    );
+    await produccion.actualizarEstatusTanque({
+      tanqueId: tanque.id_Equipos_Tanques,
+      estatus_proceso: 'LIBERADO_CALIDAD',
     });
     const salida = (
       await produccion.descargar(
@@ -723,6 +798,18 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       { resultado: 'Conforme' },
       lab,
     );
+    await id.guardarAnalisisEstructurado(m4, {
+      etapa: 'PRELIMINAR',
+      datos: { metricas: [{ clave: 'viscosidad_40', nombre: 'Viscosidad a 40°', valor: '44', unidad: 'cSt' }] },
+    }, lab);
+    await id.guardarAnalisisEstructurado(m4, {
+      etapa: 'PROCESAMIENTO',
+      datos: { tipo: 'FILTRACION', filtracion: 'ESTANDAR' },
+    }, lab);
+    await id.guardarAnalisisEstructurado(m4, {
+      etapa: 'FINAL',
+      datos: { metricas: [{ clave: 'viscosidad_40', nombre: 'Viscosidad a 40°', valor: '40', unidad: 'cSt' }] },
+    }, lab);
     await id.finalizar(m4, { dictamen: 'APROBADO' }, lab);
     await report(o3.id);
     await objetivo(o3.id);
@@ -776,7 +863,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       m6 = await sample(o5.id);
     await p.muestras.update({
       where: { id_Muestra: m6 },
-      data: { oportunidad_id: null },
+      data: { oportunidad_id: null, id_flujo_estructurado: false },
     });
     await finish(m6);
     const historialAntes = await p.id_ejecuciones.findMany({

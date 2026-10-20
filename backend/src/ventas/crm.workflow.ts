@@ -56,6 +56,10 @@ export async function eventoCrm(
   accion: crm_oportunidad_historial_accion,
   nota: string,
   data: Prisma.crm_oportunidadesUncheckedUpdateInput = {},
+  historial: Pick<
+    Prisma.crm_oportunidad_historialUncheckedCreateInput,
+    'tipo_contacto' | 'fecha_contacto'
+  > = {},
 ) {
   const nuevo = await tx.crm_oportunidades.update({
     where: { id: o.id },
@@ -72,6 +76,7 @@ export async function eventoCrm(
       estado_tecnico_anterior: o.estado_tecnico,
       estado_tecnico_nuevo: nuevo.estado_tecnico,
       proximo_contacto: nuevo.proximo_contacto,
+      ...historial,
     },
   });
   return nuevo;
@@ -82,6 +87,10 @@ export async function reiniciarTecnico(
   o: Awaited<ReturnType<typeof bloquearOportunidad>>,
   u: Usuario,
   nota: string,
+  transicion: {
+    etapa?: crm_oportunidad_etapa;
+    estado_tecnico?: crm_oportunidad_estado_id;
+  } = {},
 ) {
   if (o.etapa === 'GANADA')
     throw new ConflictException('La venta ya fue confirmada. Registra una nueva oportunidad para otro análisis comercial');
@@ -94,11 +103,17 @@ export async function reiniciarTecnico(
       oportunidad_id: o.id,
       estado: { in: ['BORRADOR', 'ENVIADA', 'ACEPTADA'] },
     },
-    data: { estado: 'CANCELADA' },
+    data: {
+      estado: 'CANCELADA',
+      token_respuesta_hash: null,
+      token_respuesta_expira: null,
+    },
   });
   return eventoCrm(tx, o, u, 'MUESTRA_ASOCIADA', nota, {
-    ...(cerradas.includes(o.etapa) ? {} : { etapa: 'EN_ANALISIS_ID' as const }),
-    estado_tecnico: 'EN_ANALISIS',
+    ...(cerradas.includes(o.etapa)
+      ? {}
+      : { etapa: transicion.etapa ?? ('EN_ANALISIS_ID' as const) }),
+    estado_tecnico: transicion.estado_tecnico ?? 'EN_ANALISIS',
   });
 }
 export function fechaCrm(v: unknown, required = false): Date | null {

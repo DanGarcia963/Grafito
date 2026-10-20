@@ -12,8 +12,8 @@ import s from "./VentasCRM.module.css";
 const base = "/api/ventas/crm",
   etapas = [
     "REGISTRADA",
-    "MUESTRA_RECOLECTADA",
     "RECOLECCION_AGENDADA",
+    "MUESTRA_RECOLECTADA",
     "EN_ANALISIS_ID",
     "COTIZACION",
     "SEGUIMIENTO_COTIZACION",
@@ -23,10 +23,41 @@ const base = "/api/ventas/crm",
   ];
 const nombre = (x: string) => x.replaceAll("_", " "),
   fecha = (x: string | null) => (x ? new Date(x).toLocaleString("es-MX") : "—");
+const documentoTipos = [
+  ["CONSTANCIA_FISCAL", "Constancia de situación fiscal (CSF/CFS)"],
+  ["OPINION_CUMPLIMIENTO", "Opinión de cumplimiento (OP)"],
+  ["COMPROBANTE_DOMICILIO", "Comprobante de domicilio"],
+  ["CARATULA_BANCARIA", "Carátula bancaria"],
+  ["OTRO", "Otro documento"],
+];
+const ahoraLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+async function descargarDocumentoCuenta(id: number, nombreArchivo: string) {
+  const r = await apiFetch(`${API_URL}/api/ventas/crm/documentos-cuenta/${id}`);
+  if (!r.ok) throw new Error("No se pudo descargar el documento de la cuenta.");
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function descargarFichaMuestra(id: number, nombreArchivo: string) {
+  const r = await apiFetch(`${API_URL}/api/investigacion/muestras/${id}/ficha`);
+  if (!r.ok) throw new Error("No se pudo descargar la ficha técnica de la muestra.");
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 const dinero = (x: string, m: string) =>
   new Intl.NumberFormat("es-MX", { style: "currency", currency: m }).format(
     Number(x),
   );
+const mostrarMediciones = (data: any) => Array.isArray(data?.metricas)
+  ? data.metricas.map((m: any) => `${m.nombre}: ${m.valor}${m.unidad ? ` ${m.unidad}` : ""}`).join(" · ")
+  : "Sin mediciones registradas";
 const cantidad = (x: string | number | null | undefined, unidad?: string) =>
   x === null || x === undefined
     ? "Sin dato"
@@ -442,6 +473,8 @@ export default function VentasCRM() {
         { value: detalle.etapa, label: "Registrar seguimiento" },
         ...opts(["PERDIDA", "CANCELADA"]),
       ]),
+      select("tipo_contacto", "Tipo de contacto", opts(["VISITA_PLANTA", "VISITA_CLIENTE", "PRESENTACION", "LLAMADA", "CORREO", "OTRO"])),
+      field("fecha_contacto", "Fecha del contacto", "datetime-local", true, ahoraLocal()),
       field("nota", "Nota / motivo de cierre", "textarea", true),
       field("proximo_contacto", "Próximo contacto", "datetime-local"),
       field(
@@ -586,6 +619,7 @@ export default function VentasCRM() {
   if (!user) return <p className="p-6">Verificando sesión…</p>;
   const abierta =
     detalle && !["GANADA", "PERDIDA", "CANCELADA"].includes(detalle.etapa);
+  const ultimoContacto = detalle?.historial?.find((h: any) => h.fecha_contacto);
   return (
     <main className={s.app}>
       <header className={s.header}>
@@ -807,6 +841,39 @@ export default function VentasCRM() {
             {fecha(cuenta.recurrencia.proxima_compra_estimada)} · Frecuencia
             acordada: {cuenta.recurrencia.frecuencia_esperada_dias ?? "—"} días
           </p>
+          <section className={`${s.historyItem} space-y-3`}>
+            <h3>Documentación del cliente</h3>
+            <p>{documentoTipos.slice(0, 4).filter(([tipo]) => cuenta.documentos?.some((d: any) => d.tipo_documento === tipo && d.vigente)).length} de 4 documentos principales vigentes.</p>
+            <form className={s.actions} onSubmit={(event) => {
+              event.preventDefault();
+              const form = event.currentTarget;
+              const data = new FormData(form);
+              void ejecutar(async () => {
+                const r = await apiFetch(`${API_URL}${base}/cuentas/${cuenta.persona.id_Persona}/documentos`, { method: "POST", body: data });
+                const body = await r.json();
+                if (!r.ok) throw new Error(body.message || "No se pudo guardar el documento.");
+                await verCuenta(cuenta.persona.id_Persona);
+                form.reset();
+              }, "Documento cargado. La versión anterior queda en el historial.");
+            }}>
+              <select name="tipo_documento" required defaultValue="CONSTANCIA_FISCAL">
+                {documentoTipos.map(([tipo, label]) => <option key={tipo} value={tipo}>{label}</option>)}
+              </select>
+              <input name="documento" type="file" required accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" />
+              <button className={s.primary} disabled={busy}>Cargar / reemplazar documento</button>
+            </form>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {documentoTipos.map(([tipo, label]) => {
+                const versiones = cuenta.documentos?.filter((doc: any) => doc.tipo_documento === tipo) ?? [];
+                const d = versiones.find((doc: any) => doc.vigente);
+                return <article key={tipo} className={s.historyItem}>
+                  <strong>{label}</strong>
+                  {d ? <><small>Versión {d.version} · {d.subido_por} · {fecha(d.subido_en)}</small><button onClick={() => void ejecutar(() => descargarDocumentoCuenta(d.id, d.nombre_archivo), "Documento descargado")}>{d.nombre_archivo}</button></> : <small>Pendiente</small>}
+                  {versiones.some((doc: any) => !doc.vigente) && <details><summary>Versiones anteriores</summary>{versiones.filter((doc: any) => !doc.vigente).map((doc: any) => <p key={doc.id}><small>Versión {doc.version} · {doc.subido_por} · {fecha(doc.subido_en)} · </small><button onClick={() => void ejecutar(() => descargarDocumentoCuenta(doc.id, doc.nombre_archivo), "Versión anterior descargada")}>{doc.nombre_archivo}</button></p>)}</details>}
+                </article>;
+              })}
+            </div>
+          </section>
           <h3>Oportunidades</h3>
           {cuenta.oportunidades.map((o: any) => (
             <button
@@ -977,6 +1044,7 @@ export default function VentasCRM() {
             {fecha(detalle.fecha_recoleccion_agendada)} · Cierre:{" "}
             {fecha(detalle.fecha_cierre)}
           </p>
+          <p>Último contacto: {ultimoContacto ? `${nombre(ultimoContacto.tipo_contacto)} · ${fecha(ultimoContacto.fecha_contacto)} · ${ultimoContacto.realizado_por}` : "Sin contacto registrado"}</p>
           <div className={s.actions}>
             {abierta && (
               <>
@@ -1053,6 +1121,7 @@ export default function VentasCRM() {
                 v{r.version} · {r.resultado} · {r.estado}
               </strong>
               <p>{r.resumen}</p>
+              {Array.isArray(r.muestras_ciclos) && r.muestras_ciclos.some((m: any) => m.analisis_preliminar || m.analisis_final) && <details className="text-sm"><summary>Caracterización antes y después</summary><div className="space-y-2 pt-2">{r.muestras_ciclos.map((m: any) => <article key={m.muestra_id} className={s.historyItem}><strong>Muestra #{m.muestra_id} · {m.dictamen}</strong><p><b>Antes:</b> {mostrarMediciones(m.analisis_preliminar)}</p><p><b>Procesamiento:</b> {m.procesamiento?.tipo === "FILTRACION" ? nombre(m.procesamiento.filtracion) : nombre(m.procesamiento?.regeneracion ?? "Pendiente")}</p><p><b>Después:</b> {mostrarMediciones(m.analisis_final)}</p>{m.ficha_nombre && <button onClick={() => void ejecutar(() => descargarFichaMuestra(m.muestra_id, m.ficha_nombre), "Ficha técnica descargada")}>Descargar ficha técnica · {m.ficha_nombre}</button>}</article>)}</div></details>}
               <small>
                 {r.publicado_por} · {fecha(r.publicado_en)}
               </small>
@@ -1162,7 +1231,7 @@ export default function VentasCRM() {
               <strong>{nombre(h.accion)}</strong>
               <p>{h.nota}</p>
               <small>
-                {h.realizado_por} · {fecha(h.realizado_en)} ·{" "}
+                {h.tipo_contacto ? `${nombre(h.tipo_contacto)} · ${fecha(h.fecha_contacto)} · ` : ""}{h.realizado_por} · {fecha(h.realizado_en)} ·{" "}
                 {nombre(h.etapa_anterior ?? "INICIO")} →{" "}
                 {nombre(h.etapa_nueva ?? "")}
               </small>

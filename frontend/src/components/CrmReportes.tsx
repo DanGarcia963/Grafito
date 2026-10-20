@@ -85,9 +85,11 @@ export default function CrmReportes({
             {o.muestras.map((m: any) => (
               <li key={m.id_Muestra}>
                 Muestra #{m.id_Muestra}: {m.estado_Muestra}
+                {m.id_flujo_estructurado && <span className="ml-2 text-xs text-slate-600">· Preliminar {m.id_analisis_preliminar ? "✓" : "pendiente"} · Procesamiento {m.id_procesamiento ? "✓" : "pendiente"} · Final {m.id_analisis_final ? "✓" : "pendiente"}</span>}
               </li>
             ))}
           </ul>
+          {o.muestras.some((m: any) => m.id_flujo_estructurado && (!m.id_analisis_preliminar || !m.id_procesamiento || !m.id_analisis_final)) && <p className="rounded bg-amber-50 p-3 text-sm text-amber-900">Completa las tres etapas estructuradas de I+D antes de publicar este reporte.</p>}
           {o.etapa !== "GANADA" && (
             <form
               className="grid gap-3"
@@ -195,6 +197,19 @@ export default function CrmReportes({
                 >
                   Descargar documento
                 </button>
+              )}
+              {area === "id" && r.estado === "PUBLICADO" && (
+                <div className="space-y-1">
+                  {r.enviado_ventas_en && <p className="text-xs text-emerald-800">Enviado a Ventas: {r.enviado_ventas_correo} · {new Date(r.enviado_ventas_en).toLocaleString("es-MX")}</p>}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="rounded border px-3 py-2"
+                    onClick={() => void ejecutar(() => pedir(`/api/ventas/crm/oportunidades/${oportunidadId}/reportes/${r.id}/enviar-ventas`, {}))}
+                  >
+                    {r.enviado_ventas_en ? "Reenviar reporte a Ventas" : "Enviar reporte al vendedor"}
+                  </button>
+                </div>
               )}
               {r.estado === "PUBLICADO" &&
                 o.etapa !== "GANADA" && (
