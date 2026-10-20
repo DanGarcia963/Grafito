@@ -16,6 +16,35 @@ function paso(key: string, label: string, estado: EstadoPaso, detalle: string) {
 
 /** Deriva el cumplimiento comercial a partir de recepciones, OP, LP y entregas. */
 export function calcularCumplimientoOV(orden: any) {
+  if (orden.estado === 'BORRADOR') {
+    const solicitado = numero(orden.cantidad);
+    return {
+      ordenes_produccion: [],
+      cumplimiento: {
+        estado: 'BORRADOR',
+        etiqueta: 'Borrador · pendiente de confirmación',
+        pasos: [
+          paso(
+            'CONFIRMACION',
+            'Confirmación de la OV',
+            'PENDIENTE',
+            'El vendedor debe completar la referencia del cliente y confirmar la orden.',
+          ),
+        ],
+        cantidad_solicitada: solicitado,
+        cantidad_producto_terminado_asignada: 0,
+        cantidad_producto_terminado_pendiente: solicitado,
+        porcentaje_producto_terminado_asignado: 0,
+        producto_terminado_asignado_completo: false,
+        cantidad_despachada: 0,
+        cantidad_entregada: 0,
+        porcentaje_entregado: 0,
+        ordenes: { total: 0, activas: 0 },
+        lotes: { total: 0, liberados: 0, en_calidad: 0, rechazados: 0, en_produccion: 0 },
+        recepciones: [],
+      },
+    };
+  }
   const ordenesProduccion: any[] = orden.ordenes_produccion ?? [];
   const lotes = ordenesProduccion.flatMap((op) => op.lotes_produccion ?? []);
   const lotesActivos = lotes.filter((lote) => lote.estado !== 'CANCELADO');

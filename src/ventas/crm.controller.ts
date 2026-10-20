@@ -38,6 +38,19 @@ export class CrmController {
   ) {
     return this.crm.cuenta(id, r.usuario);
   }
+  @Get('cuentas/:id/plantillas-venta') plantillasVenta(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+  ) {
+    return this.crm.plantillasVenta(id, r.usuario);
+  }
+  @Post('cuentas/:id/recompras') crearRecompra(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+    @Body() b: any,
+  ) {
+    return this.crm.crearRecompra(id, b, r.usuario);
+  }
   @Post('cuentas/:id/documentos') @UseInterceptors(FileInterceptor('documento', { limits: { fileSize: 10 * 1024 * 1024, files: 1 } })) subirDocumentoCuenta(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,
@@ -153,6 +166,13 @@ export class CrmController {
   }
   @Get('ordenes') ordenes(@Req() r: any) {
     return this.crm.ordenes(r.usuario);
+  }
+  @Post('ordenes/:id/confirmar') confirmarOrdenVenta(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+    @Body() b: any,
+  ) {
+    return this.crm.confirmarOrdenVenta(id, b, r.usuario);
   }
   @Get('ordenes/:id/materiales') materiales(
     @Param('id', ParseIntPipe) id: number,

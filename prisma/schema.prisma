@@ -920,6 +920,10 @@ model crm_documentos_cliente {
 model id_reportes_oportunidad {
   id               Int                  @id @default(autoincrement())
   oportunidad_id   Int
+  /// Reporte fuente cuando ventas decide reutilizar un análisis viable anterior.
+  reutilizado_de_id Int?
+  /// Cotización usada como plantilla al reutilizar el análisis para una recompra.
+  reutilizado_de_cotizacion_id Int?
   version          Int
   estado           id_reporte_estado    @default(BORRADOR)
   resultado        id_reporte_resultado
@@ -938,6 +942,9 @@ model id_reportes_oportunidad {
   anulado_en       DateTime?
   motivo_anulacion String?              @db.Text
   oportunidad      crm_oportunidades    @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reporte_origen   id_reportes_oportunidad? @relation("id_reporte_reutilizado", fields: [reutilizado_de_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_id_reporte_reutilizado_de")
+  reutilizaciones  id_reportes_oportunidad[] @relation("id_reporte_reutilizado")
+  cotizacion_origen crm_cotizaciones? @relation("id_reporte_cotizacion_origen", fields: [reutilizado_de_cotizacion_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_id_reporte_cotizacion_origen")
 
   /// Snapshot de IDs de muestras y ciclos evaluados al publicar; validación en backend.
   muestras_ciclos Json
@@ -947,12 +954,16 @@ model id_reportes_oportunidad {
   @@unique([oportunidad_id, version], map: "uq_id_reporte_oportunidad_version")
   @@unique([id, oportunidad_id], map: "uq_id_reporte_oportunidad")
   @@index([estado, publicado_en], map: "idx_id_reporte_estado_publicacion")
+  @@index([reutilizado_de_id], map: "idx_id_reporte_reutilizado_de")
+  @@index([reutilizado_de_cotizacion_id], map: "idx_id_reporte_cotizacion_origen")
 }
 
 model crm_costos_oportunidad {
   id                    Int                    @id @default(autoincrement())
   oportunidad_id        Int
   reporte_id            Int
+  /// Precio/fórmula de origen cuando se copian como base comercial de recompra.
+  reutilizado_de_id     Int?
   version               Int
   formula               String                 @db.Text
   formula_enviada_por   String                 @db.VarChar(100)
@@ -963,10 +974,13 @@ model crm_costos_oportunidad {
   precio_emitido_en     DateTime?               @db.Timestamptz(6)
   oportunidad           crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
   reporte               id_reportes_oportunidad @relation(fields: [reporte_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict, onUpdate: Cascade)
+  precio_origen         crm_costos_oportunidad? @relation("crm_costo_reutilizado", fields: [reutilizado_de_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_crm_costo_reutilizado_de")
+  reutilizaciones       crm_costos_oportunidad[] @relation("crm_costo_reutilizado")
 
   @@unique([oportunidad_id, version], map: "uq_crm_costos_oportunidad_version")
   @@unique([reporte_id, oportunidad_id], map: "uq_crm_costos_reporte")
   @@index([precio_emitido_en], map: "idx_crm_costos_emitido")
+  @@index([reutilizado_de_id], map: "idx_crm_costos_reutilizado_de")
 }
 
 model crm_cotizaciones {
@@ -1001,6 +1015,7 @@ model crm_cotizaciones {
   oportunidad             crm_oportunidades       @relation(fields: [oportunidad_id], references: [id], onDelete: Restrict)
   reporte                 id_reportes_oportunidad @relation(fields: [reporte_id, oportunidad_id], references: [id, oportunidad_id], onDelete: Restrict)
   producto                productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
+  reportes_reutilizados   id_reportes_oportunidad[] @relation("id_reporte_cotizacion_origen")
   orden_venta             crm_ordenes_venta?
 
   @@unique([id, oportunidad_id])
@@ -1024,13 +1039,13 @@ model crm_ordenes_venta {
   servicio             String                  @db.VarChar(100)
   cantidad             Decimal                 @db.Decimal(18, 4)
   unidad               productos_materiales_UM
-  orden_cliente        String                  @db.VarChar(100)
+  orden_cliente        String?                 @db.VarChar(100)
   moneda               crm_moneda              @default(MXN)
   subtotal             Decimal                 @db.Decimal(18, 2)
   impuestos            Decimal                 @db.Decimal(18, 2)
   importe_total        Decimal                 @db.Decimal(18, 2)
   estado               crm_orden_venta_estado  @default(CONFIRMADA)
-  fecha_confirmacion   DateTime                @default(now()) @db.Timestamptz(6)
+  fecha_confirmacion   DateTime?               @default(now()) @db.Timestamptz(6)
   fecha_compromiso     DateTime?               @db.Date
   fecha_cancelacion    DateTime?               @db.Timestamptz(6)
   motivo_cancelacion   String?                 @db.Text
@@ -1229,6 +1244,8 @@ enum crm_oportunidad_historial_accion {
   CANCELACION
   REAPERTURA
   REPORTE_ID_ENVIADO_VENTAS
+  REPORTE_ID_REUTILIZADO
+  ORDEN_VENTA_CONFIRMADA
 }
 
 enum crm_tipo_contacto {
@@ -1276,6 +1293,7 @@ enum crm_moneda {
 }
 
 enum crm_orden_venta_estado {
+  BORRADOR
   CONFIRMADA
   CANCELADA
 }

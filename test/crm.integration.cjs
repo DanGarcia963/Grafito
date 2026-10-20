@@ -338,7 +338,33 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       cotizacion_id: c2.id,
       orden_cliente: 'OC-001',
     };
-    const venta = (await crm.confirmar(o.id, body, seller)).data;
+    const borradorVenta = (await crm.confirmar(o.id, body, seller)).data;
+    assert.equal(borradorVenta.estado, 'BORRADOR');
+    assert.equal(borradorVenta.fecha_confirmacion, null);
+    assert.equal(borradorVenta.orden_cliente, null);
+    assert.equal(await p.manifiestos.count(), 0);
+    assert.equal(
+      (await crm.ordenes(seller)).data.find((x) => x.id === borradorVenta.id)
+        .tipo_compra,
+      null,
+    );
+    const metricasAntesDeConfirmar = (await crm.metricas(seller, {})).data;
+    assert.equal(metricasAntesDeConfirmar.convertidos, 1);
+    assert.equal(metricasAntesDeConfirmar.ordenes_periodo, 0);
+    await assert.rejects(
+      crm.produccion(borradorVenta.id, {}, seller),
+      (e) => e.status === 400,
+    );
+    const venta = (await crm.confirmarOrdenVenta(
+      borradorVenta.id,
+      { orden_cliente: 'OC-001' },
+      seller,
+    )).data;
+    assert.equal(venta.estado, 'CONFIRMADA');
+    assert.ok(venta.fecha_confirmacion);
+    assert.equal(await p.manifiestos.count(), 1);
+    await crm.confirmarOrdenVenta(venta.id, { orden_cliente: 'OC-001' }, seller);
+    assert.equal(await p.manifiestos.count(), 1);
     assert.equal(
       (await crm.ordenes(seller)).data.find((o) => o.id === venta.id)
         .tipo_compra,
@@ -355,6 +381,61 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       'CLIENTE',
     );
     assert.equal((await crm.detalle(o.id, seller)).data.etapa, 'GANADA');
+    const plantillas = (await crm.plantillasVenta(account.persona_id, seller)).data;
+    assert.ok(plantillas.some((x) => x.id === c2.id));
+    const recompraReutilizada = (await crm.crearRecompra(
+      account.persona_id,
+      {
+        cotizacion_origen_id: c2.id,
+        titulo: 'Recompra con análisis anterior',
+        cantidad_estimada: '100',
+        unidad: 'Litros',
+      },
+      seller,
+    )).data;
+    assert.equal(recompraReutilizada.etapa, 'COTIZACION');
+    assert.equal(recompraReutilizada.estado_tecnico, 'VIABLE');
+    const reporteReutilizado = await p.id_reportes_oportunidad.findFirstOrThrow({
+      where: { oportunidad_id: recompraReutilizada.id },
+    });
+    assert.equal(reporteReutilizado.reutilizado_de_id, reportePublicado.data.id);
+    assert.equal(reporteReutilizado.reutilizado_de_cotizacion_id, c2.id);
+    assert.equal(await p.muestras.count({ where: { oportunidad_id: recompraReutilizada.id } }), 0);
+    const [archivoOriginal, archivoReutilizado] = await Promise.all([
+      crm.documento('reporte', reportePublicado.data.id, seller),
+      crm.documento('reporte', reporteReutilizado.id, seller),
+    ]);
+    assert.deepEqual(Buffer.from(archivoReutilizado.contenido), Buffer.from(archivoOriginal.contenido));
+    const costoReutilizado = await p.crm_costos_oportunidad.findFirstOrThrow({
+      where: { oportunidad_id: recompraReutilizada.id },
+    });
+    assert.ok(costoReutilizado.reutilizado_de_id);
+    await assert.rejects(
+      crm.cotizar(
+        recompraReutilizada.id,
+        {
+          version: await version(recompraReutilizada.id),
+          tipo_venta: 'PRODUCTO_NUEVO',
+          producto_id: prod.id_Produc_Mater,
+          servicio: 'Servicio diferente',
+          cantidad: '100',
+          unidad: 'Litros',
+          moneda: 'MXN',
+          total: '1160',
+          subtotal: '1000',
+          impuestos: '160',
+          vigencia_hasta: future,
+          condiciones_comerciales: 'Pago 30 días',
+        },
+        pdf,
+        seller,
+      ),
+      (e) => e.status === 400,
+    );
+    const cotizacionRecompra = await quote(recompraReutilizada.id);
+    assert.equal(cotizacionRecompra.estado, 'BORRADOR');
+    assert.equal(cotizacionRecompra.reporte_id, reporteReutilizado.id);
+    assert.equal((await crm.ordenes(seller)).data.find((x) => x.id === venta.id).tipo_compra, 'PRIMERA_COMPRA');
     const times = await p.id_ejecuciones.findMany();
     const ubicacion = await p.inventario_ubicaciones.create({
       data: { codigo: 'ALM', nombre: 'Almacén', tipo: 'ALMACEN' },
@@ -695,17 +776,22 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     await objetivo(o2.id);
     const c3 = await quote(o2.id);
     await accept(o2.id, c3.id);
-    const venta2 = (
+    const venta2Borrador = (
       await crm.confirmar(
         o2.id,
         {
           version: await version(o2.id),
           cotizacion_id: c3.id,
-          orden_cliente: 'OC-002',
         },
         seller,
       )
     ).data;
+    assert.equal(venta2Borrador.estado, 'BORRADOR');
+    const venta2 = (await crm.confirmarOrdenVenta(
+      venta2Borrador.id,
+      { orden_cliente: 'OC-002' },
+      seller,
+    )).data;
     assert.equal(
       (await crm.ordenes(seller)).data.find((o) => o.id === venta2.id)
         .tipo_compra,

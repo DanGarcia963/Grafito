@@ -9,7 +9,8 @@ ALTER TABLE "crm_cotizaciones" ADD CONSTRAINT "ck_crm_cotizaciones_version" CHEC
 ALTER TABLE "crm_cotizaciones" ADD CONSTRAINT "ck_crm_cotizaciones_importes" CHECK (subtotal >= 0 AND impuestos >= 0 AND total > 0 AND total = subtotal + impuestos);
 ALTER TABLE "crm_ordenes_venta" ADD CONSTRAINT "ck_crm_ordenes_venta_cantidad" CHECK (cantidad > 0);
 ALTER TABLE "crm_ordenes_venta" ADD CONSTRAINT "ck_crm_ordenes_venta_importes" CHECK (subtotal >= 0 AND impuestos >= 0 AND importe_total > 0 AND importe_total = subtotal + impuestos);
-ALTER TABLE "crm_ordenes_venta" ADD CONSTRAINT "ck_crm_ordenes_venta_cancelacion" CHECK ((estado = 'CANCELADA' AND fecha_cancelacion IS NOT NULL AND NULLIF(btrim(motivo_cancelacion),'') IS NOT NULL) OR (estado = 'CONFIRMADA' AND fecha_cancelacion IS NULL));
+ALTER TABLE "crm_ordenes_venta" ADD CONSTRAINT "ck_crm_ordenes_venta_cancelacion" CHECK ((estado = 'CANCELADA' AND fecha_cancelacion IS NOT NULL AND NULLIF(btrim(motivo_cancelacion),'') IS NOT NULL) OR (estado IN ('BORRADOR','CONFIRMADA') AND fecha_cancelacion IS NULL));
+ALTER TABLE "crm_ordenes_venta" ADD CONSTRAINT "ck_crm_ordenes_venta_confirmacion" CHECK ((estado <> 'BORRADOR' OR (fecha_confirmacion IS NULL AND orden_cliente IS NULL)) AND (estado <> 'CONFIRMADA' OR (fecha_confirmacion IS NOT NULL AND orden_cliente IS NOT NULL)));
 ALTER TABLE "ordenes_produccion" ADD CONSTRAINT "ck_ordenes_produccion_cantidad" CHECK ("cantidad_Planificada" > 0);
 ALTER TABLE "ordenes_produccion" ADD CONSTRAINT "ck_ordenes_produccion_fechas" CHECK ("fecha_Termino_Plan" IS NULL OR "fecha_Inicio_Plan" IS NULL OR "fecha_Termino_Plan" >= "fecha_Inicio_Plan");
 ALTER TABLE "ordenes_produccion" ADD CONSTRAINT "ck_ordenes_produccion_cierre" CHECK ("fecha_Termino_Real" IS NULL OR ("fecha_Inicio_Produccion" IS NOT NULL AND "fecha_Termino_Real" >= "fecha_Inicio_Produccion"));

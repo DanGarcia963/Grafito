@@ -223,7 +223,7 @@ export class ManifiestosService {
         orderBy: { nombre: 'asc' },
       }),
       this.prisma.crm_ordenes_venta.findMany({
-        where: { estado: { not: 'CANCELADA' } },
+        where: { estado: 'CONFIRMADA' },
         select: {
           id: true,
           folio: true,
@@ -287,7 +287,7 @@ export class ManifiestosService {
         await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id = ${ordenId} FOR UPDATE`;
       const orden = ordenId
         ? await tx.crm_ordenes_venta.findFirst({
-            where: { id: ordenId, estado: { not: 'CANCELADA' } },
+            where: { id: ordenId, estado: 'CONFIRMADA' },
             include: { cliente: { select: { id_Persona: true, nombre: true } } },
           })
         : null;
@@ -360,7 +360,7 @@ export class ManifiestosService {
         await tx.$queryRaw`SELECT id FROM crm_ordenes_venta WHERE id = ${ordenId} FOR UPDATE`;
       const orden = ordenId
         ? await tx.crm_ordenes_venta.findFirst({
-            where: { id: ordenId, estado: { not: 'CANCELADA' } },
+            where: { id: ordenId, estado: 'CONFIRMADA' },
             include: { cliente: { select: { id_Persona: true, nombre: true } } },
           })
         : null;
