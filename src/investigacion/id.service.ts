@@ -1,15 +1,16 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { abierta, bloquearOportunidad, eventoCrm, reiniciarTecnico } from '../ventas/crm.workflow';
+import { abierta, bloquearOportunidad, cerradas, eventoCrm, reiniciarTecnico } from '../ventas/crm.workflow';
 import { randomUUID } from 'crypto';
-import { Prisma, muestras_estado_Muestra } from '@prisma/client';
+import { Prisma, muestras_estado_Muestra, productos_materiales_UM } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
 import { TrazabilidadService } from '../trazabilidad/trazabilidad.service';
 import { Usuario } from '../auth/auth.service';
-import { texto, idValido, estandar, metricas, fichaValida } from './id.logic';
+import { texto, idValido, estandar, metricas, fichaValida, analisisEstructuradoValido, procesamientoEstructuradoValido } from './id.logic';
 const seleccion = {id_Muestra:true,no_Muestra:true,area_Muestra:true,
   crm_oportunidades:{select:{etapa:true}},oportunidad_id:true,estado_Muestra:true,categoria_Muestra:true,etapa_Muestra:true,
  producto_id:true,cliente_id:true,vendedor_id:true,caracterizacion:true,
+ id_flujo_estructurado:true,id_analisis_preliminar:true,id_procesamiento:true,id_analisis_final:true,
  cantidad_proyecto:true,unidad_proyecto:true,
  viabilidad_nombre:true,viabilidad_id:true,fecha_recoleccion:true,
  fecha_ingreso_laboratorio:true,ficha_nombre:true,observaciones:true,
@@ -42,8 +43,21 @@ export class InvestigacionService {
   procesos:await this.prisma.id_procesos.findMany({orderBy:{nombre:'asc'}})};}
  async referencias(q:string){
   const whereNombre={contains:String(q||'').slice(0,100),mode:'insensitive' as const};
-  return {success:true,productos:await this.prisma.productos_materiales.findMany({where:{nombre_Producto:whereNombre},select:{id_Produc_Mater:true,nombre_Producto:true},take:50}),
+  return {success:true,productos:await this.prisma.productos_materiales.findMany({where:{nombre_Producto:whereNombre},select:{id_Produc_Mater:true,nombre_Producto:true,UM:true},take:50}),
    clientes:await this.prisma.personas.findMany({where:{tipo_persona:{in:['CLIENTE','PROSPECTO'],mode:'insensitive'},nombre:whereNombre},select:{id_Persona:true,nombre:true},take:50})};
+ }
+ async crearProducto(body:any,u:Usuario){
+  const nombre=texto(body?.nombre,150);
+  if(!Object.values(productos_materiales_UM).includes(body?.UM))throw new BadRequestException('Unidad de medida inválida');
+  const producto=await this.prisma.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${nombre.toLocaleLowerCase('es-MX')}))::text`;
+   const existente=await tx.productos_materiales.findFirst({where:{nombre_Producto:{equals:nombre,mode:'insensitive'}}});
+   if(existente){if(existente.UM!==body.UM)throw new BadRequestException('Ya existe un producto con ese nombre y otra unidad; selecciónalo del catálogo.');return existente;}
+   const creado=await tx.productos_materiales.create({data:{nombre_Producto:nombre,UM:body.UM as productos_materiales_UM}});
+   await this.tiempos.evento(tx,{entidad:'MUESTRA_ID',entidad_id:0},1,'PRODUCTO_CATALOGO_CREADO',{id:creado.id_Produc_Mater,nombre:creado.nombre_Producto,usuario:u.usuario});
+   return creado;
+  });
+  return {success:true,data:producto};
  }
  async guardarCatalogo(tipo:'proceso'|'viabilidad',body:any,u:Usuario){
   const nombre=texto(body?.nombre),activo=body.activo==null?true:body.activo;
@@ -77,8 +91,8 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
    // Solo aceptar campos explícitos. lote_id, tanque_id y procedencia_Origen quedan NULL.
    const m=await tx.muestras.create({data:{oportunidad_id:oportunidad.id,no_Muestra:`ID-${randomUUID()}`,area_Muestra:'INVESTIGACION_DESARROLLO',producto_id:producto,cliente_id:cliente,vendedor_id:u.personaId,
     fecha_Toma:recoleccion,Hora_Toma:recoleccion,fecha_recoleccion:recoleccion,caracterizacion:body.caracterizacion,cantidad_proyecto:new Prisma.Decimal(cantidad),unidad_proyecto:unidad,
-    viabilidad_id:viabilidad,viabilidad_nombre:v.nombre,ficha_nombre:f.nombre,ficha_mime:f.mime,ficha_contenido:new Uint8Array(file!.buffer),observaciones:body.observaciones?texto(body.observaciones,4000):null},select:{id_Muestra:true}});
-   await reiniciarTecnico(tx,oportunidad,u,`Muestra registrada: ${m.id_Muestra}`);
+    viabilidad_id:viabilidad,viabilidad_nombre:v.nombre,ficha_nombre:f.nombre,ficha_mime:f.mime,ficha_contenido:new Uint8Array(file!.buffer),id_flujo_estructurado:true,observaciones:body.observaciones?texto(body.observaciones,4000):null},select:{id_Muestra:true}});
+   await reiniciarTecnico(tx,oportunidad,u,`Muestra registrada: ${m.id_Muestra}`,{etapa:'MUESTRA_RECOLECTADA',estado_tecnico:'PENDIENTE'});
    const tramo=await this.tiempos.transicion(tx,this.ctx(m.id_Muestra),'TRASLADO');
    await tx.proceso_tramos.update({where:{id:tramo!.id},data:{inicio:recoleccion}});
    await this.tiempos.evento(tx,this.ctx(m.id_Muestra),1,'REGISTRO_VENTAS',{usuario:u.usuario,fechaRecoleccionDeclarada:recoleccion.toISOString()});return m;
@@ -108,7 +122,7 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
    if(!nuevo)await tx.id_ejecuciones.deleteMany({where:{muestra_id:id,ciclo}});
    const ahora=new Date();
    await tx.id_ejecuciones.createMany({data:ids.map((pid:number,i:number)=>{const p=cat.find(c=>c.id===pid)!;return {muestra_id:id,proceso_id:pid,ciclo:num,orden:i+1,nombre:p.nombre,estandar_segundos:p.estandar_segundos,estandar_version:p.version,disponible_desde:i===0?(nuevo?ahora:m.fecha_ingreso_laboratorio):null};})});
-   if(nuevo){if(m.oportunidad_id){const o=await bloquearOportunidad(tx,m.oportunidad_id,u);await reiniciarTecnico(tx,o,u,`Nuevo ciclo en muestra ${id}`);}await tx.muestras.update({where:{id_Muestra:id},data:{estado_Muestra:'PENDIENTE'}});await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS',true);}
+   if(nuevo){if(m.oportunidad_id){const o=await bloquearOportunidad(tx,m.oportunidad_id,u);await reiniciarTecnico(tx,o,u,`Nuevo ciclo en muestra ${id}`);}await tx.muestras.update({where:{id_Muestra:id},data:{estado_Muestra:'PENDIENTE',...(m.id_flujo_estructurado?{id_analisis_preliminar:Prisma.DbNull,id_procesamiento:Prisma.DbNull,id_analisis_final:Prisma.DbNull}:{})}});await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS',true);}
    await this.tiempos.evento(tx,this.ctx(id),num,'PLAN_PROCESOS',{usuario:u.usuario,procesos:ids,nuevoCiclo:nuevo});return {success:true};
   });this.avisar(id);return result;
  }
@@ -116,10 +130,18 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
   const r=await this.prisma.$transaction(async tx=>{
    await this.bloquear(tx,id,u);
    const m=await this.muestra(tx,id,u);if(m.fecha_ingreso_laboratorio)return {success:true,repetida:true};
-   if(m.oportunidad_id){const o=await bloquearOportunidad(tx,m.oportunidad_id,u);await eventoCrm(tx,o,u,'RECEPCION_ID',`Recepción de muestra ${id}`);}
+   if(m.id_flujo_estructurado){
+    const faltantes=[
+     !m.producto_id&&'producto',!m.cliente_id&&'cliente',!m.vendedor_id&&'vendedor',
+     !m.viabilidad_id&&'viabilidad',!m.cantidad_proyecto&&'volumen',!m.unidad_proyecto&&'unidad',
+     !m.fecha_recoleccion&&'fecha de recolección',!m.ficha_nombre&&'ficha técnica',
+    ].filter(Boolean);
+    if(faltantes.length)throw new BadRequestException(`No se puede validar la muestra; faltan: ${faltantes.join(', ')}.`);
+   }
+   if(m.oportunidad_id){const o=await bloquearOportunidad(tx,m.oportunidad_id,u);await eventoCrm(tx,o,u,'RECEPCION_ID',`Recepción de muestra ${id}`,cerradas.includes(o.etapa)?{}:{etapa:'EN_ANALISIS_ID',estado_tecnico:'EN_ANALISIS'});}
    const ahora=new Date();await tx.muestras.update({where:{id_Muestra:id},data:{fecha_ingreso_laboratorio:ahora}});
    await tx.id_ejecuciones.updateMany({where:{muestra_id:id,ciclo:1,orden:1,inicio:null},data:{disponible_desde:ahora}});
-   await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS');await this.tiempos.evento(tx,this.ctx(id),1,'RECEPCION_LABORATORIO',{usuario:u.usuario});return {success:true};
+   await this.tiempos.transicion(tx,this.ctx(id),'ESPERA_ANALISIS');await this.tiempos.evento(tx,this.ctx(id),1,m.id_flujo_estructurado?'RECEPCION_Y_VALIDACION_ID':'RECEPCION_LABORATORIO',{usuario:u.usuario,...(m.id_flujo_estructurado?{validacionInformacion:['cliente','producto','vendedor','viabilidad','volumen','unidad','fecha_recoleccion','ficha_tecnica']}: {})});return {success:true};
   });this.avisar(id);return r;
  }
  async proceso(id:number,ejecucion:number,accion:'iniciar'|'terminar',body:any,u:Usuario){
@@ -146,12 +168,47 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
    await this.tiempos.evento(tx,this.ctx(id),p.ciclo,accion==='iniciar'?'INICIO_PROCESO':'FIN_PROCESO',{ejecucion:p.id,nombre:p.nombre,usuario:u.usuario});return {success:true};
   });this.avisar(id);return r;
  }
+ async guardarAnalisisEstructurado(id:number,body:any,u:Usuario){
+  const etapa=String(body?.etapa??'');
+  if(!['PRELIMINAR','PROCESAMIENTO','FINAL'].includes(etapa))throw new BadRequestException('Etapa de análisis inválida');
+  const result=await this.prisma.$transaction(async tx=>{
+   await this.bloquear(tx,id,u);
+   const m=await this.muestra(tx,id,u);
+   if(!m.id_flujo_estructurado||!m.oportunidad_id)throw new BadRequestException('La muestra no usa el flujo estructurado de I+D');
+   if(!m.fecha_ingreso_laboratorio)throw new BadRequestException('I+D debe registrar primero el ingreso al laboratorio');
+   if(['APROBADO','RECHAZADO'].includes(m.estado_Muestra))throw new BadRequestException('El ciclo quedó cerrado al emitir dictamen. Abre un nuevo ciclo para registrar otro análisis.');
+   const ahora=new Date();
+   if(etapa==='PRELIMINAR'){
+    if(m.id_procesamiento||m.id_analisis_final)throw new BadRequestException('El análisis preliminar ya no puede editarse después del procesamiento');
+    const datos=analisisEstructuradoValido(body.datos);
+    const guardado={...datos,registrado_por:u.usuario,registrado_en:ahora.toISOString()};
+    await tx.muestras.update({where:{id_Muestra:id},data:{id_analisis_preliminar:guardado}});
+    await this.tiempos.evento(tx,this.ctx(id),m.id_ejecuciones.at(-1)?.ciclo??1,'ID_ANALISIS_PRELIMINAR',guardado);
+   }else if(etapa==='PROCESAMIENTO'){
+    if(!m.id_analisis_preliminar)throw new BadRequestException('Guarda primero la caracterización preliminar');
+    if(m.id_analisis_final)throw new BadRequestException('El procesamiento ya no puede editarse después de la caracterización final');
+    const datos=procesamientoEstructuradoValido(body.datos);
+    if(datos.tipo!==m.caracterizacion)throw new BadRequestException('El procesamiento debe coincidir con la caracterización registrada por Ventas');
+    const guardado={...datos,registrado_por:u.usuario,registrado_en:ahora.toISOString()};
+    await tx.muestras.update({where:{id_Muestra:id},data:{id_procesamiento:guardado}});
+    await this.tiempos.evento(tx,this.ctx(id),m.id_ejecuciones.at(-1)?.ciclo??1,'ID_PROCESAMIENTO_REGISTRADO',guardado);
+   }else{
+    if(!m.id_procesamiento)throw new BadRequestException('Guarda primero el procesamiento realizado');
+    const datos=analisisEstructuradoValido(body.datos);
+    const guardado={...datos,registrado_por:u.usuario,registrado_en:ahora.toISOString()};
+    await tx.muestras.update({where:{id_Muestra:id},data:{id_analisis_final:guardado}});
+    await this.tiempos.evento(tx,this.ctx(id),m.id_ejecuciones.at(-1)?.ciclo??1,'ID_ANALISIS_FINAL',guardado);
+   }
+   return {success:true};
+  });this.avisar(id);return result;
+ }
  async finalizar(id:number,body:any,u:Usuario){
   if(!['APROBADO','RECHAZADO'].includes(body?.dictamen))throw new BadRequestException('Dictamen inválido');
   const r=await this.prisma.$transaction(async tx=>{
    await this.bloquear(tx,id,u);
    const m=await this.muestra(tx,id,u);
    if(['APROBADO','RECHAZADO'].includes(m.estado_Muestra))throw new BadRequestException('Ciclo ya finalizado');
+   if(m.id_flujo_estructurado&&(!m.id_analisis_preliminar||!m.id_procesamiento||!m.id_analisis_final))throw new BadRequestException('Completa caracterización preliminar, procesamiento y caracterización final antes de dictaminar');
    const ciclo=m.id_ejecuciones.at(-1)?.ciclo,lista=m.id_ejecuciones.filter(p=>p.ciclo===ciclo);
    if(!lista.length||lista.some(p=>!p.fin))throw new BadRequestException('Completa todos los procesos');
    await tx.muestras.update({where:{id_Muestra:id},data:{estado_Muestra:body.dictamen as muestras_estado_Muestra}});

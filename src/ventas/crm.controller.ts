@@ -38,6 +38,26 @@ export class CrmController {
   ) {
     return this.crm.cuenta(id, r.usuario);
   }
+  @Post('cuentas/:id/documentos') @UseInterceptors(FileInterceptor('documento', { limits: { fileSize: 10 * 1024 * 1024, files: 1 } })) subirDocumentoCuenta(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+    @Body() b: any,
+    @UploadedFile() f: any,
+  ) {
+    return this.crm.subirDocumentoCuenta(id, b.tipo_documento, f, r.usuario);
+  }
+  @Get('documentos-cuenta/:id') async documentoCuenta(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+    @Res() res: Response,
+  ) {
+    const f = await this.crm.documentoCuenta(id, r.usuario);
+    res.setHeader('Content-Type', f.tipo_mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.nombre_archivo)}`);
+    res.send(Buffer.from(f.contenido));
+  }
   @Get('metricas') metricas(@Req() r: any, @Query() q: any) {
     return this.crm.metricas(r.usuario, q);
   }
@@ -92,6 +112,13 @@ export class CrmController {
     @Body() b: any,
   ) {
     return this.crm.anularReporte(id, rid, b, r.usuario);
+  }
+  @Areas('id') @Post('oportunidades/:id/reportes/:rid/enviar-ventas') enviarReporteVentas(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('rid', ParseIntPipe) rid: number,
+    @Req() r: any,
+  ) {
+    return this.crm.enviarReporteAVentas(id, rid, r.usuario);
   }
   @Post('oportunidades/:id/cotizaciones') @UseInterceptors(archivo()) cotizar(
     @Param('id', ParseIntPipe) id: number,

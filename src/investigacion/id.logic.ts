@@ -26,3 +26,64 @@ export function fichaValida(file?:{buffer:Buffer;originalname:string;size:number
  if(!pdf&&!doc&&!docx)throw new BadRequestException('El archivo no corresponde a un Word o PDF admitido');
  return {nombre:file.originalname.replace(/[\r\n\\/]/g,'_').slice(0,200),mime:pdf?'application/pdf':doc?'application/msword':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'};
 }
+
+export type MedicionId = {
+ clave: string;
+ nombre: string;
+ valor: string;
+ unidad: string | null;
+};
+
+export function analisisEstructuradoValido(entrada: unknown) {
+ if (!entrada || typeof entrada !== 'object' || Array.isArray(entrada))
+  throw new BadRequestException('Captura los resultados del análisis.');
+ const body = entrada as Record<string, unknown>;
+ if (!Array.isArray(body.metricas) || body.metricas.length < 1 || body.metricas.length > 40)
+  throw new BadRequestException('Registra entre 1 y 40 parámetros del análisis.');
+ const claves = new Set<string>();
+ const metricas: MedicionId[] = body.metricas.map((raw, i) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+   throw new BadRequestException(`Parámetro ${i + 1} inválido.`);
+  const item = raw as Record<string, unknown>;
+  const clave = texto(item.clave, 60).toLocaleLowerCase('es-MX');
+  if (!/^[a-z0-9_-]+$/.test(clave) || claves.has(clave))
+   throw new BadRequestException(`La clave del parámetro ${i + 1} no es válida o está repetida.`);
+  claves.add(clave);
+  const valor = String(item.valor ?? '').trim();
+  if (!valor || valor.length > 120)
+   throw new BadRequestException(`Captura un valor de hasta 120 caracteres para ${clave}.`);
+  return {
+   clave,
+   nombre: texto(item.nombre, 100),
+   valor,
+   unidad: item.unidad == null || item.unidad === '' ? null : texto(item.unidad, 40),
+  };
+ });
+ const observaciones = body.observaciones == null || body.observaciones === ''
+  ? null
+  : texto(body.observaciones, 4000);
+ return { metricas, observaciones };
+}
+
+export function procesamientoEstructuradoValido(entrada: unknown) {
+ if (!entrada || typeof entrada !== 'object' || Array.isArray(entrada))
+  throw new BadRequestException('Selecciona el procesamiento realizado.');
+ const body = entrada as Record<string, unknown>;
+ const tipo = body.tipo;
+ const nota = body.observaciones == null || body.observaciones === ''
+  ? null
+  : texto(body.observaciones, 4000);
+ if (tipo === 'FILTRACION') {
+  const filtracion = String(body.filtracion ?? '');
+  if (!['ESTANDAR', 'CODIGO_LIMPIEZA', 'FILTRACION_CV'].includes(String(filtracion)))
+   throw new BadRequestException('Selecciona el tipo de filtración.');
+  return { tipo, filtracion, regeneracion: null, observaciones: nota };
+ }
+ if (tipo === 'REGENERACION') {
+  const regeneracion = String(body.regeneracion ?? '');
+  if (!['AJUSTE_ACIDO_BASICO', 'ADITIVACION', 'AMBOS', 'EXCESO_CONTAMINACION'].includes(String(regeneracion)))
+   throw new BadRequestException('Selecciona el tipo de regeneración.');
+  return { tipo, filtracion: null, regeneracion, observaciones: nota };
+ }
+ throw new BadRequestException('El tipo de procesamiento debe ser FILTRACION o REGENERACION.');
+}

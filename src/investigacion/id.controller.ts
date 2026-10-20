@@ -13,6 +13,8 @@ export class InvestigacionController {
 
  @Get('referencias') referencias(@Query('q') q:string){return this.servicio.referencias(q);}
 
+ @Areas('ventas') @Post('productos') producto(@Body() body:any,@Req() req:any){return this.servicio.crearProducto(body,req.usuario);}
+
  @Areas('id') @Put('catalogos/proceso') procesoCatalogo(@Body() body:any,@Req() req:any){return this.servicio.guardarCatalogo('proceso',body,req.usuario);}
 
  @Areas('id') @Put('catalogos/viabilidad') viabilidad(@Body() body:any,@Req() req:any){return this.servicio.guardarCatalogo('viabilidad',body,req.usuario);}
@@ -29,6 +31,8 @@ export class InvestigacionController {
  @Areas('id') @Post('muestras/:id/plan') plan(@Param('id',ParseIntPipe) id:number,@Body() body:any,@Req() req:any){return this.servicio.planificar(id,body,req.usuario);}
 
  @Areas('id') @Post('muestras/:id/recibir') recibir(@Param('id',ParseIntPipe) id:number,@Req() req:any){return this.servicio.recibir(id,req.usuario);}
+
+ @Areas('id') @Put('muestras/:id/analisis-estructurado') analisisEstructurado(@Param('id',ParseIntPipe) id:number,@Body() body:any,@Req() req:any){return this.servicio.guardarAnalisisEstructurado(id,body,req.usuario);}
 
  @Areas('id') @Post('muestras/:id/procesos/:ejecucion/iniciar') iniciar(@Param('id',ParseIntPipe) id:number,@Param('ejecucion',ParseIntPipe) e:number,@Req() req:any){return this.servicio.proceso(id,e,'iniciar',{},req.usuario);}
 
