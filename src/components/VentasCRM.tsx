@@ -174,14 +174,24 @@ type CumplimientoVista = {
 };
 type OrdenVentaVista = {
   id: number;
-  oportunidad_id: number;
+  oportunidad_id: number | null;
   estado: string;
   tipo_venta: string;
   tipo_compra: string | null;
-  fecha_confirmacion: string;
+  fecha_confirmacion: string | null;
+  creado_en: string;
+  orden_cliente: string | null;
   importe_total: string;
   moneda: string;
   unidad: string;
+  producto: {
+    nombre_Producto: string;
+    configuracion_operativa?: {
+      campos?: { clave: string; etiqueta: string; opciones: string[]; requerido?: boolean }[];
+      peso_min_kg?: number;
+      peso_max_kg?: number;
+    } | null;
+  };
   cliente: { nombre: string };
   ordenes_produccion: OrdenProduccionVista[];
   entregas: EntregaVista[];
@@ -194,6 +204,7 @@ function Form({
   onSave,
   busy,
   onClose,
+  submitLabel,
 }: {
   title: string;
   fields: Field[];
@@ -201,6 +212,7 @@ function Form({
   onSave: (d: FormData) => Promise<unknown>;
   busy: boolean;
   onClose: () => void;
+  submitLabel?: string;
 }) {
   return (
     <section className={s.panel}>
@@ -260,7 +272,7 @@ function Form({
           ))}
           {children}
           <button className={s.primary} type="submit">
-            {busy ? "Guardando…" : "Guardar y confirmar"}
+            {busy ? "Guardando…" : submitLabel ?? "Guardar"}
           </button>
         </fieldset>
       </form>
@@ -291,7 +303,12 @@ export default function VentasCRM() {
     [registro, setRegistro] = useState(false),
     [muestra, setMuestra] = useState<number>(),
     [cot, setCot] = useState<any>(null),
-    [ov, setOv] = useState<any>(null);
+    [ov, setOv] = useState<any>(null),
+    [plantillasVenta, setPlantillasVenta] = useState<any[]>([]),
+    [reutilizarAnalisis, setReutilizarAnalisis] = useState(false),
+    [plantillaCotizacionId, setPlantillaCotizacionId] = useState(""),
+    [cantidadRecompra, setCantidadRecompra] = useState(""),
+    [cotizacionPlantilla, setCotizacionPlantilla] = useState<any>(null);
   const [productos, setProductos] = useState<any[]>([]),
     [productoQ, setProductoQ] = useState("");
   useEffect(() => {
@@ -394,8 +411,46 @@ export default function VentasCRM() {
   ): Field => ({ name, label, options, value, required: true });
   const opts = (xs: string[]) =>
     xs.map((x) => ({ value: x, label: nombre(x) }));
+  const plantillaSeleccionada = plantillasVenta.find(
+    (p) => String(p.id) === plantillaCotizacionId,
+  );
   let fields: Field[] = [],
     title = "";
+  if (form === "ventaCliente") {
+    title = `Nueva venta para ${cuenta?.persona.nombre ?? "cliente"}`;
+    fields = [
+      field("titulo", "Título de la oportunidad", "text", true),
+      field("necesidad", "Descripción / necesidad", "textarea"),
+      ...(!reutilizarAnalisis
+        ? [
+            field("cantidad_estimada", "Cantidad de la nueva muestra", "number", true),
+            select("unidad", "Unidad", opts(["Litros", "Kilogramos", "Piezas"])),
+          ]
+        : []),
+      ...(reutilizarAnalisis
+        ? []
+        : [
+            field(
+              "fecha_recoleccion_agendada",
+              "Fecha de recolección de la nueva muestra",
+              "datetime-local",
+              true,
+            ),
+            {
+              name: "producto_id",
+              label: "Producto para analizar",
+              required: true,
+              options: [
+                { value: "", label: "Seleccionar producto" },
+                ...productos.map((p) => ({
+                  value: p.id_Produc_Mater,
+                  label: p.nombre_Producto,
+                })),
+              ],
+            },
+          ]),
+    ];
+  }
   if (form === "cuenta") {
     title = "Perfil comercial permanente";
     fields = [
@@ -491,41 +546,56 @@ export default function VentasCRM() {
     ];
   }
   if (form === "cotizacion") {
-    title = "Nueva versión de cotización";
+    title = cotizacionPlantilla
+      ? `Nueva cotización basada en ${cotizacionPlantilla.folio}`
+      : "Nueva versión de cotización";
     fields = [
-      select("moneda", "Moneda", opts(["MXN", "USD", "EUR"])),
-      select(
-        "tipo_venta",
-        "Tipo de venta",
-        opts(["PRODUCTO_NUEVO", "SERVICIO_REGENERACION"]),
-      ),
-      field(
-        "producto_id",
-        "ID del producto",
-        "number",
-        true,
-        detalle.producto_id ?? "",
-      ),
-      field("servicio", "Servicio", "text", true),
+      ...(cotizacionPlantilla
+        ? []
+        : [
+            select("moneda", "Moneda", opts(["MXN", "USD", "EUR"])),
+            select(
+              "tipo_venta",
+              "Tipo de venta",
+              opts(["PRODUCTO_NUEVO", "SERVICIO_REGENERACION"]),
+            ),
+            field(
+              "producto_id",
+              "ID del producto",
+              "number",
+              true,
+              detalle.producto_id ?? "",
+            ),
+            field("servicio", "Servicio", "text", true),
+          ]),
       field(
         "cantidad",
         "Cantidad",
         "number",
         true,
-        detalle.cantidad_estimada ?? "",
+        cotizacionPlantilla?.cantidad ?? detalle.cantidad_estimada ?? "",
       ),
-      select("unidad", "Unidad", opts(["Litros", "Kilogramos", "Piezas"])),
-      field("subtotal", "Subtotal", "number", true),
-      field("impuestos", "Impuestos", "number", true),
-      field("total", "Total", "number", true),
-      field("vigencia_hasta", "Vigencia", "date", true),
+      ...(cotizacionPlantilla
+        ? []
+        : [select("unidad", "Unidad", opts(["Litros", "Kilogramos", "Piezas"]))]),
+      field("subtotal", "Subtotal", "number", true, cotizacionPlantilla?.subtotal ?? ""),
+      field("impuestos", "Impuestos", "number", true, cotizacionPlantilla?.impuestos ?? ""),
+      field("total", "Total", "number", true, cotizacionPlantilla?.total ?? ""),
+      field(
+        "vigencia_hasta",
+        "Vigencia",
+        "date",
+        true,
+        new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      ),
       field(
         "condiciones_comerciales",
         "Condiciones comerciales",
         "textarea",
         true,
+        cotizacionPlantilla?.condiciones_comerciales ?? "",
       ),
-      field("notas", "Notas", "textarea"),
+      field("notas", "Notas", "textarea", false, cotizacionPlantilla?.notas ?? ""),
       field("documento", "Documento Word / PDF (hasta 10 MB)", "file"),
     ];
   }
@@ -548,12 +618,16 @@ export default function VentasCRM() {
       field("proximo_contacto", "Próximo contacto", "datetime-local"),
     ];
   }
-  if (form === "confirmar") {
-    title = `Confirmar compra: ${dinero(cot.total, cot.moneda)} · Cotización v${cot.version}`;
+  if (form === "borradorOV") {
+    title = `Generar borrador de OV · ${cot.folio}`;
+    fields = [];
+  }
+  if (form === "confirmarOV") {
+    title = `Completar y confirmar OV ${ov?.folio ?? `#${ov?.id ?? ""}`}`;
     fields = [
       field(
         "orden_cliente",
-        "Orden de compra / referencia de aceptación",
+        "Orden de compra / referencia del cliente",
         "text",
         true,
       ),
@@ -581,6 +655,39 @@ export default function VentasCRM() {
         const r = await pedir(`${base}/oportunidades`, b);
         await abrir(r.data.id);
       }
+      if (form === "ventaCliente") {
+        const personaId = cuenta?.persona.id_Persona;
+        if (!personaId) throw new Error("Selecciona una cuenta de cliente.");
+        if (b.reutilizar_analisis === "true") {
+          const r = await pedir(`${base}/cuentas/${personaId}/recompras`, {
+            cotizacion_origen_id: Number(b.cotizacion_origen_id),
+            titulo: b.titulo,
+            necesidad: b.necesidad,
+            cantidad_estimada: b.cantidad_estimada,
+            unidad: b.unidad,
+          });
+          const d = await pedir(`${base}/oportunidades/${r.data.id}`, undefined, "GET");
+          setVista("oportunidades");
+          setCuenta(null);
+          setDetalle(d.data);
+          setCotizacionPlantilla({
+            ...r.data.cotizacion_plantilla,
+            cantidad: b.cantidad_estimada,
+            unidad: b.unidad,
+          });
+          setForm("cotizacion");
+        } else {
+          const r = await pedir(`${base}/oportunidades`, {
+            ...b,
+            persona_id: personaId,
+          });
+          setVista("oportunidades");
+          setCotizacionPlantilla(null);
+          setCuenta(null);
+          await abrir(r.data.id);
+        }
+        return;
+      }
       if (form === "seguimiento" || form === "asociar")
         await pedir(
           `${base}/oportunidades/${detalle.id}/${form === "asociar" ? "muestras" : "seguimiento"}`,
@@ -600,15 +707,20 @@ export default function VentasCRM() {
           `${base}/oportunidades/${detalle.id}/cotizaciones/${cot.id}/estado`,
           { ...b, version: detalle.version },
         );
-      if (form === "confirmar")
+      if (form === "borradorOV")
         await pedir(`${base}/oportunidades/${detalle.id}/confirmar`, {
-          ...b,
           version: detalle.version,
           cotizacion_id: cot.id,
+        });
+      if (form === "confirmarOV")
+        await pedir(`${base}/ordenes/${ov.id}/confirmar`, {
+          ...b,
           especificaciones: b.especificaciones
             ? JSON.parse(String(b.especificaciones))
             : undefined,
         });
+      if (form === "confirmarOV") setOv(null);
+      if (form === "cotizacion") setCotizacionPlantilla(null);
       if (form === "produccion" || form === "cancelarOrden")
         await pedir(
           `${base}/ordenes/${ov.id}/${form === "produccion" ? "produccion" : "cancelar"}`,
@@ -619,6 +731,9 @@ export default function VentasCRM() {
   if (!user) return <p className="p-6">Verificando sesión…</p>;
   const abierta =
     detalle && !["GANADA", "PERDIDA", "CANCELADA"].includes(detalle.etapa);
+  const analisisReutilizado = Boolean(
+    detalle?.reportes_id?.some((r: any) => r.reutilizado_de_id),
+  );
   const ultimoContacto = detalle?.historial?.find((h: any) => h.fecha_contacto);
   return (
     <main className={s.app}>
@@ -820,6 +935,30 @@ export default function VentasCRM() {
           <div className={s.actions}>
             <h2>{cuenta.persona.nombre}</h2>
             <button onClick={() => setForm("cuenta")}>Editar perfil</button>
+            {(cuenta.persona.crm_perfil_comercial?.estado_comercial === "CLIENTE" || cuenta.persona.tipo_persona === "CLIENTE") && (
+              <button
+                className={s.primary}
+                disabled={busy}
+                onClick={() =>
+                  void ejecutar(async () => {
+                    const personaId = cuenta.persona.id_Persona;
+                    const [plantillas, catalogo] = await Promise.all([
+                      pedir(`${base}/cuentas/${personaId}/plantillas-venta`, undefined, "GET"),
+                      pedir(`/api/investigacion/referencias?q=`, undefined, "GET"),
+                    ]);
+                    setPlantillasVenta(plantillas.data ?? []);
+                    setProductos(catalogo.productos ?? []);
+                    setPlantillaCotizacionId(String(plantillas.data?.[0]?.id ?? ""));
+                    setCantidadRecompra(String(plantillas.data?.[0]?.cantidad ?? ""));
+                    setReutilizarAnalisis(false);
+                    setCotizacionPlantilla(null);
+                    setForm("ventaCliente");
+                  }, "Opciones de recompra consultadas")
+                }
+              >
+                Nueva venta / cotización
+              </button>
+            )}
             <button
               onClick={() => {
                 setVista("oportunidades");
@@ -889,7 +1028,7 @@ export default function VentasCRM() {
           <h3>Compras</h3>
           {cuenta.ordenes.map((v: any) => (
             <p key={v.id}>
-              #{v.id} · {fecha(v.fecha_confirmacion)} ·{" "}
+              #{v.id} · {v.fecha_confirmacion ? fecha(v.fecha_confirmacion) : `Borrador · creado ${fecha(v.creado_en)}`} ·{" "}
               {dinero(v.importe_total, v.moneda)} · {v.estado} · {v.tipo_compra}
             </p>
           ))}
@@ -987,6 +1126,29 @@ export default function VentasCRM() {
           </button>
         </div>
       )}
+      {form === "ventaCliente" && !reutilizarAnalisis && (
+        <div className={s.actions}>
+          <input
+            placeholder="Buscar producto para el nuevo análisis"
+            value={productoQ}
+            onChange={(e) => setProductoQ(e.target.value)}
+          />
+          <button
+            onClick={() =>
+              void ejecutar(async () => {
+                const r = await pedir(
+                  `/api/investigacion/referencias?q=${encodeURIComponent(productoQ)}`,
+                  undefined,
+                  "GET",
+                );
+                setProductos(r.productos ?? []);
+              }, "Productos consultados")
+            }
+          >
+            Buscar producto
+          </button>
+        </div>
+      )}
       {form === "produccion" && (
         <PlanProduccion
           venta={ov}
@@ -1004,16 +1166,134 @@ export default function VentasCRM() {
           fields={fields}
           onSave={guardar}
           busy={busy}
-          onClose={() => setForm("")}
+          onClose={() => {
+            setForm("");
+            if (form === "cotizacion") setCotizacionPlantilla(null);
+          }}
+          submitLabel={
+            form === "ventaCliente"
+              ? "Continuar"
+              : form === "cotizacion"
+                ? "Guardar cotización"
+                : form === "borradorOV"
+                  ? "Crear borrador de OV"
+                  : form === "confirmarOV"
+                    ? "Confirmar orden de venta"
+                    : undefined
+          }
         >
-          {form === "confirmar" && (
-            <>
+          {form === "cotizacion" && cotizacionPlantilla && (
+            <div className={s.help}>
               <p>
-                Presentación acordada. La recepción registrará los pesos reales.
+                Se cargaron las condiciones de {cotizacionPlantilla.folio} como plantilla. Cantidad anterior: {cantidad(cotizacionPlantilla.cantidad, cotizacionPlantilla.unidad)} · Importe anterior: {dinero(cotizacionPlantilla.total, cotizacionPlantilla.moneda)}. Revisa los importes según la cantidad nueva, la vigencia y adjunta el documento actualizado si aplica.
+              </p>
+              <p>
+                El producto, servicio, tipo de venta, unidad y moneda quedan
+                ligados al análisis reutilizado.
+              </p>
+              <input type="hidden" name="moneda" value={cotizacionPlantilla.moneda} />
+              <input type="hidden" name="tipo_venta" value={cotizacionPlantilla.tipo_venta} />
+              <input type="hidden" name="producto_id" value={cotizacionPlantilla.producto_id} />
+              <input type="hidden" name="servicio" value={cotizacionPlantilla.servicio} />
+              <input type="hidden" name="unidad" value={cotizacionPlantilla.unidad} />
+              <small>
+                {cotizacionPlantilla.producto?.nombre_Producto ?? `Producto #${cotizacionPlantilla.producto_id}`} · {cotizacionPlantilla.servicio} · {nombre(cotizacionPlantilla.tipo_venta)} · {cotizacionPlantilla.unidad} · {cotizacionPlantilla.moneda}
+              </small>
+            </div>
+          )}
+          {form === "ventaCliente" && (
+            <div className="space-y-2 rounded-lg border border-slate-700 p-3">
+              {plantillasVenta.length > 0 ? (
+                <>
+                  <label className="flex items-start gap-2">
+                    <input
+                      className="mt-1"
+                      type="checkbox"
+                      name="reutilizar_analisis"
+                      value="true"
+                      checked={reutilizarAnalisis}
+                      onChange={(event) => setReutilizarAnalisis(event.target.checked)}
+                    />
+                    <span>
+                      Reutilizar resultados de análisis y el precio objetivo anteriores.
+                      <small className="block">
+                        Se copiará una referencia rastreable; la cotización será nueva y editable.
+                      </small>
+                    </span>
+                  </label>
+                  {reutilizarAnalisis && (
+                    <>
+                      <label>
+                        Análisis y cotización base
+                        <select
+                          name="cotizacion_origen_id"
+                          required
+                          value={plantillaCotizacionId}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            const seleccionada = plantillasVenta.find((p) => String(p.id) === value);
+                            setPlantillaCotizacionId(value);
+                            setCantidadRecompra(String(seleccionada?.cantidad ?? ""));
+                          }}
+                        >
+                          {plantillasVenta.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.producto.nombre_Producto} · {p.servicio} · {p.folio} · Reporte ID v{p.reporte.version}
+                            </option>
+                          ))}
+                        </select>
+                        {plantillaSeleccionada && (
+                          <small>
+                            Precio objetivo anterior: {dinero(plantillaSeleccionada.precio_objetivo.precio_objetivo_litro, plantillaSeleccionada.precio_objetivo.moneda)} por litro. Los importes de la nueva cotización se pueden ajustar.
+                          </small>
+                        )}
+                      </label>
+                      <label>
+                        Cantidad a cotizar
+                        <input
+                          name="cantidad_estimada"
+                          type="number"
+                          min="0.0001"
+                          step="any"
+                          required
+                          value={cantidadRecompra}
+                          onChange={(event) => setCantidadRecompra(event.target.value)}
+                        />
+                      </label>
+                      <input
+                        type="hidden"
+                        name="unidad"
+                        value={plantillaSeleccionada?.unidad ?? ""}
+                      />
+                      <small>Unidad: {plantillaSeleccionada?.unidad ?? "—"}</small>
+                    </>
+                  )}
+                </>
+              ) : (
+                <p className={s.help}>
+                  No hay cotizaciones con análisis viable y precio de Costos disponibles para reutilizar. Esta venta deberá iniciar una nueva recolección y análisis.
+                </p>
+              )}
+              {!reutilizarAnalisis && (
+                <p className={s.help}>
+                  Se abrirá una oportunidad para una nueva muestra; I+D y Costos completarán sus etapas antes de cotizar.
+                </p>
+              )}
+            </div>
+          )}
+          {form === "borradorOV" && (
+            <p className={s.help}>
+              El cliente aceptó la cotización. Se generará la OV como borrador; todavía no creará manifiesto ni podrá vincular producción. El vendedor completará la referencia de compra y demás datos en la pestaña Órdenes de venta.
+            </p>
+          )}
+          {form === "confirmarOV" && (
+            <>
+              <p className={s.help}>
+                Al confirmar se generará el manifiesto y la orden quedará disponible para recepción, producción y seguimiento.
               </p>
               <EspecificacionesMaterial
-                config={cot?.producto?.configuracion_operativa}
-                unidad={cot?.unidad}
+                config={ov?.producto?.configuracion_operativa}
+                unidad={ov?.unidad}
               />
             </>
           )}
@@ -1039,6 +1319,11 @@ export default function VentasCRM() {
             {nombre(detalle.estado_tecnico)}
           </p>
           <p>{detalle.necesidad}</p>
+          {analisisReutilizado && (
+            <p className={s.help}>
+              Esta oportunidad reutiliza resultados anteriores. Para pedir un análisis nuevo, inicia otra oportunidad del cliente y deja sin marcar la opción de reutilización.
+            </p>
+          )}
           <p>
             Apertura: {fecha(detalle.fecha_apertura)} · Recolección agendada:{" "}
             {fecha(detalle.fecha_recoleccion_agendada)} · Cierre:{" "}
@@ -1048,18 +1333,22 @@ export default function VentasCRM() {
           <div className={s.actions}>
             {abierta && (
               <>
-                <button
-                  onClick={() => {
-                    setRegistro(true);
-                    setMuestra(undefined);
-                    setForm("");
-                  }}
-                >
-                  Registrar muestra recolectada
-                </button>
-                <button onClick={() => setForm("asociar")}>
-                  Vincular muestra anterior
-                </button>
+                {!analisisReutilizado && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setRegistro(true);
+                        setMuestra(undefined);
+                        setForm("");
+                      }}
+                    >
+                      Registrar muestra recolectada
+                    </button>
+                    <button onClick={() => setForm("asociar")}>
+                      Vincular muestra anterior
+                    </button>
+                  </>
+                )}
                 <button onClick={() => setForm("seguimiento")}>
                   Seguimiento / cierre
                 </button>
@@ -1120,6 +1409,11 @@ export default function VentasCRM() {
               <strong>
                 v{r.version} · {r.resultado} · {r.estado}
               </strong>
+              {r.reutilizado_de_id && (
+                <p className={s.help}>
+                  Resultados reutilizados del reporte #{r.reutilizado_de_id}{r.reutilizado_de_cotizacion_id ? ` con base en la cotización #${r.reutilizado_de_cotizacion_id}` : ""}; no se creó una muestra ni un análisis nuevo.
+                </p>
+              )}
               <p>{r.resumen}</p>
               {Array.isArray(r.muestras_ciclos) && r.muestras_ciclos.some((m: any) => m.analisis_preliminar || m.analisis_final) && <details className="text-sm"><summary>Caracterización antes y después</summary><div className="space-y-2 pt-2">{r.muestras_ciclos.map((m: any) => <article key={m.muestra_id} className={s.historyItem}><strong>Muestra #{m.muestra_id} · {m.dictamen}</strong><p><b>Antes:</b> {mostrarMediciones(m.analisis_preliminar)}</p><p><b>Procesamiento:</b> {m.procesamiento?.tipo === "FILTRACION" ? nombre(m.procesamiento.filtracion) : nombre(m.procesamiento?.regeneracion ?? "Pendiente")}</p><p><b>Después:</b> {mostrarMediciones(m.analisis_final)}</p>{m.ficha_nombre && <button onClick={() => void ejecutar(() => descargarFichaMuestra(m.muestra_id, m.ficha_nombre), "Ficha técnica descargada")}>Descargar ficha técnica · {m.ficha_nombre}</button>}</article>)}</div></details>}
               <small>
@@ -1148,6 +1442,7 @@ export default function VentasCRM() {
                   : "Precio pendiente de Costos"}
               </strong>
               {c.reporte?.version && <p>Calculado para el reporte de ID v{c.reporte.version} · {fecha(c.precio_emitido_en)}</p>}
+              {c.reutilizado_de_id && <p className={s.help}>Precio objetivo reutilizado del registro de Costos #{c.reutilizado_de_id}.</p>}
             </article>
           )) : <p>Esta oportunidad aún no tiene un precio objetivo emitido por Costos.</p>}
           <h3>Cotizaciones y revisiones</h3>
@@ -1211,10 +1506,10 @@ export default function VentasCRM() {
                     className={s.primary}
                     onClick={() => {
                       setCot(c);
-                      setForm("confirmar");
+                      setForm("borradorOV");
                     }}
                   >
-                    Confirmar orden de venta
+                    Generar borrador de OV
                   </button>
                 )}
               </div>
@@ -1255,7 +1550,7 @@ export default function VentasCRM() {
                   {[
                     "Orden",
                     "Cliente",
-                    "Confirmación",
+                    "Confirmación / creación",
                     "Compra",
                     "Importe",
                     "Cumplimiento",
@@ -1268,19 +1563,25 @@ export default function VentasCRM() {
               <tbody>
                 {(ordenes as OrdenVentaVista[])
                   .filter(
-                    (o) =>
-                      (!q ||
+                    (o) => {
+                      const fechaOrden = o.fecha_confirmacion ?? o.creado_en;
+                      return (!q ||
                         o.cliente.nombre
                           .toLowerCase()
                           .includes(q.toLowerCase())) &&
-                      (!desde || o.fecha_confirmacion.slice(0, 10) >= desde) &&
-                      (!hasta || o.fecha_confirmacion.slice(0, 10) <= hasta),
+                      (!desde || fechaOrden.slice(0, 10) >= desde) &&
+                      (!hasta || fechaOrden.slice(0, 10) <= hasta);
+                    },
                   )
                   .map((o) => (
                     <tr key={o.id}>
                       <td>#{o.id}</td>
                       <td>{o.cliente.nombre}</td>
-                      <td>{fecha(o.fecha_confirmacion)}</td>
+                      <td>
+                        {o.fecha_confirmacion
+                          ? fecha(o.fecha_confirmacion)
+                          : `Pendiente · creada ${fecha(o.creado_en)}`}
+                      </td>
                       <td>{o.tipo_compra}</td>
                       <td>{dinero(o.importe_total, o.moneda)}</td>
                       <td className={s.fulfillmentCell}>
@@ -1578,17 +1879,30 @@ export default function VentasCRM() {
                         })()}
                       </td>
                       <td>
-                        <button
-                          onClick={() => {
-                            setVista("oportunidades");
-                            void ejecutar(() => abrir(o.oportunidad_id));
-                          }}
-                        >
-                          Oportunidad
-                        </button>
+                        {o.oportunidad_id && (
+                          <button
+                            onClick={() => {
+                              setVista("oportunidades");
+                              void ejecutar(() => abrir(o.oportunidad_id!));
+                            }}
+                          >
+                            Oportunidad
+                          </button>
+                        )}
+                        {o.estado === "BORRADOR" && (
+                          <button
+                            className={s.primary}
+                            onClick={() => {
+                              setOv(o);
+                              setForm("confirmarOV");
+                            }}
+                          >
+                            Completar y confirmar OV
+                          </button>
+                        )}
                         {o.estado !== "CANCELADA" && (
                           <>
-                            {o.estado !== "CANCELADA" && (
+                            {o.estado === "CONFIRMADA" && (
                               <button
                                 onClick={() => {
                                   setOv(o);
