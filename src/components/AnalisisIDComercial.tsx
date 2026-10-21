@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { pedir } from "@/utils/api";
+import FloatingModal from "./FloatingModal";
 
 type Analisis = {
   metricas?: { clave: string; nombre: string; valor: string; unidad: string | null }[];
@@ -73,6 +74,7 @@ export default function AnalisisIDComercial({
   onActualizado: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [modalEtapa, setModalEtapa] = useState<"PRELIMINAR" | "PROCESAMIENTO" | "FINAL" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [preliminar, setPreliminar] = useState(() => filasIniciales(muestra.id_analisis_preliminar));
@@ -93,6 +95,7 @@ export default function AnalisisIDComercial({
     try {
       await pedir(`/api/investigacion/muestras/${muestra.id_Muestra}/analisis-estructurado`, { etapa, datos }, "PUT");
       await onActualizado();
+      setModalEtapa(null);
       setNotice(`${textoEtapa(etapa)} guardada.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar el análisis.");
@@ -101,7 +104,7 @@ export default function AnalisisIDComercial({
     }
   };
 
-  const formAnalisis = (
+  const formularioAnalisis = (
     etapa: "PRELIMINAR" | "FINAL",
     values: typeof preliminar,
     setValues: typeof setPreliminar,
@@ -143,6 +146,15 @@ export default function AnalisisIDComercial({
     </form>
   );
 
+  const abrirEtapa = (etapa: "PRELIMINAR" | "PROCESAMIENTO" | "FINAL", disabled: boolean) => (
+    <button type="button" onClick={() => setModalEtapa(etapa)} disabled={disabled || busy} className="rounded border border-indigo-300 px-3 py-2 text-sm font-medium text-indigo-900 disabled:opacity-50">
+      {etapa === "PRELIMINAR" && muestra.id_analisis_preliminar ? "Ver / editar caracterización preliminar" :
+        etapa === "FINAL" && muestra.id_analisis_final ? "Ver / editar caracterización final" :
+          etapa === "PROCESAMIENTO" && muestra.id_procesamiento ? "Ver / editar procesamiento" :
+            `Capturar ${textoEtapa(etapa).toLowerCase()}`}
+    </button>
+  );
+
   const resumen = (value?: Analisis | null) => value ? (
     <div className="space-y-1">
       <dl className="grid sm:grid-cols-2 gap-2 text-sm">
@@ -169,25 +181,38 @@ export default function AnalisisIDComercial({
         <h4 className="font-semibold">1. Caracterización preliminar</h4>
         {resumen(muestra.id_analisis_preliminar)}
         {!muestra.id_analisis_preliminar && !muestra.fecha_ingreso_laboratorio && <p className="text-sm text-amber-800">Registra el ingreso de la muestra para habilitar esta etapa.</p>}
-        {formAnalisis("PRELIMINAR", preliminar, setPreliminar, preliminarObs, setPreliminarObs, preliminarBloqueado)}
+        {abrirEtapa("PRELIMINAR", preliminarBloqueado)}
       </article>
       <article className="space-y-3 rounded-lg border bg-white p-3">
         <h4 className="font-semibold">2. Procesamiento</h4>
         {muestra.id_procesamiento ? resumen({ metricas: [{ clave: "proceso", nombre: "Proceso", valor: String(muestra.id_procesamiento.filtracion ?? muestra.id_procesamiento.regeneracion ?? "Registrado"), unidad: muestra.id_procesamiento.tipo }], observaciones: muestra.id_procesamiento.observaciones, registrado_por: muestra.id_procesamiento.registrado_por, registrado_en: muestra.id_procesamiento.registrado_en }) : <p className="text-sm text-amber-800">Pendiente</p>}
-        <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (tipoProceso === "FILTRACION") void guardar("PROCESAMIENTO", { tipo: "FILTRACION", filtracion: opcionProceso, regeneracion: null, observaciones: procesoObs }); else void guardar("PROCESAMIENTO", { tipo: "REGENERACION", filtracion: null, regeneracion: opcionProceso, observaciones: procesoObs }); }}>
-          <label className="text-sm">Tipo<select value={tipoProceso} onChange={(event) => { setTipoProceso(event.target.value as "FILTRACION" | "REGENERACION"); setOpcionProceso(""); }} disabled={procesoBloqueado || busy} className="block w-full rounded border p-2"><option value="FILTRACION">Filtración</option><option value="REGENERACION">Regeneración</option></select></label>
-          <label className="text-sm">Método<select required value={opcionProceso} onChange={(event) => setOpcionProceso(event.target.value)} disabled={procesoBloqueado || busy} className="block w-full rounded border p-2"><option value="">Seleccionar</option>{procesoOpciones.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label className="text-sm sm:col-span-2">Observaciones<textarea value={procesoObs} onChange={(event) => setProcesoObs(event.target.value)} maxLength={4000} disabled={procesoBloqueado || busy} className="block w-full rounded border p-2" /></label>
-          <button type="submit" disabled={procesoBloqueado || busy || !opcionProceso} className="justify-self-start rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50">{busy ? "Guardando…" : "Guardar procesamiento"}</button>
-        </form>
+        {!muestra.id_procesamiento && <p className="text-sm text-amber-800">Pendiente de capturar</p>}
+        {abrirEtapa("PROCESAMIENTO", procesoBloqueado)}
         {procesoBloqueado && !muestra.id_procesamiento && <p className="text-sm text-amber-800">Guarda primero la caracterización preliminar.</p>}
       </article>
       <article className="space-y-3 rounded-lg border bg-white p-3">
         <h4 className="font-semibold">3. Caracterización final</h4>
         {resumen(muestra.id_analisis_final)}
-        {formAnalisis("FINAL", final, setFinal, finalObs, setFinalObs, finalBloqueado)}
+        {abrirEtapa("FINAL", finalBloqueado)}
         {finalBloqueado && <p className="text-sm text-amber-800">Guarda primero el procesamiento de la muestra.</p>}
       </article>
+      {modalEtapa && <FloatingModal
+        title={textoEtapa(modalEtapa)}
+        description={`Muestra ${muestra.id_Muestra} · ${muestra.fecha_ingreso_laboratorio ? new Date(muestra.fecha_ingreso_laboratorio).toLocaleString("es-MX") : "pendiente de ingreso"}`}
+        onClose={() => setModalEtapa(null)}
+        closeDisabled={busy}
+        size="xl"
+      >
+        {error && <p role="alert" className="mb-3 rounded bg-red-100 p-2 text-red-800">{error}</p>}
+        {modalEtapa === "PRELIMINAR" && formularioAnalisis("PRELIMINAR", preliminar, setPreliminar, preliminarObs, setPreliminarObs, preliminarBloqueado)}
+        {modalEtapa === "FINAL" && formularioAnalisis("FINAL", final, setFinal, finalObs, setFinalObs, finalBloqueado)}
+        {modalEtapa === "PROCESAMIENTO" && <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (tipoProceso === "FILTRACION") void guardar("PROCESAMIENTO", { tipo: "FILTRACION", filtracion: opcionProceso, regeneracion: null, observaciones: procesoObs }); else void guardar("PROCESAMIENTO", { tipo: "REGENERACION", filtracion: null, regeneracion: opcionProceso, observaciones: procesoObs }); }}>
+          <label className="text-sm">Tipo<select value={tipoProceso} onChange={(event) => { setTipoProceso(event.target.value as "FILTRACION" | "REGENERACION"); setOpcionProceso(""); }} disabled={procesoBloqueado || busy} className="block w-full rounded border p-2"><option value="FILTRACION">Filtración</option><option value="REGENERACION">Regeneración</option></select></label>
+          <label className="text-sm">Método<select required value={opcionProceso} onChange={(event) => setOpcionProceso(event.target.value)} disabled={procesoBloqueado || busy} className="block w-full rounded border p-2"><option value="">Seleccionar</option>{procesoOpciones.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className="text-sm sm:col-span-2">Observaciones<textarea value={procesoObs} onChange={(event) => setProcesoObs(event.target.value)} maxLength={4000} disabled={procesoBloqueado || busy} className="block w-full rounded border p-2" /></label>
+          <button type="submit" disabled={procesoBloqueado || busy || !opcionProceso} className="justify-self-start rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50">{busy ? "Guardando…" : "Guardar procesamiento"}</button>
+        </form>}
+      </FloatingModal>}
     </section>
   );
 }

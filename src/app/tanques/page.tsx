@@ -1,11 +1,13 @@
 "use client";
 import EspecificacionesMaterial from "@/components/EspecificacionesMaterial";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { pedir, sesionActual } from "@/utils/api";
 import { useSocket } from "@/context/SocketContext";
 import HistorialTiempos from "@/components/HistorialTiempos";
 import PlanProduccion from "@/components/PlanProduccion";
+import FloatingModal from "@/components/FloatingModal";
+import { MessageCircle, X } from "lucide-react";
 const estados = [
   "CARGANDO_TANQUE",
   "PROCESO",
@@ -191,6 +193,9 @@ export default function TanquesPage() {
     [lotesPendientes, setLotesPendientes] = useState<any[]>([]);
   const [ordenesVenta, setOrdenesVenta] = useState<OrdenVentaDisponible[]>([]);
   const [asignacionesProductoOV, setAsignacionesProductoOV] = useState<any[]>([]);
+  const [pedidosPreparacion, setPedidosPreparacion] = useState<any[]>([]);
+  const [bandejaPedidosAbierta, setBandejaPedidosAbierta] = useState(false);
+  const [avancePedido, setAvancePedido] = useState<any>(null);
   const [tab, setTab] = useState("tanques"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -204,7 +209,7 @@ export default function TanquesPage() {
     [plan, setPlan] = useState(false);
   const cargar = useCallback(async () => {
     const usuarioActual = sesionActual();
-    const [o, t, m, c, maybeLotes, maybeOrdenesVenta, maybeAsignaciones] = await Promise.all([
+    const [o, t, m, c, maybeLotes, maybeOrdenesVenta, maybeAsignaciones, maybePedidos] = await Promise.all([
       pedir("/api/produccion/test", undefined, "GET"),
       pedir("/api/produccion/tanques?tipo=GRAFITO", undefined, "GET"),
       pedir("/api/calidad/obtenerMuestras", undefined, "GET"),
@@ -216,6 +221,9 @@ export default function TanquesPage() {
       usuarioActual?.area === "produccion"
         ? pedir("/api/produccion/asignaciones-producto-ov", undefined, "GET")
         : Promise.resolve({ data: [] }),
+      usuarioActual?.area === "produccion"
+        ? pedir("/api/ventas/crm/pedidos-preparacion/produccion", undefined, "GET")
+        : Promise.resolve({ data: [] }),
     ]);
     setOrdenes(o.result);
     setBitacora(o.bitacora);
@@ -224,6 +232,7 @@ export default function TanquesPage() {
     setLotesPendientes(maybeLotes.data ?? []);
     setOrdenesVenta(maybeOrdenesVenta.data ?? []);
     setAsignacionesProductoOV(maybeAsignaciones.data ?? []);
+    setPedidosPreparacion(maybePedidos.data ?? []);
     const ids = new Set(
       o.result.flatMap((o: any) =>
         o.lotes_produccion.map((l: any) => l.id_Lote_Produccion),
@@ -255,6 +264,8 @@ export default function TanquesPage() {
       "ESTATUS_TANQUE_CAMBIADO",
       "MUESTRA_ACTUALIZADA",
       "MUESTRA_CREADA",
+      "CRM_PEDIDO_PREPARACION_CREADO",
+      "CRM_PEDIDO_PREPARACION_ACTUALIZADO",
     ];
     events.forEach((e) => socket?.on(e, refresh));
     return () => {
@@ -320,6 +331,24 @@ export default function TanquesPage() {
             : ov.tipo_venta !== "SERVICIO_REGENERACION";
         })
       : [];
+  const actualizarPedidoPreparacion = (pedidoId: number, data: any) =>
+    ejecutar(() => pedir(`/api/ventas/crm/pedidos-preparacion/${pedidoId}/progreso`, data));
+  const guardarAvancePedido = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!avancePedido) return;
+    const datos = new FormData(event.currentTarget);
+    const lineas = avancePedido.detalles.map((detalle: any) => ({
+      id: detalle.id,
+      cantidad_preparada: datos.get(`preparada_${detalle.id}`),
+    }));
+    void ejecutar(async () => {
+      await pedir(`/api/ventas/crm/pedidos-preparacion/${avancePedido.id}/progreso`, {
+        detalles: lineas,
+        respuesta_produccion: datos.get("respuesta_produccion"),
+      });
+      setAvancePedido(null);
+    });
+  };
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-5 md:p-8">
       <header className="flex justify-between flex-wrap gap-3 mb-6">
@@ -1666,6 +1695,87 @@ export default function TanquesPage() {
             </form>
           </section>
         </div>
+      )}
+      {produccion && !cargando && (
+        <>
+          {bandejaPedidosAbierta && (
+            <section
+              role="dialog"
+              aria-label="Avisos de preparación de Ventas"
+              className="fixed bottom-24 right-4 z-[80] flex max-h-[70vh] w-[min(94vw,440px)] flex-col overflow-hidden rounded-2xl border border-cyan-800 bg-slate-900 shadow-2xl"
+            >
+              <header className="flex items-center justify-between border-b border-slate-700 p-4">
+                <div>
+                  <h2 className="font-semibold">Pedidos de preparación</h2>
+                  <p className="text-xs text-slate-400">Avisos de los vendedores · no reservan inventario</p>
+                </div>
+                <button type="button" aria-label="Cerrar avisos" className={boton} onClick={() => setBandejaPedidosAbierta(false)}><X size={16} /></button>
+              </header>
+              <div className="space-y-3 overflow-y-auto p-3">
+                {!pedidosPreparacion.length && <p className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-400">No hay avisos pendientes.</p>}
+                {pedidosPreparacion.map((pedido: any) => (
+                  <article key={pedido.id} className="rounded-xl border border-slate-700 bg-slate-950 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] text-cyan-300">{pedido.folio} · {String(pedido.estado).replaceAll("_", " ")}</p>
+                        <h3 className="mt-1 font-semibold">{pedido.cliente.nombre}</h3>
+                        <p className="text-xs text-slate-400">Vendedor: {pedido.vendedor.nombre} · {new Date(pedido.creado_en).toLocaleString("es-MX")}</p>
+                      </div>
+                    </div>
+                    {pedido.fecha_requerida && <p className="mt-2 text-xs text-amber-200">Requerido: {new Date(pedido.fecha_requerida).toLocaleDateString("es-MX")}</p>}
+                    {pedido.observaciones && <p className="mt-2 rounded-lg bg-slate-900 p-2 text-xs text-slate-300">{pedido.observaciones}</p>}
+                    <div className="mt-3 space-y-2">
+                      {pedido.detalles.map((linea: any) => (
+                        <div key={linea.id} className="rounded-lg border border-slate-800 bg-slate-900 p-2 text-xs">
+                          <strong>{linea.producto.nombre_Producto}</strong>{linea.tipo_prensa ? ` · ${linea.tipo_prensa}` : ""}
+                          <p>Solicitado {cantidad(linea.cantidad_solicitada)} kg · Preparado {cantidad(linea.cantidad_preparada)} kg</p>
+                          {linea.contenedores_solicitados && <p>{linea.contenedores_solicitados} contenedores{linea.peso_estimado_contenedor ? ` · ${cantidad(linea.peso_estimado_contenedor)} kg estimados c/u` : ""}</p>}
+                          {linea.ordenes_venta?.length > 0 && <p className="text-cyan-200">OV confirmadas: {linea.ordenes_venta.filter((ov: any) => ov.estado === "CONFIRMADA").map((ov: any) => `${ov.folio} (${cantidad(ov.cantidad)} ${ov.unidad})`).join(" · ")}</p>}
+                        </div>
+                      ))}
+                    </div>
+                    {pedido.respuesta_produccion && <p className="mt-2 text-xs text-emerald-200">Respuesta: {pedido.respuesta_produccion}</p>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {pedido.estado === "ENVIADO" && <button disabled={busy} className="rounded-lg bg-cyan-800 px-3 py-2 text-xs hover:bg-cyan-700 disabled:opacity-50" onClick={() => void actualizarPedidoPreparacion(pedido.id, { estado: "RECIBIDO" })}>Marcar recibido</button>}
+                      {["ENVIADO", "RECIBIDO"].includes(pedido.estado) && <button disabled={busy} className="rounded-lg border border-slate-600 px-3 py-2 text-xs hover:bg-slate-800 disabled:opacity-50" onClick={() => void actualizarPedidoPreparacion(pedido.id, { estado: "EN_PREPARACION" })}>Iniciar preparación</button>}
+                      {pedido.estado !== "PREPARADO" && <button disabled={busy} className="rounded-lg border border-emerald-700 px-3 py-2 text-xs text-emerald-200 hover:bg-emerald-950 disabled:opacity-50" onClick={() => setAvancePedido(pedido)}>Registrar avance</button>}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+          <button
+            type="button"
+            aria-label="Abrir pedidos de preparación"
+            onClick={() => setBandejaPedidosAbierta((abierta) => !abierta)}
+            className="fixed bottom-5 right-5 z-[80] flex h-14 items-center gap-2 rounded-full bg-cyan-700 px-5 text-white shadow-xl transition hover:bg-cyan-600"
+          >
+            <MessageCircle size={20} />
+            <span className="font-semibold">Pedidos</span>
+            {pedidosPreparacion.filter((pedido: any) => pedido.estado === "ENVIADO").length > 0 && <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-600 px-1 text-xs font-bold">{pedidosPreparacion.filter((pedido: any) => pedido.estado === "ENVIADO").length}</span>}
+          </button>
+          {avancePedido && (
+            <FloatingModal
+              title={`Registrar avance · ${avancePedido.folio}`}
+              description="Ingresa el producto que Producción alcanzó a preparar. Este reporte no crea ni descuenta inventario."
+              onClose={() => setAvancePedido(null)}
+              closeDisabled={busy}
+              theme="dark"
+            >
+              <form onSubmit={guardarAvancePedido} className="space-y-4">
+                {avancePedido.detalles.map((linea: any) => (
+                  <label key={linea.id} className="block text-sm">
+                    {linea.producto.nombre_Producto}{linea.tipo_prensa ? ` · ${linea.tipo_prensa}` : ""} · solicitado {cantidad(linea.cantidad_solicitada)} kg
+                    <input required type="number" min="0" step="0.0001" name={`preparada_${linea.id}`} defaultValue={linea.cantidad_preparada ?? 0} className={input} />
+                  </label>
+                ))}
+                <label className="block text-sm">Nota para Ventas<textarea name="respuesta_produccion" maxLength={4000} defaultValue={avancePedido.respuesta_produccion ?? ""} className={`${input} min-h-24`} /></label>
+                <button disabled={busy} className="rounded-lg bg-emerald-700 px-4 py-2 font-semibold disabled:opacity-50">{busy ? "Guardando…" : "Guardar avance"}</button>
+              </form>
+            </FloatingModal>
+          )}
+        </>
       )}
       {hist && <HistorialTiempos {...hist} onClose={() => setHist(null)} />}
     </main>

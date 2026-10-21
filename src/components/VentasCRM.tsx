@@ -3,6 +3,7 @@ import EspecificacionesMaterial from "./EspecificacionesMaterial";
 import PlanProduccion from "./PlanProduccion";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import FloatingModal from "@/components/FloatingModal";
 import { Plus, RefreshCw, LogOut } from "lucide-react";
 import { API_URL, apiFetch, pedir, sesionActual } from "@/utils/api";
 import { useSocket } from "@/context/SocketContext";
@@ -69,6 +70,7 @@ type Field = {
   required?: boolean;
   options?: { value: string | number; label: string }[];
   value?: string | number;
+  accept?: string;
 };
 type ChecklistContenedorVista = {
   no_consecutivo: number;
@@ -174,6 +176,7 @@ type CumplimientoVista = {
 };
 type OrdenVentaVista = {
   id: number;
+  persona_id: number;
   oportunidad_id: number | null;
   estado: string;
   tipo_venta: string;
@@ -205,6 +208,7 @@ function Form({
   busy,
   onClose,
   submitLabel,
+  hideSubmit,
 }: {
   title: string;
   fields: Field[];
@@ -213,13 +217,10 @@ function Form({
   busy: boolean;
   onClose: () => void;
   submitLabel?: string;
+  hideSubmit?: boolean;
 }) {
   return (
-    <section className={s.panel}>
-      <div className={s.actions}>
-        <h2>{title}</h2>
-        <button onClick={onClose}>Cerrar formulario</button>
-      </div>
+    <FloatingModal title={title} onClose={onClose} closeDisabled={busy}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -265,18 +266,18 @@ function Form({
                   required={f.required}
                   defaultValue={f.value}
                   step={f.type === "number" ? "any" : undefined}
-                  accept={f.type === "file" ? ".pdf,.doc,.docx" : undefined}
+                  accept={f.type === "file" ? f.accept ?? ".pdf,.doc,.docx" : undefined}
                 />
               )}
             </label>
           ))}
           {children}
-          <button className={s.primary} type="submit">
+          {!hideSubmit && <button className={s.primary} type="submit">
             {busy ? "Guardando…" : submitLabel ?? "Guardar"}
-          </button>
+          </button>}
         </fieldset>
       </form>
-    </section>
+    </FloatingModal>
   );
 }
 export default function VentasCRM() {
@@ -308,7 +309,11 @@ export default function VentasCRM() {
     [reutilizarAnalisis, setReutilizarAnalisis] = useState(false),
     [plantillaCotizacionId, setPlantillaCotizacionId] = useState(""),
     [cantidadRecompra, setCantidadRecompra] = useState(""),
-    [cotizacionPlantilla, setCotizacionPlantilla] = useState<any>(null);
+    [cotizacionPlantilla, setCotizacionPlantilla] = useState<any>(null),
+    [detallesPreparacion, setDetallesPreparacion] = useState<any[]>([]),
+    [lineasPreparacion, setLineasPreparacion] = useState<any[]>([
+      { key: "linea-inicial", producto_id: "", tipo_prensa: "", contenedores_solicitados: "", peso_estimado_contenedor: "", cantidad_solicitada: "", observaciones: "" },
+    ]);
   const [productos, setProductos] = useState<any[]>([]),
     [productoQ, setProductoQ] = useState("");
   useEffect(() => {
@@ -416,6 +421,9 @@ export default function VentasCRM() {
   );
   let fields: Field[] = [],
     title = "";
+  if (form === "seleccionVenta") {
+    title = `Nueva venta para ${cuenta?.persona.nombre ?? "cliente"}`;
+  }
   if (form === "ventaCliente") {
     title = `Nueva venta para ${cuenta?.persona.nombre ?? "cliente"}`;
     fields = [
@@ -451,6 +459,13 @@ export default function VentasCRM() {
           ]),
     ];
   }
+  if (form === "pedidoPreparacion") {
+    title = `Aviso de preparación para ${cuenta?.persona.nombre ?? "cliente"}`;
+    fields = [
+      field("fecha_requerida", "Fecha estimada para tenerlo preparado", "date"),
+      field("observaciones", "Indicaciones para Producción", "textarea"),
+    ];
+  }
   if (form === "cuenta") {
     title = "Perfil comercial permanente";
     fields = [
@@ -483,6 +498,18 @@ export default function VentasCRM() {
           cuenta?.persona.crm_perfil_comercial?.[n] ?? "",
         ),
       ),
+    ];
+  }
+  if (form === "documentoCuenta") {
+    title = `Documentación · ${cuenta?.persona.nombre ?? "cliente"}`;
+    fields = [
+      {
+        name: "tipo_documento",
+        label: "Tipo de documento",
+        required: true,
+        options: documentoTipos.map(([value, label]) => ({ value, label })),
+      },
+      { ...field("documento", "Archivo (PDF, Word o imagen)", "file", true), accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png" },
     ];
   }
   if (form === "oportunidad") {
@@ -631,6 +658,19 @@ export default function VentasCRM() {
         "text",
         true,
       ),
+      {
+        name: "pedido_preparacion_detalle_id",
+        label: "Aviso de preparación relacionado (opcional)",
+        required: false,
+        options: [
+          { value: "", label: "Sin aviso de preparación" },
+          ...detallesPreparacion.map((d: any) => ({
+            value: d.id,
+            label: `${d.pedido.folio} · ${d.producto.nombre_Producto}${d.tipo_prensa ? ` · ${d.tipo_prensa}` : ""} · ${cantidad(d.cantidad_solicitada)} kg solicitados`,
+          })),
+        ],
+        value: ov?.pedido_preparacion_detalle_id ?? "",
+      },
       field("fecha_compromiso", "Fecha compromiso", "date"),
       field("observaciones", "Observaciones", "textarea"),
     ];
@@ -650,6 +690,35 @@ export default function VentasCRM() {
           persona_id: cuenta?.persona.id_Persona,
         });
         if (cuenta) await verCuenta(cuenta.persona.id_Persona);
+      }
+      if (form === "documentoCuenta") {
+        const personaId = cuenta?.persona.id_Persona;
+        if (!personaId) throw new Error("Selecciona una cuenta de cliente.");
+        const r = await apiFetch(`${API_URL}${base}/cuentas/${personaId}/documentos`, { method: "POST", body: d });
+        const result = await r.json();
+        if (!r.ok) throw new Error(result.message || "No se pudo guardar el documento.");
+        await verCuenta(personaId);
+        setForm("");
+        return;
+      }
+      if (form === "pedidoPreparacion") {
+        const personaId = cuenta?.persona.id_Persona;
+        if (!personaId) throw new Error("Selecciona una cuenta de cliente.");
+        const detalles = JSON.parse(String(b.detalles ?? "[]"));
+        if (!Array.isArray(detalles) || detalles.length === 0)
+          throw new Error("Agrega al menos un producto al aviso.");
+        if (detalles.some((x: any) => !x.producto_id || Number(x.cantidad_solicitada) <= 0))
+          throw new Error("Selecciona producto y cantidad solicitada en cada renglón.");
+        await pedir(`${base}/pedidos-preparacion`, {
+          cliente_id: personaId,
+          fecha_requerida: b.fecha_requerida || null,
+          observaciones: b.observaciones,
+          detalles,
+        });
+        await verCuenta(personaId);
+        setLineasPreparacion([{ key: "linea-inicial", producto_id: "", tipo_prensa: "", contenedores_solicitados: "", peso_estimado_contenedor: "", cantidad_solicitada: "", observaciones: "" }]);
+        setForm("");
+        return;
       }
       if (form === "oportunidad") {
         const r = await pedir(`${base}/oportunidades`, b);
@@ -952,11 +1021,12 @@ export default function VentasCRM() {
                     setCantidadRecompra(String(plantillas.data?.[0]?.cantidad ?? ""));
                     setReutilizarAnalisis(false);
                     setCotizacionPlantilla(null);
-                    setForm("ventaCliente");
+                    setLineasPreparacion([{ key: "linea-inicial", producto_id: "", tipo_prensa: "", contenedores_solicitados: "", peso_estimado_contenedor: "", cantidad_solicitada: "", observaciones: "" }]);
+                    setForm("seleccionVenta");
                   }, "Opciones de recompra consultadas")
                 }
               >
-                Nueva venta / cotización
+                Nueva venta
               </button>
             )}
             <button
@@ -983,24 +1053,7 @@ export default function VentasCRM() {
           <section className={`${s.historyItem} space-y-3`}>
             <h3>Documentación del cliente</h3>
             <p>{documentoTipos.slice(0, 4).filter(([tipo]) => cuenta.documentos?.some((d: any) => d.tipo_documento === tipo && d.vigente)).length} de 4 documentos principales vigentes.</p>
-            <form className={s.actions} onSubmit={(event) => {
-              event.preventDefault();
-              const form = event.currentTarget;
-              const data = new FormData(form);
-              void ejecutar(async () => {
-                const r = await apiFetch(`${API_URL}${base}/cuentas/${cuenta.persona.id_Persona}/documentos`, { method: "POST", body: data });
-                const body = await r.json();
-                if (!r.ok) throw new Error(body.message || "No se pudo guardar el documento.");
-                await verCuenta(cuenta.persona.id_Persona);
-                form.reset();
-              }, "Documento cargado. La versión anterior queda en el historial.");
-            }}>
-              <select name="tipo_documento" required defaultValue="CONSTANCIA_FISCAL">
-                {documentoTipos.map(([tipo, label]) => <option key={tipo} value={tipo}>{label}</option>)}
-              </select>
-              <input name="documento" type="file" required accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" />
-              <button className={s.primary} disabled={busy}>Cargar / reemplazar documento</button>
-            </form>
+            <button type="button" className={s.primary} onClick={() => setForm("documentoCuenta")}>Cargar / reemplazar documento</button>
             <div className="grid sm:grid-cols-2 gap-2">
               {documentoTipos.map(([tipo, label]) => {
                 const versiones = cuenta.documentos?.filter((doc: any) => doc.tipo_documento === tipo) ?? [];
@@ -1030,8 +1083,33 @@ export default function VentasCRM() {
             <p key={v.id}>
               #{v.id} · {v.fecha_confirmacion ? fecha(v.fecha_confirmacion) : `Borrador · creado ${fecha(v.creado_en)}`} ·{" "}
               {dinero(v.importe_total, v.moneda)} · {v.estado} · {v.tipo_compra}
+              {v.pedido_preparacion_detalle?.pedido?.folio ? ` · Aviso ${v.pedido_preparacion_detalle.pedido.folio}` : ""}
             </p>
           ))}
+          <h3>Avisos de preparación para Producción</h3>
+          {!cuenta.pedidos_preparacion?.length && <p className={s.help}>Esta cuenta aún no tiene avisos de preparación.</p>}
+          <div className="grid gap-3">
+            {(cuenta.pedidos_preparacion ?? []).map((pedido: any) => (
+              <article key={pedido.id} className={s.historyItem}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <strong>{pedido.folio}</strong>
+                  <span>{nombre(pedido.estado)}</span>
+                </div>
+                <p className="text-sm">Solicitado {fecha(pedido.creado_en)} · Requerido {fecha(pedido.fecha_requerida)} · {pedido.actualizado_produccion_por ? `Actualizado por ${pedido.actualizado_produccion_por}` : "Pendiente de respuesta de Producción"}</p>
+                {pedido.respuesta_produccion && <p className="text-sm">Respuesta: {pedido.respuesta_produccion}</p>}
+                <div className="mt-2 space-y-2">
+                  {pedido.detalles.map((linea: any) => (
+                    <div key={linea.id} className="rounded-lg border border-slate-700 p-3 text-sm">
+                      <strong>{linea.producto.nombre_Producto}</strong>{linea.tipo_prensa ? ` · ${linea.tipo_prensa}` : ""}
+                      <p>Solicitado: {cantidad(linea.cantidad_solicitada)} kg · Preparado: {cantidad(linea.cantidad_preparada)} kg · Confirmado en OV: {cantidad(linea.cantidad_ov_confirmada)} kg</p>
+                      {linea.contenedores_solicitados && <small>{linea.contenedores_solicitados} contenedores · {linea.peso_estimado_contenedor ? `${cantidad(linea.peso_estimado_contenedor)} kg estimados c/u` : "peso por contenedor pendiente"}</small>}
+                      {linea.ordenes_venta?.length > 0 && <p className="text-xs">OV vinculadas: {linea.ordenes_venta.map((o: any) => `${o.folio} (${o.estado})`).join(" · ")}</p>}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
       )}
       {vista === "oportunidades" && (
@@ -1179,9 +1257,86 @@ export default function VentasCRM() {
                   ? "Crear borrador de OV"
                   : form === "confirmarOV"
                     ? "Confirmar orden de venta"
-                    : undefined
+                    : form === "pedidoPreparacion"
+                      ? "Enviar aviso a Producción"
+                      : undefined
           }
+          hideSubmit={form === "seleccionVenta"}
         >
+          {form === "seleccionVenta" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                className={`${s.primary} min-h-32 text-left`}
+                onClick={() => setForm("ventaCliente")}
+              >
+                <strong className="block">Iniciar venta / cotización</strong>
+                <span className="mt-2 block text-sm font-normal">Continuar con el flujo comercial, reutilizando un análisis anterior o solicitando uno nuevo.</span>
+              </button>
+              <button
+                type="button"
+                className="min-h-32 rounded-lg border border-slate-500 p-4 text-left hover:bg-slate-800"
+                onClick={() => setForm("pedidoPreparacion")}
+              >
+                <strong className="block">Enviar pedido a Producción</strong>
+                <span className="mt-2 block text-sm">Avisar cantidades y tipos de prensa que se espera necesitar. No crea una OV ni mueve inventario.</span>
+              </button>
+            </div>
+          )}
+          {form === "pedidoPreparacion" && (
+            <div className="space-y-4">
+              <p className={s.help}>El aviso es opcional y no reserva inventario ni crea una orden de producción. Producción registrará aquí la cantidad que alcanzó a preparar.</p>
+              <input
+                type="hidden"
+                name="detalles"
+                value={JSON.stringify(lineasPreparacion.map(({ key, ...linea }) => ({
+                  producto_id: linea.producto_id,
+                  tipo_prensa: linea.tipo_prensa || null,
+                  contenedores_solicitados: linea.contenedores_solicitados || null,
+                  peso_estimado_contenedor: linea.peso_estimado_contenedor || null,
+                  cantidad_solicitada: linea.cantidad_solicitada,
+                  observaciones: linea.observaciones || null,
+                })))}
+              />
+              {lineasPreparacion.map((linea, index) => {
+                const cambia = (campo: string, valor: string) =>
+                  setLineasPreparacion((actuales) => actuales.map((x) => x.key === linea.key ? { ...x, [campo]: valor } : x));
+                const subtotal = Number(linea.contenedores_solicitados || 0) * Number(linea.peso_estimado_contenedor || 0);
+                return (
+                  <fieldset key={linea.key} className="grid gap-3 rounded-xl border border-slate-600 p-3 sm:grid-cols-2">
+                    <legend className="px-1 text-sm font-semibold">Renglón {index + 1}</legend>
+                    <label>Producto
+                      <select required value={linea.producto_id} onChange={(e) => cambia("producto_id", e.target.value)} className="mt-1 block w-full rounded border p-2 text-slate-900">
+                        <option value="">Selecciona producto</option>
+                        {productos.map((p) => <option key={p.id_Produc_Mater} value={p.id_Produc_Mater}>{p.nombre_Producto}</option>)}
+                      </select>
+                    </label>
+                    <label>Prensa del producto
+                      <input value={linea.tipo_prensa} onChange={(e) => cambia("tipo_prensa", e.target.value)} maxLength={80} placeholder="Ej. Fagor" className="mt-1 block w-full rounded border p-2 text-slate-900" />
+                    </label>
+                    <label>Contenedores estimados
+                      <input type="number" min="1" step="1" value={linea.contenedores_solicitados} onChange={(e) => cambia("contenedores_solicitados", e.target.value)} className="mt-1 block w-full rounded border p-2 text-slate-900" />
+                    </label>
+                    <label>Kg por contenedor estimados
+                      <input type="number" min="0.0001" step="0.0001" value={linea.peso_estimado_contenedor} onChange={(e) => cambia("peso_estimado_contenedor", e.target.value)} className="mt-1 block w-full rounded border p-2 text-slate-900" />
+                    </label>
+                    <label>Cantidad solicitada (kg)
+                      <input required type="number" min="0.0001" step="0.0001" value={linea.cantidad_solicitada} onChange={(e) => cambia("cantidad_solicitada", e.target.value)} className="mt-1 block w-full rounded border p-2 text-slate-900" />
+                    </label>
+                    <label>Detalle del renglón
+                      <input value={linea.observaciones} onChange={(e) => cambia("observaciones", e.target.value)} maxLength={2000} className="mt-1 block w-full rounded border p-2 text-slate-900" />
+                    </label>
+                    {subtotal > 0 && <p className="text-xs text-slate-400 sm:col-span-2">Contenedores × peso estimado: {cantidad(subtotal)} kg. La cantidad solicitada se registra por separado.</p>}
+                    {lineasPreparacion.length > 1 && <button type="button" onClick={() => setLineasPreparacion((actuales) => actuales.filter((x) => x.key !== linea.key))} className="justify-self-start rounded border px-3 py-2 text-sm sm:col-span-2">Quitar renglón</button>}
+                  </fieldset>
+                );
+              })}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button type="button" disabled={lineasPreparacion.length >= 20} onClick={() => setLineasPreparacion((actuales) => [...actuales, { key: crypto.randomUUID(), producto_id: "", tipo_prensa: "", contenedores_solicitados: "", peso_estimado_contenedor: "", cantidad_solicitada: "", observaciones: "" }])} className="rounded border px-3 py-2 disabled:opacity-50">Agregar producto / prensa</button>
+                <strong>Total solicitado: {cantidad(lineasPreparacion.reduce((total, linea) => total + Number(linea.cantidad_solicitada || 0), 0))} kg</strong>
+              </div>
+            </div>
+          )}
           {form === "cotizacion" && cotizacionPlantilla && (
             <div className={s.help}>
               <p>
@@ -1892,10 +2047,12 @@ export default function VentasCRM() {
                         {o.estado === "BORRADOR" && (
                           <button
                             className={s.primary}
-                            onClick={() => {
+                            onClick={() => void ejecutar(async () => {
+                              const disponibles = await pedir(`${base}/cuentas/${o.persona_id}/pedidos-preparacion-disponibles`, undefined, "GET");
+                              setDetallesPreparacion((disponibles.data ?? []).flatMap((pedido: any) => pedido.detalles.map((detalle: any) => ({ ...detalle, pedido: { folio: pedido.folio } }))));
                               setOv(o);
                               setForm("confirmarOV");
-                            }}
+                            }, "Avisos disponibles consultados")}
                           >
                             Completar y confirmar OV
                           </button>
