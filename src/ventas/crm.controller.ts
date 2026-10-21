@@ -44,6 +44,36 @@ export class CrmController {
   ) {
     return this.crm.plantillasVenta(id, r.usuario);
   }
+  @Areas('ventas')
+  @Get('cuentas/:id/pedidos-preparacion-disponibles') pedidosPreparacionCuenta(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+  ) {
+    return this.crm.pedidosPreparacionCuenta(id, r.usuario);
+  }
+  @Areas('ventas')
+  @Post('pedidos-preparacion') crearPedidoPreparacion(
+    @Req() r: any,
+    @Body() b: any,
+  ) {
+    return this.crm.crearPedidoPreparacion(b, r.usuario);
+  }
+  @Areas('ventas')
+  @Get('pedidos-preparacion') pedidosPreparacionVentas(@Req() r: any) {
+    return this.crm.pedidosPreparacionVentas(r.usuario);
+  }
+  @Areas('produccion')
+  @Get('pedidos-preparacion/produccion') pedidosPreparacionProduccion() {
+    return this.crm.pedidosPreparacionProduccion();
+  }
+  @Areas('produccion')
+  @Post('pedidos-preparacion/:id/progreso') actualizarPedidoPreparacion(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() r: any,
+    @Body() b: any,
+  ) {
+    return this.crm.actualizarPedidoPreparacion(id, b, r.usuario);
+  }
   @Post('cuentas/:id/recompras') crearRecompra(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,

@@ -814,6 +814,93 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       ).tipo_persona,
       'CLIENTE',
     );
+    const grafitoKg = await p.productos_materiales.create({
+      data: { nombre_Producto: 'Grafito preparado', UM: 'Kilogramos' },
+    });
+    const ordenesProduccionAntesDelAviso = await p.ordenes_produccion.count();
+    const reservasAntesDelAviso = await p.inventario_reservas.count();
+    const aviso = (await crm.crearPedidoPreparacion({
+      cliente_id: account.persona_id,
+      fecha_requerida: future,
+      observaciones: 'Preparar antes de confirmar las OVs.',
+      detalles: [
+        {
+          producto_id: grafitoKg.id_Produc_Mater,
+          tipo_prensa: 'Fagor',
+          cantidad_solicitada: '2550',
+          contenedores_solicitados: 3,
+          peso_estimado_contenedor: '850',
+        },
+        {
+          producto_id: grafitoKg.id_Produc_Mater,
+          tipo_prensa: 'Polymaster',
+          cantidad_solicitada: '1700',
+          contenedores_solicitados: 2,
+          peso_estimado_contenedor: '850',
+        },
+      ],
+    }, seller)).data;
+    assert.equal(aviso.detalles.length, 2);
+    assert.equal(await p.ordenes_produccion.count(), ordenesProduccionAntesDelAviso);
+    assert.equal(await p.inventario_reservas.count(), reservasAntesDelAviso);
+    await assert.rejects(
+      crm.pedidosPreparacionCuenta(account.persona_id, { ...seller, personaId: 999 }),
+      (e) => e.status === 404,
+    );
+    const avisoEnProduccion = (await crm.pedidosPreparacionProduccion()).data.find((x) => x.id === aviso.id);
+    assert.ok(avisoEnProduccion);
+    const produccionUser = { ...seller, area: 'produccion' };
+    const avisoParcial = (await crm.actualizarPedidoPreparacion(aviso.id, {
+      estado: 'RECIBIDO',
+      detalles: [
+        { id: aviso.detalles[0].id, cantidad_preparada: '1700' },
+        { id: aviso.detalles[1].id, cantidad_preparada: '850' },
+      ],
+    }, produccionUser)).data;
+    assert.equal(avisoParcial.estado, 'PARCIAL');
+    const crearOVPreparacion = async (folio, cantidad, detalleId) => {
+      const borrador = await p.crm_ordenes_venta.create({
+        data: {
+          folio,
+          persona_id: account.persona_id,
+          vendedor_id: seller.personaId,
+          producto_id: grafitoKg.id_Produc_Mater,
+          tipo_venta: 'PRODUCTO_NUEVO',
+          servicio: 'Preparación de grafito',
+          estado: 'BORRADOR',
+          cantidad,
+          unidad: 'Kilogramos',
+          subtotal: 100,
+          impuestos: 16,
+          importe_total: 116,
+          fecha_confirmacion: null,
+          creado_por: seller.usuario,
+        },
+      });
+      return crm.confirmarOrdenVenta(borrador.id, {
+        orden_cliente: `OC-${folio}`,
+        pedido_preparacion_detalle_id: detalleId,
+      }, seller);
+    };
+    const [ovPreparacionA, ovPreparacionB] = await Promise.all([
+      crearOVPreparacion('OV-PREP-A', '1700', aviso.detalles[0].id),
+      crearOVPreparacion('OV-PREP-B', '850', aviso.detalles[0].id),
+    ]);
+    assert.equal(ovPreparacionA.data.pedido_preparacion_detalle_id, aviso.detalles[0].id);
+    assert.equal(ovPreparacionB.data.pedido_preparacion_detalle_id, aviso.detalles[0].id);
+    const avisoConOVs = (await crm.pedidosPreparacionProduccion()).data.find((x) => x.id === aviso.id);
+    assert.deepEqual(
+      avisoConOVs.detalles[0].ordenes_venta.map((x) => x.folio).sort(),
+      ['OV-PREP-A', 'OV-PREP-B'],
+    );
+    const avisoPreparado = (await crm.actualizarPedidoPreparacion(aviso.id, {
+      detalles: [
+        { id: aviso.detalles[0].id, cantidad_preparada: '2550' },
+        { id: aviso.detalles[1].id, cantidad_preparada: '1700' },
+      ],
+      respuesta_produccion: 'Listo para programar.',
+    }, produccionUser)).data;
+    assert.equal(avisoPreparado.estado, 'PREPARADO');
     const o3 = await open(),
       m4 = await sample(o3.id);
     await finish(m4);
