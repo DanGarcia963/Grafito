@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { pedir, sesionActual } from "@/utils/api";
 import { useSocket } from "@/context/SocketContext";
+import FloatingModal from "@/components/FloatingModal";
 
 export default function CostosPage() {
   const socket = useSocket();
@@ -11,6 +12,7 @@ export default function CostosPage() {
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [busy, setBusy] = useState(false);
+  const [formulaActiva, setFormulaActiva] = useState<any>(null);
 
   const cargar = useCallback(async () => {
     const r = await pedir("/api/costos/formulas", undefined, "GET");
@@ -52,6 +54,7 @@ export default function CostosPage() {
         moneda: data.get("moneda"),
       });
       setMensaje(`Precio objetivo emitido para ${f.oportunidad.folio}; ya está disponible para Ventas.`);
+      setFormulaActiva(null);
       await cargar();
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo emitir el precio");
@@ -95,21 +98,29 @@ export default function CostosPage() {
             {f.precio_emitido_en ? (
               <p className="text-lg">Precio objetivo: <strong>{f.precio_objetivo_litro} {f.moneda}/L</strong> · Emitido por {f.precio_emitido_por} el {new Date(f.precio_emitido_en).toLocaleString("es-MX")}</p>
             ) : (
-              <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => void emitir(e, f)}>
-                <label>Precio objetivo por litro
-                  <input required name="precio_objetivo_litro" type="number" min="0.000001" step="0.000001" className="mt-1 block rounded border border-slate-600 bg-slate-950 p-2" />
-                </label>
-                <label>Moneda
-                  <select name="moneda" defaultValue="MXN" className="mt-1 block rounded border border-slate-600 bg-slate-950 p-2">
-                    <option value="MXN">MXN</option><option value="USD">USD</option><option value="EUR">EUR</option>
-                  </select>
-                </label>
-                <button disabled={busy} className="rounded bg-cyan-700 px-4 py-2 font-medium hover:bg-cyan-600 disabled:opacity-50">Emitir precio a Ventas</button>
-              </form>
+              <button type="button" disabled={busy} onClick={() => setFormulaActiva(f)} className="rounded bg-cyan-700 px-4 py-2 font-medium hover:bg-cyan-600 disabled:opacity-50">Registrar precio objetivo</button>
             )}
           </article>
         ))}
       </section>
+      {formulaActiva && <FloatingModal
+        title="Emitir precio objetivo"
+        description={`${formulaActiva.oportunidad.folio} · ${formulaActiva.oportunidad.cliente.nombre} · Fórmula v${formulaActiva.version}`}
+        onClose={() => setFormulaActiva(null)}
+        closeDisabled={busy}
+      >
+        <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => void emitir(e, formulaActiva)}>
+          <label className="sm:col-span-2">Precio objetivo por litro
+            <input required name="precio_objetivo_litro" type="number" min="0.000001" step="0.000001" className="mt-1 block w-full rounded border border-slate-600 bg-slate-950 p-2" />
+          </label>
+          <label>Moneda
+            <select name="moneda" defaultValue="MXN" className="mt-1 block w-full rounded border border-slate-600 bg-slate-950 p-2">
+              <option value="MXN">MXN</option><option value="USD">USD</option><option value="EUR">EUR</option>
+            </select>
+          </label>
+          <button disabled={busy} className="self-end rounded bg-cyan-700 px-4 py-2 font-medium hover:bg-cyan-600 disabled:opacity-50">Emitir precio a Ventas</button>
+        </form>
+      </FloatingModal>}
     </main>
   );
 }
