@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowDownToLine, CheckCircle2, ClipboardCheck, FileText, Mail, RefreshCw, Truck } from 'lucide-react';
 import { useSocket } from '@/context/SocketContext';
 import { API_URL, apiFetch, pedir, sesionActual } from '@/utils/api';
+import FloatingModal from '@/components/FloatingModal';
 
 type Stage = 'PEDIDO' | 'RECOLECCION' | 'PESAJE' | 'VERIFICAR_DATOS' | 'CORRECCION_DATOS' | 'CONTADURIA' | 'RESGUARDO';
 type Person = { id_Persona: number; nombre: string; tipo_persona: string };
@@ -29,6 +30,7 @@ type Manifest = {
   cliente?: Client | null; orden_venta?: Order | null; eventos: EventItem[];
 };
 type Catalogs = { operadores: Person[]; clientes: Client[]; ordenes: Omit<Order, 'estado' | 'tipo_venta' | 'materiales_recibidos'>[] };
+type ManifestModal = { tipo: 'crear' | 'completo' | 'asignar' | 'pesaje' | 'verificar' | 'corregir' | 'resguardo'; manifest?: Manifest };
 
 const stages: { id: Stage; label: string; area: string; hint: string }[] = [
   { id: 'PEDIDO', label: 'Pedido', area: 'Logística', hint: 'Asigna número de manifiesto y operador.' },
@@ -133,6 +135,7 @@ export default function ManifiestosPage() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<ManifestModal | null>(null);
 
   const load = useCallback(async () => {
     const [m, c] = await Promise.all([
@@ -172,20 +175,28 @@ export default function ManifiestosPage() {
       const result = await pedir(path, body);
       setNotice(result.mensaje ?? 'Cambios guardados.');
       await load();
+      return true;
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo completar la acción'); }
     finally { setBusy(null); }
+    return false;
   };
 
   const submitForm = (id: number, path: string, build: (form: FormData) => unknown) => async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    await act(id, path, build(new FormData(e.currentTarget)));
+    if (await act(id, path, build(new FormData(e.currentTarget)))) setModal(null);
   };
 
   const actUpload = async (id: number, path: string, form: FormData) => {
     setBusy(id); setError(''); setNotice('');
-    try { const result = await upload(path, form); setNotice(result.mensaje ?? 'Documento guardado.'); await load(); }
+    try { const result = await upload(path, form); setNotice(result.mensaje ?? 'Documento guardado.'); await load(); return true; }
     catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar el documento'); }
     finally { setBusy(null); }
+    return false;
+  };
+
+  const submitUpload = (id: number, path: string) => async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (await actUpload(id, path, new FormData(e.currentTarget))) setModal(null);
   };
 
   const download = async (id: number, tipo: 'manifiesto' | 'llegada', nombre: string) => {
@@ -212,6 +223,7 @@ export default function ManifiestosPage() {
       setNotice(result.mensaje ?? 'Solicitud creada para Recolección.');
       formElement.reset();
       await load();
+      setModal(null);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo crear el manifiesto'); }
     finally { setBusy(null); }
   };
@@ -225,6 +237,7 @@ export default function ManifiestosPage() {
       setNotice(result.mensaje ?? 'Manifiesto completo registrado.');
       formElement.reset();
       await load();
+      setModal(null);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar el manifiesto completo'); }
     finally { setBusy(null); }
   };
@@ -249,42 +262,9 @@ export default function ManifiestosPage() {
     {error && <p role="alert" className="mb-4 rounded-lg border border-red-900 bg-red-950/70 p-3 text-sm text-red-200">{error}</p>}
     {notice && <p role="status" className="mb-4 rounded-lg border border-emerald-900 bg-emerald-950/50 p-3 text-sm text-emerald-200">{notice}</p>}
 
-    {area === 'seguridad' && <div className="mb-5 grid gap-4 xl:grid-cols-2">
-      <details className="rounded-xl border border-cyan-900/60 bg-slate-900 p-4">
-        <summary className="cursor-pointer font-semibold text-cyan-200">+ Crear solicitud para Recolección</summary>
-        <p className="mt-2 text-xs text-slate-400">Captura lo básico. La tarjeta quedará en Recolección para que Almacén confirme la llegada. Si eliges una OV, se reutiliza la tarjeta que se creó al confirmar la venta.</p>
-        <form onSubmit={create} className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="sm:col-span-2">Orden de venta (opcional)
-            <select name="orden_venta_id" className="field"><option value="">Sin OV · recepción independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select>
-          </label>
-          <label className="sm:col-span-2">Cliente registrado (para poder enviarle el manifiesto)<select name="cliente_id" className="field"><option value="">Selecciona cliente si no hay OV</option>{catalogs.clientes.map(p => <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}{p.crm_perfil_comercial?.correo ? ` · ${p.crm_perfil_comercial.correo}` : ' · sin correo'}</option>)}</select></label>
-          <label>Razón social generadora<input name="razon_social_generadora" required maxLength={200} className="field" /></label>
-          <label>Nombre del residuo<input name="nombre_residuo" required maxLength={200} className="field" /></label>
-          <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
-          <label className="flex items-center gap-2 self-end rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs"><input type="checkbox" name="es_gkn" /> Es GKN (obligatorio si no hay OV)</label>
-          <button disabled={busy === 0} className="rounded-lg bg-cyan-700 px-4 py-2 font-semibold hover:bg-cyan-600 disabled:opacity-50 sm:col-span-2">Crear solicitud para Recolección</button>
-        </form>
-      </details>
-
-      <details className="rounded-xl border border-violet-900/60 bg-slate-900 p-4">
-        <summary className="cursor-pointer font-semibold text-violet-200">+ Registrar manifiesto completo</summary>
-        <p className="mt-2 text-xs text-slate-400">SHyMA puede capturar todos los datos y documentos en una sola acción. El registro completo pasa directo a la validación del checklist; si eliges una OV, debe tener su manifiesto en Pedido.</p>
-        <form onSubmit={createComplete} encType="multipart/form-data" className="mt-4 space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="sm:col-span-2">Orden de venta (opcional)
-              <select name="orden_venta_id" className="field"><option value="">Sin OV · GKN independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select>
-            </label>
-            <label className="sm:col-span-2">Cliente registrado<select name="cliente_id" className="field"><option value="">Se toma del cliente de la OV o selecciona uno</option>{catalogs.clientes.map(p => <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}{p.crm_perfil_comercial?.correo ? ` · ${p.crm_perfil_comercial.correo}` : ' · sin correo'}</option>)}</select></label>
-            <MetadataInputs operators={catalogs.operadores} withAssignment allowGknEdit complete />
-            <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
-            <label>Peso de llegada (kg)<input required name="peso_llegada" type="number" min="0.0001" step="0.0001" className="field" /></label>
-            <label>PDF del manifiesto (opcional)<input name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
-            <label>PDF de llegada a almacén (opcional)<input name="documento_llegada" type="file" accept="application/pdf,.pdf" className="field" /></label>
-          </div>
-          <p className="text-[11px] text-slate-500">Para manifiestos no GKN también se requieren transportista, autorización SEMARNAT, placas y registro SCT. Cada PDF puede pesar hasta 10 MB.</p>
-          <button disabled={busy === 0} className="w-full rounded-lg bg-violet-700 px-4 py-2 font-semibold hover:bg-violet-600 disabled:opacity-50">Registrar y enviar a checklist SHyMA</button>
-        </form>
-      </details>
+    {area === 'seguridad' && <div className="mb-5 flex flex-wrap gap-3">
+      <button type="button" onClick={() => setModal({ tipo: 'crear' })} className="rounded-lg border border-cyan-800 bg-cyan-950/60 px-4 py-3 text-left text-sm font-semibold text-cyan-200 hover:bg-cyan-900/60">+ Crear solicitud para Recolección</button>
+      <button type="button" onClick={() => setModal({ tipo: 'completo' })} className="rounded-lg border border-violet-800 bg-violet-950/60 px-4 py-3 text-left text-sm font-semibold text-violet-200 hover:bg-violet-900/60">+ Registrar manifiesto completo</button>
     </div>}
 
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -319,40 +299,16 @@ export default function ManifiestosPage() {
               {m.documento_llegada_nombre && <button onClick={() => void download(m.id, 'llegada', m.documento_llegada_nombre!)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800"><ArrowDownToLine size={13} /> Documento de llegada</button>}
               {m.documento_manifiesto_nombre && <button onClick={() => void download(m.id, 'manifiesto', m.documento_manifiesto_nombre!)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800"><FileText size={13} /> PDF de manifiesto</button>}
 
-              {m.estado === 'PEDIDO' && area === 'logistica' && <details className="mt-3 rounded-lg border border-slate-800 p-2"><summary className="cursor-pointer text-xs font-semibold text-cyan-300">Asignar número y completar datos</summary>
-                <form onSubmit={submitForm(m.id, `/api/manifiestos/${m.id}/asignar`, f => Object.fromEntries([...f.entries()]))} className="mt-3 space-y-3">
-                  <MetadataInputs manifest={m} operators={catalogs.operadores} withAssignment />
-                  <button disabled={busy === m.id} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">Enviar a Recolección</button>
-                </form>
-              </details>}
+              {m.estado === 'PEDIDO' && area === 'logistica' && <button type="button" onClick={() => setModal({ tipo: 'asignar', manifest: m })} className="mt-3 w-full rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600">Asignar número y completar datos</button>}
               {m.estado === 'RECOLECCION' && area === 'almacen' && <button disabled={busy === m.id} onClick={() => void act(m.id, `/api/manifiestos/${m.id}/recibir`, {})} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600 disabled:opacity-50"><Truck size={14} /> Confirmar llegada · pasar a Pesaje</button>}
-              {m.estado === 'PESAJE' && area === 'almacen' && <form onSubmit={e => { e.preventDefault(); const form = new FormData(e.currentTarget); void actUpload(m.id, `/api/manifiestos/${m.id}/pesaje`, form); }} className="mt-3 space-y-3">
-                <label>Peso real de llegada (kg)<input required name="peso_llegada" type="number" min="0.0001" step="0.0001" defaultValue={m.peso_llegada ?? ''} className="field" /></label>
-                <label>Documento de llegada a almacén (PDF)<input name="documento_llegada" type="file" accept="application/pdf,.pdf" className="field" /></label>
-                <button disabled={busy === m.id} className="w-full rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600 disabled:opacity-50">Guardar pesaje</button>
-              </form>}
-              {m.estado === 'VERIFICAR_DATOS' && area === 'seguridad' && <details className="mt-3 rounded-lg border border-slate-800 p-2"><summary className="cursor-pointer text-xs font-semibold text-cyan-300">Abrir checklist SHyMA</summary>
-                <form onSubmit={submitForm(m.id, `/api/manifiestos/${m.id}/verificar`, f => ({ checklist: Object.fromEntries([...f.entries()].map(([k, v]) => [k, v === 'on'])) }))} className="mt-3 space-y-2">
-                  <ChecklistInputs manifest={m} />
-                  <button disabled={busy === m.id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50"><ClipboardCheck size={14} /> Validar y enviar</button>
-                </form>
-              </details>}
-              {m.estado === 'CORRECCION_DATOS' && area === 'logistica' && <details className="mt-3 rounded-lg border border-amber-900/60 p-2" open><summary className="cursor-pointer text-xs font-semibold text-amber-200">Corregir datos</summary>
-                <form onSubmit={submitForm(m.id, `/api/manifiestos/${m.id}/corregir`, f => Object.fromEntries([...f.entries()]))} className="mt-3 space-y-3">
-                  <MetadataInputs manifest={m} operators={catalogs.operadores} allowGknEdit />
-                  <label>Después de corregir, enviar a<select name="destino" defaultValue="VERIFICAR_DATOS" className="field"><option value="VERIFICAR_DATOS">Revalidación del checklist SHyMA</option><option value="CONTADURIA">Contaduría, si se cumplen los controles pendientes</option></select></label>
-                  <p className="text-[11px] text-slate-500">El pase directo revisa nuevamente los datos obligatorios, el peso y la trazabilidad de inventario. La clasificación GKN y la bitácora deben haber sido confirmadas por SHyMA.</p>
-                  <button disabled={busy === m.id} className="w-full rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600 disabled:opacity-50">Guardar corrección y enviar</button>
-                </form>
-              </details>}
+              {m.estado === 'PESAJE' && area === 'almacen' && <button type="button" onClick={() => setModal({ tipo: 'pesaje', manifest: m })} className="mt-3 w-full rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600">Registrar pesaje</button>}
+              {m.estado === 'VERIFICAR_DATOS' && area === 'seguridad' && <button type="button" onClick={() => setModal({ tipo: 'verificar', manifest: m })} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600"><ClipboardCheck size={14} /> Abrir checklist SHyMA</button>}
+              {m.estado === 'CORRECCION_DATOS' && area === 'logistica' && <button type="button" onClick={() => setModal({ tipo: 'corregir', manifest: m })} className="mt-3 w-full rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold hover:bg-amber-600">Corregir datos</button>}
               {m.estado === 'CONTADURIA' && area === 'contaduria' && <button disabled={busy === m.id} onClick={() => void act(m.id, `/api/manifiestos/${m.id}/firmar`, {})} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold hover:bg-emerald-600 disabled:opacity-50"><CheckCircle2 size={14} /> Firmar y enviar a Resguardo</button>}
               {m.estado === 'RESGUARDO' && area === 'seguridad' && <div className="mt-3 space-y-2">
                 {m.resguardado_en
                   ? <p className="rounded-lg border border-emerald-900 bg-emerald-950/50 p-2 text-xs text-emerald-200">Resguardado {showDate(m.resguardado_en)}{m.resguardado_por ? ` · ${m.resguardado_por.nombre}` : ''}</p>
-                  : <form onSubmit={e => { e.preventDefault(); void actUpload(m.id, `/api/manifiestos/${m.id}/resguardo`, new FormData(e.currentTarget)); }} className="space-y-3">
-                      <label>{m.documento_manifiesto_nombre ? `PDF del manifiesto ya cargado: ${m.documento_manifiesto_nombre}` : 'PDF final del manifiesto'}<input required={!m.documento_manifiesto_nombre} name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
-                      <button disabled={busy === m.id} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">{m.documento_manifiesto_nombre ? 'Confirmar resguardo' : 'Guardar en resguardo'}</button>
-                    </form>}
+                  : <button type="button" onClick={() => setModal({ tipo: 'resguardo', manifest: m })} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600">{m.documento_manifiesto_nombre ? 'Confirmar resguardo' : 'Guardar PDF en resguardo'}</button>}
                 {m.resguardado_en && (m.cliente?.crm_perfil_comercial?.correo || m.orden_venta?.cliente.crm_perfil_comercial?.correo
                   ? <button disabled={busy === m.id} onClick={() => void act(m.id, `/api/manifiestos/${m.id}/enviar-correo`, {})} className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-800 px-3 py-2 text-xs font-semibold hover:bg-cyan-700 disabled:opacity-50"><Mail size={14} /> Enviar manifiesto al cliente</button>
                   : <p className="rounded-lg border border-amber-900/70 bg-amber-950/40 p-2 text-[11px] text-amber-200">Registra el correo del cliente en su perfil comercial para habilitar el envío manual.</p>)}
@@ -367,6 +323,62 @@ export default function ManifiestosPage() {
         </section>;
       })}
     </div>}
+    {modal && <FloatingModal
+      title={modal.tipo === 'crear' ? 'Crear solicitud para Recolección' : modal.tipo === 'completo' ? 'Registrar manifiesto completo' : modal.tipo === 'asignar' ? 'Asignar número y completar datos' : modal.tipo === 'pesaje' ? 'Registrar pesaje de llegada' : modal.tipo === 'verificar' ? 'Checklist SHyMA' : modal.tipo === 'corregir' ? 'Corregir datos del manifiesto' : 'Guardar manifiesto en resguardo'}
+      description={modal.manifest ? `${modal.manifest.no_Manifiesto ?? `Manifiesto #${modal.manifest.id}`} · ${modal.manifest.orden_venta?.folio ?? (modal.manifest.es_gkn ? 'GKN' : 'Sin OV')}` : modal.tipo === 'crear' ? 'La solicitud queda en Pedido/Recolección para que las áreas continúen el flujo.' : 'SHyMA registra los datos y el expediente en una sola captura.'}
+      onClose={() => setModal(null)}
+      closeDisabled={busy !== null}
+      size="xl"
+      theme="dark"
+    >
+      {error && <p role="alert" className="mb-3 rounded-lg border border-red-900 bg-red-950/70 p-3 text-sm text-red-200">{error}</p>}
+      {modal.tipo === 'crear' && <form onSubmit={create} className="grid gap-3 sm:grid-cols-2">
+        <label className="sm:col-span-2">Orden de venta (opcional)<select name="orden_venta_id" className="field"><option value="">Sin OV · recepción independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select></label>
+        <label className="sm:col-span-2">Cliente registrado (para poder enviarle el manifiesto)<select name="cliente_id" className="field"><option value="">Selecciona cliente si no hay OV</option>{catalogs.clientes.map(p => <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}{p.crm_perfil_comercial?.correo ? ` · ${p.crm_perfil_comercial.correo}` : ' · sin correo'}</option>)}</select></label>
+        <label>Razón social generadora<input name="razon_social_generadora" required maxLength={200} className="field" /></label>
+        <label>Nombre del residuo<input name="nombre_residuo" required maxLength={200} className="field" /></label>
+        <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
+        <label className="flex items-center gap-2 self-end rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs"><input type="checkbox" name="es_gkn" /> Es GKN (obligatorio si no hay OV)</label>
+        <p className="text-xs text-slate-400 sm:col-span-2">Al elegir una OV se conserva el manifiesto generado al confirmar esa venta. Sin OV, completa el cliente y marca GKN para registrar una recepción independiente.</p>
+        <button disabled={busy === 0} className="rounded-lg bg-cyan-700 px-4 py-2 font-semibold hover:bg-cyan-600 disabled:opacity-50 sm:col-span-2">Crear solicitud para Recolección</button>
+      </form>}
+      {modal.tipo === 'completo' && <form onSubmit={createComplete} encType="multipart/form-data" className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="sm:col-span-2">Orden de venta (opcional)<select name="orden_venta_id" className="field"><option value="">Sin OV · GKN independiente</option>{catalogs.ordenes.map(o => <option key={o.id} value={o.id}>{o.folio} · {o.cliente.nombre} · {o.cantidad} {o.unidad}</option>)}</select></label>
+          <label className="sm:col-span-2">Cliente registrado<select name="cliente_id" className="field"><option value="">Se toma del cliente de la OV o selecciona uno</option>{catalogs.clientes.map(p => <option key={p.id_Persona} value={p.id_Persona}>{p.nombre}{p.crm_perfil_comercial?.correo ? ` · ${p.crm_perfil_comercial.correo}` : ' · sin correo'}</option>)}</select></label>
+          <MetadataInputs operators={catalogs.operadores} withAssignment allowGknEdit complete />
+          <label>Peso pedido (kg, opcional)<input name="peso_pedido" type="number" min="0.0001" step="0.0001" className="field" /></label>
+          <label>Peso de llegada (kg)<input required name="peso_llegada" type="number" min="0.0001" step="0.0001" className="field" /></label>
+          <label>PDF del manifiesto (opcional)<input name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
+          <label>PDF de llegada a almacén (opcional)<input name="documento_llegada" type="file" accept="application/pdf,.pdf" className="field" /></label>
+        </div>
+        <p className="text-[11px] text-slate-400">Para manifiestos no GKN se requieren transportista, autorización SEMARNAT, placas y registro SCT. Cada PDF puede pesar hasta 10 MB.</p>
+        <button disabled={busy === 0} className="w-full rounded-lg bg-violet-700 px-4 py-2 font-semibold hover:bg-violet-600 disabled:opacity-50">Registrar y enviar a checklist SHyMA</button>
+      </form>}
+      {modal.tipo === 'asignar' && modal.manifest && <form onSubmit={submitForm(modal.manifest.id, `/api/manifiestos/${modal.manifest.id}/asignar`, f => Object.fromEntries([...f.entries()]))} className="space-y-4">
+        <MetadataInputs manifest={modal.manifest} operators={catalogs.operadores} withAssignment />
+        <button disabled={busy === modal.manifest.id} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50">Enviar a Recolección</button>
+      </form>}
+      {modal.tipo === 'pesaje' && modal.manifest && <form onSubmit={submitUpload(modal.manifest.id, `/api/manifiestos/${modal.manifest.id}/pesaje`)} className="space-y-4">
+        <label>Peso real de llegada (kg)<input required name="peso_llegada" type="number" min="0.0001" step="0.0001" defaultValue={modal.manifest.peso_llegada ?? ''} className="field" /></label>
+        <label>Documento de llegada a almacén (PDF)<input name="documento_llegada" type="file" accept="application/pdf,.pdf" className="field" /></label>
+        <button disabled={busy === modal.manifest.id} className="w-full rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold hover:bg-amber-600 disabled:opacity-50">Guardar pesaje</button>
+      </form>}
+      {modal.tipo === 'verificar' && modal.manifest && <form onSubmit={submitForm(modal.manifest.id, `/api/manifiestos/${modal.manifest.id}/verificar`, f => ({ checklist: Object.fromEntries([...f.entries()].map(([k, v]) => [k, v === 'on'])) }))} className="space-y-3">
+        <ChecklistInputs manifest={modal.manifest} />
+        <button disabled={busy === modal.manifest.id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-700 px-3 py-2 text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50"><ClipboardCheck size={14} /> Validar y enviar</button>
+      </form>}
+      {modal.tipo === 'corregir' && modal.manifest && <form onSubmit={submitForm(modal.manifest.id, `/api/manifiestos/${modal.manifest.id}/corregir`, f => Object.fromEntries([...f.entries()]))} className="space-y-4">
+        <MetadataInputs manifest={modal.manifest} operators={catalogs.operadores} allowGknEdit />
+        <label>Después de corregir, enviar a<select name="destino" defaultValue="VERIFICAR_DATOS" className="field"><option value="VERIFICAR_DATOS">Revalidación del checklist SHyMA</option><option value="CONTADURIA">Contaduría, si se cumplen los controles pendientes</option></select></label>
+        <p className="text-[11px] text-slate-400">El pase directo vuelve a revisar los datos, el peso y la trazabilidad. SHyMA debe haber confirmado la clasificación GKN y la bitácora.</p>
+        <button disabled={busy === modal.manifest.id} className="w-full rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold hover:bg-amber-600 disabled:opacity-50">Guardar corrección y enviar</button>
+      </form>}
+      {modal.tipo === 'resguardo' && modal.manifest && <form onSubmit={submitUpload(modal.manifest.id, `/api/manifiestos/${modal.manifest.id}/resguardo`)} className="space-y-4">
+        <label>{modal.manifest.documento_manifiesto_nombre ? `PDF del manifiesto ya cargado: ${modal.manifest.documento_manifiesto_nombre}` : 'PDF final del manifiesto'}<input required={!modal.manifest.documento_manifiesto_nombre} name="documento_manifiesto" type="file" accept="application/pdf,.pdf" className="field" /></label>
+        <button disabled={busy === modal.manifest.id} className="w-full rounded-lg bg-cyan-700 px-3 py-2 text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50">{modal.manifest.documento_manifiesto_nombre ? 'Confirmar resguardo' : 'Guardar en resguardo'}</button>
+      </form>}
+    </FloatingModal>}
     <style jsx global>{`
       .field { display:block; width:100%; margin-top:6px; border:1px solid #334155; border-radius:8px; background:#020617; padding:9px 10px; color:#e2e8f0; font-size:12px; outline:none; }
       .field:focus { border-color:#0891b2; box-shadow:0 0 0 2px #0891b233; }

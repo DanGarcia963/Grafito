@@ -2,6 +2,7 @@
 'use client';
 import { API_URL, apiFetch as fetch, sesionActual } from '@/utils/api';
 import HistorialTiempos from '@/components/HistorialTiempos';
+import FloatingModal from '@/components/FloatingModal';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -82,6 +83,7 @@ const CalidadMuestrasScreen: React.FC = () => {
   const [muestrasCertificadoPendiente, setMuestrasCertificadoPendiente] = useState<any[]>([]);
   const [loadingCertificados, setLoadingCertificados] = useState(false);
   const [subiendoCertificado, setSubiendoCertificado] = useState<number | null>(null);
+  const [muestraCertificadoActiva, setMuestraCertificadoActiva] = useState<any>(null);
   const [errorCertificado, setErrorCertificado] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<string>('TODOS'); // Cambiado a TODOS por defecto
@@ -482,6 +484,7 @@ useEffect(() => {
       if (!res.ok || !data.success)
         throw new Error(data.message || data.error || 'No se pudo guardar el certificado');
       form.reset();
+      setMuestraCertificadoActiva(null);
       await Promise.all([fetchMuestras(), fetchMuestrasDictaminadas(), fetchCertificadosPendientes()]);
     } catch (error) {
       setErrorCertificado(error instanceof Error ? error.message : 'Error al cargar el certificado');
@@ -1004,21 +1007,31 @@ return (
                   <p className="mt-1 text-sm text-slate-400">{muestra.productos_materiales?.nombre_Producto} · {muestra.equipos_tanques?.nombre_Equipo ?? 'Sin tanque'} · {muestra.fecha_Toma ? new Date(muestra.fecha_Toma).toLocaleDateString('es-MX') : 'Sin fecha'}</p>
                   {muestra.observaciones && <p className="mt-2 text-sm text-slate-300">{muestra.observaciones}</p>}
                 </div>
-                <form onSubmit={(event) => { event.preventDefault(); void subirCertificado(muestra.id_Muestra, event.currentTarget); }} className="grid gap-3 sm:grid-cols-2">
-                  <label className="text-xs text-slate-400">Folio del certificado<input required name="folio_Certificado" maxLength={50} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
-                  <label className="text-xs text-slate-400">Número de certificado<input required name="no_Certificado" maxLength={50} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
-                  <label className="text-xs text-slate-400">Fecha de emisión<input required type="date" name="fecha_Emision" defaultValue={new Date().toISOString().slice(0, 10)} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
-                  <label className="text-xs text-slate-400">Documento PDF (máximo 10 MB)<input required type="file" name="documento" accept="application/pdf,.pdf" className="mt-1 block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white" /></label>
-                  <button type="submit" disabled={subiendoCertificado !== null} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2">
-                    {subiendoCertificado === muestra.id_Muestra ? 'Guardando certificado…' : 'Guardar certificado y liberar lote'}
-                  </button>
-                </form>
+                <button type="button" onClick={() => setMuestraCertificadoActiva(muestra)} disabled={subiendoCertificado !== null} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Agregar certificado y liberar lote</button>
               </article>
             ))}
           </div>
         )}
       </section>
     )}
+    {muestraCertificadoActiva && <FloatingModal
+      title="Adjuntar certificado de calidad"
+      description={`Muestra ${muestraCertificadoActiva.no_Muestra} · Lote ${muestraCertificadoActiva.lotes_produccion?.no_Lote ?? 'sin lote'}`}
+      onClose={() => setMuestraCertificadoActiva(null)}
+      closeDisabled={subiendoCertificado !== null}
+      theme="dark"
+    >
+      {errorCertificado && <p role="alert" className="mb-3 rounded-lg border border-red-800 bg-red-950/50 p-3 text-sm text-red-200">{errorCertificado}</p>}
+      <form onSubmit={(event) => { event.preventDefault(); void subirCertificado(muestraCertificadoActiva.id_Muestra, event.currentTarget); }} className="grid gap-3 sm:grid-cols-2">
+        <label className="text-xs text-slate-400">Folio del certificado<input required name="folio_Certificado" maxLength={50} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
+        <label className="text-xs text-slate-400">Número de certificado<input required name="no_Certificado" maxLength={50} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
+        <label className="text-xs text-slate-400">Fecha de emisión<input required type="date" name="fecha_Emision" defaultValue={new Date().toISOString().slice(0, 10)} className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white" /></label>
+        <label className="text-xs text-slate-400">Documento PDF (máximo 10 MB)<input required type="file" name="documento" accept="application/pdf,.pdf" className="mt-1 block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white" /></label>
+        <button type="submit" disabled={subiendoCertificado !== null} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2">
+          {subiendoCertificado === muestraCertificadoActiva.id_Muestra ? 'Guardando certificado…' : 'Guardar certificado y liberar lote'}
+        </button>
+      </form>
+    </FloatingModal>}
     {/* ==================================================================== */}
       {/* VISTA 2: CHECKLIST MANTENIMIENTO (LOTES DE GRAFITO SUCIO) */}
       {/* ==================================================================== */}

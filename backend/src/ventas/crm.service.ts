@@ -19,6 +19,7 @@ import {
   id_reporte_resultado,
   crm_tipo_contacto,
   crm_documento_cliente_tipo,
+  crm_pedido_preparacion_estado,
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
@@ -427,6 +428,9 @@ export class CrmService {
       where: { persona_id: id, ...this.scope(u) },
       include: {
         produccion_asignada: { include: { orden_produccion: true } },
+        pedido_preparacion_detalle: {
+          include: { pedido: { select: { id: true, folio: true, estado: true } } },
+        },
       },
       orderBy: { fecha_confirmacion: 'desc' },
     });
@@ -446,6 +450,22 @@ export class CrmService {
       where: { persona_id: id, ...this.scope(u) },
       orderBy: { id: 'desc' },
     });
+    const pedidosPreparacion = await this.prisma.crm_pedidos_preparacion.findMany({
+      where: { cliente_id: id, vendedor_id: persona.crm_perfil_comercial?.vendedor_responsable_id ?? -1 },
+      include: {
+        detalles: {
+          include: {
+            producto: { select: { id_Produc_Mater: true, nombre_Producto: true } },
+            ordenes_venta: {
+              select: { id: true, folio: true, estado: true, cantidad: true, unidad: true },
+              orderBy: { id: 'asc' },
+            },
+          },
+          orderBy: { id: 'asc' },
+        },
+      },
+      orderBy: { creado_en: 'desc' },
+    });
     return {
       success: true,
       data: {
@@ -453,6 +473,7 @@ export class CrmService {
         documentos,
         ordenes: await this.clasificarCompras(ordenesConProduccion),
         oportunidades,
+        pedidos_preparacion: this.resumirPedidosPreparacion(pedidosPreparacion),
         recurrencia: recurrencia(
           ordenes
             .filter((x) => x.estado === 'CONFIRMADA' && x.fecha_confirmacion)
@@ -461,6 +482,238 @@ export class CrmService {
         ),
       },
     };
+  }
+
+  private resumirPedidosPreparacion(pedidos: any[]) {
+    return pedidos.map((pedido) => ({
+      ...pedido,
+      detalles: pedido.detalles.map((detalle: any) => {
+        const cantidadOV = detalle.ordenes_venta
+          .filter((ov: any) => ov.estado === 'CONFIRMADA')
+          .reduce(
+            (total: Prisma.Decimal, ov: any) => total.add(ov.cantidad),
+            new Prisma.Decimal(0),
+          );
+        return {
+          ...detalle,
+          cantidad_ov_confirmada: cantidadOV,
+          cantidad_pendiente_ov: new Prisma.Decimal(detalle.cantidad_solicitada).sub(cantidadOV),
+        };
+      }),
+    }));
+  }
+
+  /** Crea un aviso de preparación; no reserva ni consume inventario y no crea OP. */
+  async crearPedidoPreparacion(b: any, u: Usuario) {
+    const clienteId = idValido(b.cliente_id);
+    if (!clienteId) throw new BadRequestException('Selecciona el cliente del pedido.');
+    const cuenta = await this.prisma.personas.findFirst({
+      where: {
+        id_Persona: clienteId,
+        crm_perfil_comercial: { is: { vendedor_responsable_id: u.personaId } },
+      },
+      select: {
+        id_Persona: true,
+        tipo_persona: true,
+        crm_perfil_comercial: { select: { estado_comercial: true } },
+      },
+    });
+    if (!cuenta) throw new NotFoundException('Cuenta no encontrada');
+    if (
+      cuenta.tipo_persona !== 'CLIENTE' &&
+      cuenta.crm_perfil_comercial?.estado_comercial !== 'CLIENTE'
+    )
+      throw new BadRequestException('Los avisos de preparación sólo se registran para clientes ganados.');
+    if (!Array.isArray(b.detalles) || b.detalles.length < 1 || b.detalles.length > 20)
+      throw new BadRequestException('Agrega entre 1 y 20 renglones de preparación.');
+
+    const detalles = b.detalles.map((linea: any) => {
+      const productoId = idValido(linea.producto_id);
+      if (!productoId) throw new BadRequestException('Cada renglón debe tener un producto válido.');
+      const cantidad = decimalCrm(linea.cantidad_solicitada, 4);
+      const contenedores = linea.contenedores_solicitados == null || linea.contenedores_solicitados === ''
+        ? null
+        : Number(linea.contenedores_solicitados);
+      if (contenedores != null && (!Number.isSafeInteger(contenedores) || contenedores <= 0))
+        throw new BadRequestException('El número de contenedores debe ser un entero mayor que cero.');
+      const peso = linea.peso_estimado_contenedor == null || linea.peso_estimado_contenedor === ''
+        ? null
+        : decimalCrm(linea.peso_estimado_contenedor, 4);
+      return {
+        producto_id: productoId,
+        tipo_prensa: opc(linea.tipo_prensa, 80),
+        cantidad_solicitada: cantidad,
+        contenedores_solicitados: contenedores,
+        peso_estimado_contenedor: peso,
+        observaciones: opc(linea.observaciones, 2000),
+      };
+    });
+    const combinaciones = new Set<string>();
+    for (const linea of detalles) {
+      const clave = `${linea.producto_id}:${String(linea.tipo_prensa ?? '').trim().toLowerCase()}`;
+      if (combinaciones.has(clave))
+        throw new BadRequestException('Combina en un solo renglón las cantidades del mismo producto y prensa.');
+      combinaciones.add(clave);
+    }
+    const idsProductos = [...new Set<number>(detalles.map((d: any) => Number(d.producto_id)))];
+    const productosEncontrados = await this.prisma.productos_materiales.count({
+      where: { id_Produc_Mater: { in: idsProductos } },
+    });
+    if (productosEncontrados !== idsProductos.length)
+      throw new BadRequestException('Uno o más productos ya no están disponibles. Actualiza el catálogo.');
+
+    const creado = await this.prisma.crm_pedidos_preparacion.create({
+      data: {
+        folio: `PREP-${randomUUID().slice(0, 8).toUpperCase()}`,
+        cliente_id: clienteId,
+        vendedor_id: u.personaId,
+        fecha_requerida: fechaCrm(b.fecha_requerida),
+        observaciones: opc(b.observaciones),
+        creado_por: u.usuario,
+        detalles: { create: detalles },
+      },
+      include: {
+        cliente: { select: { id_Persona: true, nombre: true } },
+        vendedor: { select: { id_Persona: true, nombre: true } },
+        detalles: { include: { producto: { select: { id_Produc_Mater: true, nombre_Producto: true } } } },
+      },
+    });
+    this.eventos.notificar('CRM_PEDIDO_PREPARACION_CREADO', {
+      pedido_id: creado.id,
+      folio: creado.folio,
+    });
+    return { success: true, data: creado };
+  }
+
+  async pedidosPreparacionVentas(u: Usuario) {
+    const pedidos = await this.prisma.crm_pedidos_preparacion.findMany({
+      where: { vendedor_id: u.personaId },
+      include: {
+        cliente: { select: { id_Persona: true, nombre: true } },
+        detalles: {
+          include: {
+            producto: { select: { id_Produc_Mater: true, nombre_Producto: true } },
+            ordenes_venta: { select: { id: true, folio: true, estado: true, cantidad: true, unidad: true } },
+          },
+          orderBy: { id: 'asc' },
+        },
+      },
+      orderBy: { creado_en: 'desc' },
+    });
+    return { success: true, data: this.resumirPedidosPreparacion(pedidos) };
+  }
+
+  async pedidosPreparacionCuenta(id: number, u: Usuario) {
+    const cuenta = await this.prisma.personas.findFirst({
+      where: { id_Persona: id, ...this.cuentaScope(u) },
+      select: { id_Persona: true },
+    });
+    if (!cuenta) throw new NotFoundException('Cuenta no encontrada');
+    const pedidos = await this.prisma.crm_pedidos_preparacion.findMany({
+      where: { cliente_id: id, vendedor_id: u.personaId, estado: { not: 'CANCELADO' } },
+      include: {
+        detalles: {
+          include: {
+            producto: { select: { id_Produc_Mater: true, nombre_Producto: true } },
+            ordenes_venta: { select: { id: true, folio: true, estado: true, cantidad: true, unidad: true } },
+          },
+          orderBy: { id: 'asc' },
+        },
+      },
+      orderBy: { creado_en: 'desc' },
+    });
+    return { success: true, data: this.resumirPedidosPreparacion(pedidos) };
+  }
+
+  async pedidosPreparacionProduccion() {
+    const pedidos = await this.prisma.crm_pedidos_preparacion.findMany({
+      where: { estado: { not: 'CANCELADO' } },
+      include: {
+        cliente: { select: { id_Persona: true, nombre: true } },
+        vendedor: { select: { id_Persona: true, nombre: true } },
+        detalles: {
+          include: {
+            producto: { select: { id_Produc_Mater: true, nombre_Producto: true } },
+            ordenes_venta: { select: { id: true, folio: true, estado: true, cantidad: true, unidad: true } },
+          },
+          orderBy: { id: 'asc' },
+        },
+      },
+      orderBy: [{ estado: 'asc' }, { creado_en: 'desc' }],
+    });
+    return { success: true, data: this.resumirPedidosPreparacion(pedidos) };
+  }
+
+  /** Producción registra su recepción y el avance declarado sin cambiar existencias. */
+  async actualizarPedidoPreparacion(id: number, b: any, u: Usuario) {
+    const data = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM crm_pedidos_preparacion WHERE id=${id} FOR UPDATE`;
+      const pedido = await tx.crm_pedidos_preparacion.findUnique({
+        where: { id },
+        include: { detalles: true },
+      });
+      if (!pedido || pedido.estado === 'CANCELADO')
+        throw new NotFoundException('Pedido de preparación no encontrado');
+      const estadoSolicitado = String(b.estado ?? '').toUpperCase();
+      if (estadoSolicitado && !['RECIBIDO', 'EN_PREPARACION'].includes(estadoSolicitado))
+        throw new BadRequestException('Estado de Producción inválido.');
+
+      if (b.detalles !== undefined) {
+        if (!Array.isArray(b.detalles))
+          throw new BadRequestException('El avance debe incluir una lista de renglones.');
+        const idsPedido = new Set(pedido.detalles.map((d) => d.id));
+        for (const linea of b.detalles) {
+          const detalleId = idValido(linea.id);
+          if (!detalleId || !idsPedido.has(detalleId))
+            throw new BadRequestException('Uno de los renglones no pertenece a este pedido.');
+          const cantidadPreparada = decimalCrm(linea.cantidad_preparada, 4, true);
+          await tx.crm_pedidos_preparacion_detalles.update({
+            where: { id: detalleId },
+            data: { cantidad_preparada: cantidadPreparada },
+          });
+        }
+      }
+
+      const detallesActualizados = await tx.crm_pedidos_preparacion_detalles.findMany({
+        where: { pedido_id: id },
+        select: { cantidad_solicitada: true, cantidad_preparada: true },
+      });
+      const todasPreparadas = detallesActualizados.length > 0 && detallesActualizados.every(
+        (d) => d.cantidad_preparada.gte(d.cantidad_solicitada),
+      );
+      const algunaPreparada = detallesActualizados.some((d) => d.cantidad_preparada.gt(0));
+      const estado = todasPreparadas
+        ? crm_pedido_preparacion_estado.PREPARADO
+        : algunaPreparada
+          ? crm_pedido_preparacion_estado.PARCIAL
+          : (estadoSolicitado as crm_pedido_preparacion_estado | '') ||
+            (pedido.estado === 'PARCIAL' || pedido.estado === 'PREPARADO'
+              ? crm_pedido_preparacion_estado.EN_PREPARACION
+              : pedido.estado);
+      const actualizado = await tx.crm_pedidos_preparacion.update({
+        where: { id },
+        data: {
+          estado,
+          ...(b.respuesta_produccion === undefined ? {} : { respuesta_produccion: opc(b.respuesta_produccion, 4000) }),
+          actualizado_produccion_por: u.usuario,
+          ...(estado !== 'ENVIADO' && !pedido.recibido_en ? { recibido_en: new Date() } : {}),
+          ...(estado === 'PREPARADO' ? { preparado_en: new Date() } : {}),
+          ...(estado !== 'PREPARADO' && pedido.preparado_en ? { preparado_en: null } : {}),
+        },
+        include: {
+          cliente: { select: { nombre: true } },
+          vendedor: { select: { nombre: true } },
+          detalles: { include: { producto: { select: { nombre_Producto: true } } }, orderBy: { id: 'asc' } },
+        },
+      });
+      return actualizado;
+    });
+    this.eventos.notificar('CRM_PEDIDO_PREPARACION_ACTUALIZADO', {
+      pedido_id: data.id,
+      folio: data.folio,
+      estado: data.estado,
+    });
+    return { success: true, data };
   }
   /** Cotizaciones de esta cuenta cuyo reporte viable y precio de Costos pueden servir como base. */
   async plantillasVenta(id: number, u: Usuario) {
@@ -1615,7 +1868,7 @@ export class CrmService {
         include: { producto: { select: { configuracion_operativa: true } } },
       });
       if (!orden) throw new NotFoundException('Orden no encontrada');
-      if (orden.estado === 'CONFIRMADA') return { orden, confirmada: false };
+      if (orden.estado === 'CONFIRMADA') return { orden, confirmada: false, pedidoPreparacionId: null };
       if (orden.estado !== 'BORRADOR')
         throw new ConflictException('Sólo se pueden confirmar órdenes en borrador.');
       if (await tx.manifiestos.findFirst({ where: { orden_venta_id: id }, select: { id: true } }))
@@ -1630,6 +1883,34 @@ export class CrmService {
             orden.unidad,
             orden.cantidad,
           );
+      let pedidoPreparacionDetalleId = orden.pedido_preparacion_detalle_id;
+      let pedidoPreparacionId: number | null = null;
+      if (b.pedido_preparacion_detalle_id !== undefined) {
+        if (b.pedido_preparacion_detalle_id == null || b.pedido_preparacion_detalle_id === '') {
+          pedidoPreparacionDetalleId = null;
+        } else {
+          const detalleId = idValido(b.pedido_preparacion_detalle_id);
+          if (!detalleId) throw new BadRequestException('El renglón de preparación seleccionado no es válido.');
+          if (orden.unidad !== 'Kilogramos')
+            throw new BadRequestException('Sólo se pueden vincular avisos de preparación expresados en kilogramos.');
+          const detallePedido = await tx.crm_pedidos_preparacion_detalles.findFirst({
+            where: {
+              id: detalleId,
+              producto_id: orden.producto_id,
+              pedido: {
+                cliente_id: orden.persona_id,
+                vendedor_id: orden.vendedor_id,
+                estado: { not: 'CANCELADO' },
+              },
+            },
+            select: { id: true, pedido_id: true },
+          });
+          if (!detallePedido)
+            throw new BadRequestException('El renglón debe pertenecer a un aviso activo del mismo cliente, vendedor y producto.');
+          pedidoPreparacionDetalleId = detallePedido.id;
+          pedidoPreparacionId = detallePedido.pedido_id;
+        }
+      }
       const confirmadaEn = new Date();
       const actualizada = await tx.crm_ordenes_venta.update({
         where: { id },
@@ -1639,6 +1920,7 @@ export class CrmService {
           fecha_confirmacion: confirmadaEn,
           fecha_compromiso: fechaCrm(b.fecha_compromiso),
           observaciones: opc(b.observaciones),
+          pedido_preparacion_detalle_id: pedidoPreparacionDetalleId,
           ...(especificaciones === undefined ? {} : { especificaciones }),
         },
       });
@@ -1683,12 +1965,17 @@ export class CrmService {
             `OV ${actualizada.folio} confirmada con la referencia ${ordenCliente}.`,
           );
       }
-      return { orden: actualizada, confirmada: true };
+      return { orden: actualizada, confirmada: true, pedidoPreparacionId };
     });
     this.avisar(resultado.orden.oportunidad_id ?? undefined);
     if (resultado.confirmada)
       this.eventos.notificar('MANIFIESTO_ACTUALIZADO', {
         ordenVentaId: resultado.orden.id,
+      });
+    if (resultado.pedidoPreparacionId)
+      this.eventos.notificar('CRM_PEDIDO_PREPARACION_ACTUALIZADO', {
+        pedido_id: resultado.pedidoPreparacionId,
+        orden_venta_id: resultado.orden.id,
       });
     return { success: true, data: resultado.orden };
   }

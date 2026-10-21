@@ -436,6 +436,8 @@ model personas {
   crm_oportunidades_vendedor                                             crm_oportunidades[]        @relation("crm_oportunidad_vendedor")
   crm_ordenes_venta_cliente                                              crm_ordenes_venta[]        @relation("crm_orden_venta_cliente")
   crm_ordenes_venta_vendedor                                             crm_ordenes_venta[]        @relation("crm_orden_venta_vendedor")
+  crm_pedidos_preparacion_cliente                                        crm_pedidos_preparacion[]  @relation("crm_pedido_preparacion_cliente")
+  crm_pedidos_preparacion_vendedor                                       crm_pedidos_preparacion[]  @relation("crm_pedido_preparacion_vendedor")
   crm_documentos_cliente                                                 crm_documentos_cliente[]
   manifiestos_como_operador                                               manifiestos[]              @relation("manifiesto_operador")
   manifiestos_como_cliente                                               manifiestos[]              @relation("manifiesto_cliente")
@@ -466,6 +468,7 @@ model productos_materiales {
   requisiciones_compra      requisiciones_compra[]
   crm_oportunidades         crm_oportunidades[]
   crm_ordenes_venta         crm_ordenes_venta[]
+  crm_pedidos_preparacion_detalles crm_pedidos_preparacion_detalles[]
 
   lotes_inventario lotes_inventario[]
   cotizaciones     crm_cotizaciones[]
@@ -1032,6 +1035,7 @@ model crm_ordenes_venta {
   folio                String                  @unique(map: "uq_crm_orden_venta_folio") @db.VarChar(60)
   oportunidad_id       Int?                     @unique(map: "uq_crm_orden_venta_oportunidad")
   cotizacion_id        Int?                     @unique(map: "uq_crm_orden_venta_cotizacion")
+  pedido_preparacion_detalle_id Int?
   persona_id           Int
   vendedor_id          Int
   tipo_venta           crm_tipo_venta
@@ -1058,6 +1062,7 @@ model crm_ordenes_venta {
   cliente              personas                @relation("crm_orden_venta_cliente", fields: [persona_id], references: [id_Persona], onDelete: Restrict)
   vendedor             personas                @relation("crm_orden_venta_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict)
   producto             productos_materiales    @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict)
+  pedido_preparacion_detalle crm_pedidos_preparacion_detalles? @relation(fields: [pedido_preparacion_detalle_id], references: [id], onDelete: Restrict, map: "fk_crm_orden_venta_pedido_detalle")
   produccion_asignada  crm_ordenes_venta_produccion[]
   materiales_recibidos lotes_inventario[]
   entregas             entregas_logistica[]
@@ -1071,6 +1076,53 @@ model crm_ordenes_venta {
   @@index([persona_id, fecha_confirmacion])
   @@index([vendedor_id, fecha_confirmacion])
   @@index([producto_id])
+  @@index([pedido_preparacion_detalle_id], map: "idx_crm_ov_pedido_preparacion_detalle")
+}
+
+/// Aviso opcional de preparación que Ventas envía a Producción antes de formalizar
+/// una o varias órdenes de venta. No crea OP ni modifica inventario.
+model crm_pedidos_preparacion {
+  id                         Int                           @id @default(autoincrement())
+  folio                      String                        @unique(map: "uq_crm_pedido_preparacion_folio") @db.VarChar(50)
+  cliente_id                 Int
+  vendedor_id                Int
+  estado                     crm_pedido_preparacion_estado @default(ENVIADO)
+  fecha_requerida            DateTime?                     @db.Date
+  observaciones              String?                       @db.Text
+  respuesta_produccion       String?                       @db.Text
+  actualizado_produccion_por String?                       @db.VarChar(100)
+  recibido_en                DateTime?                     @db.Timestamptz(6)
+  preparado_en               DateTime?                     @db.Timestamptz(6)
+  creado_por                 String                        @db.VarChar(100)
+  creado_en                  DateTime                      @default(now()) @db.Timestamptz(6)
+  actualizado_en             DateTime                      @updatedAt @db.Timestamptz(6)
+  cliente                    personas                      @relation("crm_pedido_preparacion_cliente", fields: [cliente_id], references: [id_Persona], onDelete: Restrict, map: "fk_crm_pedido_preparacion_cliente")
+  vendedor                   personas                      @relation("crm_pedido_preparacion_vendedor", fields: [vendedor_id], references: [id_Persona], onDelete: Restrict, map: "fk_crm_pedido_preparacion_vendedor")
+  detalles                   crm_pedidos_preparacion_detalles[]
+
+  @@index([estado, creado_en], map: "idx_crm_pedido_preparacion_estado_fecha")
+  @@index([vendedor_id, estado], map: "idx_crm_pedido_preparacion_vendedor_estado")
+  @@index([cliente_id, creado_en], map: "idx_crm_pedido_preparacion_cliente_fecha")
+}
+
+/// Cantidades solicitadas por producto/prensa. Un renglón puede cubrirse con
+/// varias OVs; cada OV corresponde a un renglón opcional.
+model crm_pedidos_preparacion_detalles {
+  id                       Int                      @id @default(autoincrement())
+  pedido_id                Int
+  producto_id              Int
+  tipo_prensa              String?                  @db.VarChar(80)
+  cantidad_solicitada      Decimal                  @db.Decimal(18, 4)
+  contenedores_solicitados Int?
+  peso_estimado_contenedor Decimal?                 @db.Decimal(18, 4)
+  cantidad_preparada       Decimal                  @default(0) @db.Decimal(18, 4)
+  observaciones            String?                  @db.Text
+  pedido                   crm_pedidos_preparacion  @relation(fields: [pedido_id], references: [id], onDelete: Restrict, map: "fk_crm_pedido_preparacion_detalle_pedido")
+  producto                 productos_materiales     @relation(fields: [producto_id], references: [id_Produc_Mater], onDelete: Restrict, map: "fk_crm_pedido_preparacion_detalle_producto")
+  ordenes_venta            crm_ordenes_venta[]
+
+  @@index([pedido_id], map: "idx_crm_pedido_preparacion_detalle_pedido")
+  @@index([producto_id, tipo_prensa], map: "idx_crm_pedido_preparacion_detalle_producto_prensa")
 }
 
 /// Un manifiesto puede nacer de una OV o ser capturado por SHyMA para una entrada GKN sin OV.
@@ -1296,6 +1348,15 @@ enum crm_orden_venta_estado {
   BORRADOR
   CONFIRMADA
   CANCELADA
+}
+
+enum crm_pedido_preparacion_estado {
+  ENVIADO
+  RECIBIDO
+  EN_PREPARACION
+  PARCIAL
+  PREPARADO
+  CANCELADO
 }
 
 enum no_conformidades_tipo {

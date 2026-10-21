@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { API_URL, apiFetch, pedir, sesionActual } from "@/utils/api";
+import FloatingModal from "./FloatingModal";
 export async function descargarCrm(tipo: string, id: number, nombre: string) {
   const r = await apiFetch(
     `${API_URL}/api/ventas/crm/documentos/${tipo}/${id}`,
@@ -23,7 +24,9 @@ export default function CrmReportes({
     [busy, setBusy] = useState(false),
     [mensaje, setMensaje] = useState(""),
     [area, setArea] = useState(""),
-    [formula, setFormula] = useState("");
+    [formula, setFormula] = useState(""),
+    [modal, setModal] = useState<"reporte" | "formula" | "anular" | "">(""),
+    [reporteAnular, setReporteAnular] = useState<number | null>(null);
   const cargar = async () => {
     const r = await pedir(
       `/api/ventas/crm/oportunidades/${oportunidadId}`,
@@ -90,89 +93,11 @@ export default function CrmReportes({
             ))}
           </ul>
           {o.muestras.some((m: any) => m.id_flujo_estructurado && (!m.id_analisis_preliminar || !m.id_procesamiento || !m.id_analisis_final)) && <p className="rounded bg-amber-50 p-3 text-sm text-amber-900">Completa las tres etapas estructuradas de I+D antes de publicar este reporte.</p>}
-          {o.etapa !== "GANADA" && (
-            <form
-              className="grid gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const data = new FormData(e.currentTarget);
-                data.set("version", String(o.version));
-                void ejecutar(async () => {
-                  const r = await apiFetch(
-                    `${API_URL}/api/ventas/crm/oportunidades/${oportunidadId}/reportes`,
-                    { method: "POST", body: data },
-                  );
-                  const d = await r.json();
-                  if (!r.ok) throw new Error(d.message);
-                });
-              }}
-            >
-              <label>
-                Resultado
-                <select name="resultado" className="border p-2 block">
-                  <option value="VIABLE">Viable</option>
-                  <option value="NO_VIABLE">No viable</option>
-                  <option value="REQUIERE_NUEVA_MUESTRA">
-                    Requiere nueva muestra
-                  </option>
-                </select>
-              </label>
-              <label>
-                Resumen del reporte
-                <textarea
-                  name="resumen"
-                  required
-                  maxLength={8000}
-                  className="border p-2 block w-full"
-                />
-              </label>
-              <label>
-                Observaciones
-                <textarea
-                  name="observaciones"
-                  maxLength={4000}
-                  className="border p-2 block w-full"
-                />
-              </label>
-              <label>
-                Documento Word o PDF (opcional, hasta 10 MB)
-                <input
-                  name="documento"
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  className="block"
-                />
-              </label>
-              <button
-                disabled={busy}
-                className="bg-blue-700 text-white p-2 rounded"
-              >
-                Publicar reporte y actualizar CRM
-              </button>
-            </form>
-          )}
+          {o.etapa !== "GANADA" && <button type="button" disabled={busy} onClick={() => setModal("reporte")} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50">Publicar reporte de I+D</button>}
           {area === "id" && (() => {
             const vigente = o.reportes_id.find((r: any) => r.estado === "PUBLICADO" && r.resultado === "VIABLE");
             const enviada = vigente && o.costos_oportunidad?.find((x: any) => x.reporte?.version === vigente.version);
-            return vigente && !enviada ? (
-              <form className="grid gap-3 border rounded-lg p-3 bg-white" onSubmit={(e) => {
-                e.preventDefault();
-                void ejecutar(async () => {
-                  await pedir(`/api/ventas/crm/oportunidades/${oportunidadId}/formulas-costos`, {
-                    version: o.version,
-                    formula,
-                  });
-                  setFormula("");
-                });
-              }}>
-                <h4 className="font-semibold">Enviar fórmula a Costos · Reporte v{vigente.version}</h4>
-                <p className="text-sm">La fórmula quedará asociada a este reporte viable. Costos registrará el precio objetivo por litro en una versión auditable.</p>
-                <label>Fórmula / proceso propuesto
-                  <textarea required maxLength={12000} value={formula} onChange={(e) => setFormula(e.target.value)} className="border p-2 block w-full min-h-28" />
-                </label>
-                <button disabled={busy} className="bg-indigo-700 text-white p-2 rounded">Enviar fórmula a Costos</button>
-              </form>
-            ) : null;
+            return vigente && !enviada ? <button type="button" disabled={busy} onClick={() => setModal("formula")} className="rounded bg-indigo-700 px-3 py-2 text-white disabled:opacity-50">Enviar fórmula a Costos · Reporte v{vigente.version}</button> : null;
           })()}
           {area === "id" && o.costos_oportunidad?.map((c: any) => (
             <p key={c.id} className="text-sm">Fórmula v{c.version} · Reporte v{c.reporte?.version} · {c.precio_emitido_en ? `Precio objetivo recibido: ${c.precio_objetivo_litro} ${c.moneda}/L` : "Pendiente de precio de Costos"}</p>
@@ -211,34 +136,44 @@ export default function CrmReportes({
                   </button>
                 </div>
               )}
-              {r.estado === "PUBLICADO" &&
-                o.etapa !== "GANADA" && (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const data = new FormData(e.currentTarget);
-                      void ejecutar(() =>
-                        pedir(
-                          `/api/ventas/crm/oportunidades/${oportunidadId}/reportes/${r.id}/anular`,
-                          { version: o.version, motivo: data.get("motivo") },
-                        ),
-                      );
-                    }}
-                  >
-                    <input
-                      required
-                      name="motivo"
-                      placeholder="Motivo de anulación"
-                      className="border p-2"
-                    />
-                    <button disabled={busy}>Anular reporte</button>
-                  </form>
-                )}
+              {r.estado === "PUBLICADO" && o.etapa !== "GANADA" && <button type="button" disabled={busy} onClick={() => { setReporteAnular(r.id); setModal("anular"); }} className="rounded border px-3 py-2 text-sm">Anular reporte</button>}
               {r.motivo_anulacion && <p>{r.motivo_anulacion}</p>}
             </article>
           ))}
         </>
       )}
+      {o && modal === "reporte" && <FloatingModal title="Publicar reporte de I+D" description={`${o.titulo} · Versión ${o.version}`} onClose={() => setModal("")} closeDisabled={busy}>
+        <form className="grid gap-3" onSubmit={(e) => {
+          e.preventDefault();
+          const data = new FormData(e.currentTarget);
+          data.set("version", String(o.version));
+          void ejecutar(async () => {
+            const r = await apiFetch(`${API_URL}/api/ventas/crm/oportunidades/${oportunidadId}/reportes`, { method: "POST", body: data });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.message);
+            setModal("");
+          });
+        }}>
+          <label>Resultado<select name="resultado" className="block border p-2"><option value="VIABLE">Viable</option><option value="NO_VIABLE">No viable</option><option value="REQUIERE_NUEVA_MUESTRA">Requiere nueva muestra</option></select></label>
+          <label>Resumen del reporte<textarea name="resumen" required maxLength={8000} className="block w-full border p-2" /></label>
+          <label>Observaciones<textarea name="observaciones" maxLength={4000} className="block w-full border p-2" /></label>
+          <label>Documento Word o PDF (opcional, hasta 10 MB)<input name="documento" type="file" accept=".pdf,.doc,.docx" className="block" /></label>
+          <button disabled={busy} className="rounded bg-blue-700 p-2 text-white">Publicar reporte y actualizar CRM</button>
+        </form>
+      </FloatingModal>}
+      {o && modal === "formula" && <FloatingModal title="Enviar fórmula a Costos" description={`${o.titulo} · Oportunidad #${oportunidadId}`} onClose={() => setModal("")} closeDisabled={busy}>
+        <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); void ejecutar(async () => { await pedir(`/api/ventas/crm/oportunidades/${oportunidadId}/formulas-costos`, { version: o.version, formula }); setFormula(""); setModal(""); }); }}>
+          <p className="text-sm">La fórmula quedará asociada al reporte viable y Costos registrará el precio objetivo por litro.</p>
+          <label>Fórmula / proceso propuesto<textarea required maxLength={12000} value={formula} onChange={(e) => setFormula(e.target.value)} className="block min-h-40 w-full border p-2" /></label>
+          <button disabled={busy} className="rounded bg-indigo-700 p-2 text-white">Enviar fórmula a Costos</button>
+        </form>
+      </FloatingModal>}
+      {o && modal === "anular" && reporteAnular != null && <FloatingModal title="Anular reporte publicado" description="Escribe el motivo para conservar la trazabilidad del cambio." onClose={() => { setModal(""); setReporteAnular(null); }} closeDisabled={busy}>
+        <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); void ejecutar(async () => { await pedir(`/api/ventas/crm/oportunidades/${oportunidadId}/reportes/${reporteAnular}/anular`, { version: o.version, motivo: data.get("motivo") }); setModal(""); setReporteAnular(null); }); }}>
+          <label>Motivo de anulación<input required name="motivo" maxLength={1000} className="block w-full border p-2" /></label>
+          <button disabled={busy} className="rounded bg-rose-700 p-2 text-white">Anular reporte</button>
+        </form>
+      </FloatingModal>}
     </section>
   );
 }
