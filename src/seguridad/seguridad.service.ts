@@ -646,4 +646,73 @@ export class SeguridadService {
       );
     }
   }
+
+  /** Reemplaza el PDF de un trámite y conserva la integridad de documentos compartidos. */
+  async actualizarDocumentoTramite(
+    id: number,
+    file?: MulterFile,
+  ) {
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new BadRequestException('El ID del trámite debe ser un entero positivo.');
+    }
+    if (!file || file.buffer.subarray(0, 5).toString() !== '%PDF-') {
+      throw new BadRequestException('Adjunta un archivo PDF válido.');
+    }
+
+    try {
+      const resultado = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id_Tramite_Legal" FROM tramites_legales WHERE "id_Tramite_Legal" = ${id} FOR UPDATE`;
+        const tramite = await tx.tramites_legales.findUnique({
+          where: { id_Tramite_Legal: id },
+          select: { documento_ID: true },
+        });
+        if (!tramite) {
+          throw new NotFoundException(`El trámite con ID ${id} no existe.`);
+        }
+
+        const documento = await tx.documentos_legales.create({
+          data: {
+            nombre_archivo: file.originalname,
+            contenido_pdf: new Uint8Array(file.buffer),
+          },
+          select: { id_Documento: true, nombre_archivo: true },
+        });
+
+        await tx.tramites_legales.update({
+          where: { id_Tramite_Legal: id },
+          data: { documento_ID: documento.id_Documento },
+        });
+
+        const referenciasDocumentoAnterior = await tx.tramites_legales.count({
+          where: { documento_ID: tramite.documento_ID },
+        });
+        if (referenciasDocumentoAnterior === 0) {
+          await tx.documentos_legales.delete({
+            where: { id_Documento: tramite.documento_ID },
+          });
+        }
+
+        return documento;
+      });
+
+      this.eventos.notificar('TRAMITE_ACTUALIZADO', {
+        id: String(id),
+        nombre_original: resultado.nombre_archivo,
+      });
+      return {
+        success: true,
+        id: String(id),
+        nombre_original: resultado.nombre_archivo,
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      console.error('Error actualizando el documento del trámite:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(
+        `No fue posible actualizar el documento del trámite: ${message}`,
+      );
+    }
+  }
 }
