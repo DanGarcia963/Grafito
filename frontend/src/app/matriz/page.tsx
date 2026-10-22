@@ -365,6 +365,13 @@ export default function MatrizLegalPage() {
     setArchivoSeleccionado,
   ] = useState<File | null>(null);
 
+  const [tramiteDocumentoEditando, setTramiteDocumentoEditando] =
+    useState<TramiteLegal | null>(null);
+  const [archivoDocumentoEditado, setArchivoDocumentoEditado] =
+    useState<File | null>(null);
+  const [errorDocumentoEditado, setErrorDocumentoEditado] = useState('');
+  const [actualizandoDocumento, setActualizandoDocumento] = useState(false);
+
   const [
     previewPdfUrl,
     setPreviewPdfUrl,
@@ -1436,6 +1443,66 @@ export default function MatrizLegalPage() {
     setPreviewPdfNombre('');
   };
 
+  const abrirEdicionDocumento = (tramite: TramiteLegal) => {
+    setTramiteDocumentoEditando(tramite);
+    setArchivoDocumentoEditado(null);
+    setErrorDocumentoEditado('');
+  };
+
+  const guardarDocumentoEditado = async () => {
+    if (!tramiteDocumentoEditando) return;
+    if (!archivoDocumentoEditado) {
+      setErrorDocumentoEditado('Selecciona el nuevo documento PDF.');
+      return;
+    }
+    if (archivoDocumentoEditado.size > 10 * 1024 * 1024) {
+      setErrorDocumentoEditado('El PDF no puede exceder 10 MB.');
+      return;
+    }
+    if (
+      archivoDocumentoEditado.type !== 'application/pdf' &&
+      !archivoDocumentoEditado.name.toLowerCase().endsWith('.pdf')
+    ) {
+      setErrorDocumentoEditado('Selecciona un archivo PDF.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('archivo', archivoDocumentoEditado);
+    setActualizandoDocumento(true);
+    setErrorDocumentoEditado('');
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/tramites/${encodeURIComponent(tramiteDocumentoEditando.id)}/documento`,
+        { method: 'PUT', body: formData },
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const mensaje = errorData?.message
+          ? Array.isArray(errorData.message)
+            ? errorData.message.join(', ')
+            : errorData.message
+          : `Error HTTP ${response.status}`;
+        throw new Error(mensaje);
+      }
+      const resultado = await response.json();
+      setTramites(prev => prev.map(tramite =>
+        String(tramite.id) === String(tramiteDocumentoEditando.id)
+          ? { ...tramite, nombreArchivo: resultado.nombre_original }
+          : tramite,
+      ));
+      setTramiteDocumentoEditando(null);
+      setArchivoDocumentoEditado(null);
+      alert('Documento del trámite actualizado correctamente.');
+    } catch (error) {
+      setErrorDocumentoEditado(
+        error instanceof Error ? error.message : 'No fue posible actualizar el documento.',
+      );
+    } finally {
+      setActualizandoDocumento(false);
+    }
+  };
+
   /* =======================================================
      RENDER
   ======================================================= */
@@ -1646,16 +1713,25 @@ export default function MatrizLegalPage() {
                             <td className="p-3">{tramite.responsable}</td>
                             <td className="p-3">{tramite.proveedor}</td>
                             <td className="max-w-[220px] break-words p-3" title={tramite.nombreArchivo}>
-                              {tramite.nombreArchivo ? (
-                                <div className="flex min-w-0 flex-col items-start gap-2">
-                                  <span className="break-all">📄 {tramite.nombreArchivo}</span>
-                                  <button type="button" onClick={() => abrirDocumentoGuardado(tramite)}
-                                    aria-label={`Ver PDF de ${tramite.nombreTramite}`}
-                                    className="shrink-0 rounded border border-blue-200 bg-blue-50 px-3 py-1.5 font-semibold text-blue-700 hover:bg-blue-100">
-                                    Ver PDF
+                              <div className="flex min-w-0 flex-col items-start gap-2">
+                                <span className="break-all">
+                                  {tramite.nombreArchivo ? `📄 ${tramite.nombreArchivo}` : 'Sin documento'}
+                                </span>
+                                <div className="flex flex-wrap gap-2">
+                                  {tramite.nombreArchivo && (
+                                    <button type="button" onClick={() => abrirDocumentoGuardado(tramite)}
+                                      aria-label={`Ver PDF de ${tramite.nombreTramite}`}
+                                      className="shrink-0 rounded border border-blue-200 bg-blue-50 px-3 py-1.5 font-semibold text-blue-700 hover:bg-blue-100">
+                                      Ver PDF
+                                    </button>
+                                  )}
+                                  <button type="button" onClick={() => abrirEdicionDocumento(tramite)}
+                                    aria-label={`${tramite.nombreArchivo ? 'Editar' : 'Adjuntar'} documento de ${tramite.nombreTramite}`}
+                                    className="shrink-0 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100">
+                                    {tramite.nombreArchivo ? 'Editar documento' : 'Adjuntar PDF'}
                                   </button>
                                 </div>
-                              ) : 'Sin documento'}
+                              </div>
                             </td>
                           </tr>)}
                         </tbody>
@@ -2319,6 +2395,68 @@ export default function MatrizLegalPage() {
 
           </div>
 
+        </div>
+      )}
+
+      {tramiteDocumentoEditando && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-labelledby="titulo-editar-documento"
+            className="w-full max-w-xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b pb-3">
+              <div>
+                <h2 id="titulo-editar-documento" className="text-lg font-bold text-slate-900">
+                  Actualizar documento del trámite
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  {tramiteDocumentoEditando.nombreTramite} · {nombreArea(tramiteDocumentoEditando)}
+                </p>
+              </div>
+              <button type="button" onClick={() => setTramiteDocumentoEditando(null)}
+                disabled={actualizandoDocumento} aria-label="Cerrar"
+                className="rounded border px-3 py-1 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+                Cerrar
+              </button>
+            </div>
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-slate-600">
+                Documento actual: <strong>{tramiteDocumentoEditando.nombreArchivo || 'Sin documento'}</strong>
+              </p>
+              <label className="block text-sm font-semibold text-slate-800">
+                Nuevo archivo PDF (máximo 10 MB)
+                <input type="file" accept="application/pdf,.pdf" disabled={actualizandoDocumento}
+                  onChange={event => {
+                    setArchivoDocumentoEditado(event.target.files?.[0] ?? null);
+                    setErrorDocumentoEditado('');
+                  }}
+                  className="mt-2 block w-full rounded border border-slate-300 p-2 text-sm font-normal" />
+              </label>
+              {archivoDocumentoEditado && (
+                <p className="rounded bg-slate-50 p-3 text-sm text-slate-700">
+                  Se reemplazará por: <strong className="break-all">{archivoDocumentoEditado.name}</strong>
+                </p>
+              )}
+              {errorDocumentoEditado && (
+                <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  {errorDocumentoEditado}
+                </p>
+              )}
+              <p className="text-xs text-slate-500">
+                Solo se cambiará el PDF asociado; los datos y fechas del trámite permanecerán iguales.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <button type="button" onClick={() => setTramiteDocumentoEditando(null)}
+                disabled={actualizandoDocumento}
+                className="rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                Cancelar
+              </button>
+              <button type="button" onClick={() => void guardarDocumentoEditado()}
+                disabled={actualizandoDocumento || !archivoDocumentoEditado}
+                className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
+                {actualizandoDocumento ? 'Actualizando…' : 'Guardar documento'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
