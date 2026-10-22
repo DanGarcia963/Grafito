@@ -5,6 +5,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Param,
   Body,
   UseInterceptors,
@@ -165,5 +166,29 @@ export class SeguridadController {
         dto,
         file,
       );
+  }
+
+  /* Reemplaza el PDF actual sin modificar los demás datos del trámite. */
+  @Put('tramites/:id/documento')
+  @UseInterceptors(
+    FileInterceptor('archivo', {
+      storage: memoryStorage(),
+      fileFilter: (req, file, callback) => {
+        if (file.mimetype !== 'application/pdf') {
+          return callback(
+            new BadRequestException('Solo se permiten archivos PDF.'),
+            false,
+          );
+        }
+        callback(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async actualizarDocumentoTramite(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: MulterFile,
+  ) {
+    return this.seguridadService.actualizarDocumentoTramite(id, file);
   }
 }
