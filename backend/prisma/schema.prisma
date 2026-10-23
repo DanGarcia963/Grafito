@@ -615,8 +615,6 @@ model catalogo_tramites {
   activo              Boolean?           @default(true)
   areas_legales       areas_legales      @relation(fields: [id_Area], references: [id_Area], onUpdate: Restrict, map: "fk_catalogo_area")
   tramites_legales    tramites_legales[]
-
-  @@unique([id_Area, nombre_Tramite], map: "uq_tramite_area")
 }
 
 model documentos_legales {
