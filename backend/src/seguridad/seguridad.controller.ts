@@ -30,6 +30,7 @@ import {
 } from './seguridad.service';
 
 import type {
+  CrearCatalogoTramiteDto,
   CrearTramiteDto,
 } from './seguridad.service';
 
@@ -52,6 +53,18 @@ export class SeguridadController {
   async obtenerCatalogoTramites() {
     return this.seguridadService
       .obtenerCatalogoTramites();
+  }
+
+  @Get('areas-legales')
+  async obtenerAreasLegales() {
+    return this.seguridadService.obtenerAreasLegales();
+  }
+
+  @Post('catalogo-tramites')
+  async crearCatalogoTramite(
+    @Body() dto: CrearCatalogoTramiteDto,
+  ) {
+    return this.seguridadService.crearCatalogoTramite(dto);
   }
 
   /* =====================================================
