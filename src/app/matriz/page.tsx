@@ -44,6 +44,11 @@ type CatalogoTramite = {
   nombre_Area: string;
 };
 
+type CoincidenciaCatalogo = CatalogoTramite & {
+  activo: boolean;
+  coincidencia: number;
+};
+
 type AreaLegal = {
   id_Area: number;
   nombre_Area: string;
@@ -318,6 +323,7 @@ function agruparGastoPorAnio(registros: TramiteLegal[]) {
 
 export default function MatrizLegalPage() {
   const [revision, setRevision] = useState(0);
+  const [catalogoRevision, setCatalogoRevision] = useState(0);
   const socket = useSocket();
   const [visorAbierto, setVisorAbierto] = useState(false);
   const [cargandoPdf, setCargandoPdf] = useState(false);
@@ -334,6 +340,8 @@ export default function MatrizLegalPage() {
     catalogoTramites,
     setCatalogoTramites,
   ] = useState<CatalogoTramite[]>([]);
+  const [areasLegales, setAreasLegales] = useState<AreaLegal[]>([]);
+  const [cargandoAreasLegales, setCargandoAreasLegales] = useState(true);
 
   const [
     tramites,
@@ -344,6 +352,13 @@ export default function MatrizLegalPage() {
     mostrarModal,
     setMostrarModal,
   ] = useState(false);
+
+  const [mostrarModalCatalogo, setMostrarModalCatalogo] = useState(false);
+  const [nuevoCatalogo, setNuevoCatalogo] = useState({ idArea: 0, nombre: '' });
+  const [coincidenciasCatalogo, setCoincidenciasCatalogo] = useState<CoincidenciaCatalogo[]>([]);
+  const [confirmacionCatalogoPendiente, setConfirmacionCatalogoPendiente] = useState(false);
+  const [guardandoCatalogo, setGuardandoCatalogo] = useState(false);
+  const [errorCatalogo, setErrorCatalogo] = useState('');
 
   const [
     cargandoCatalogo,
@@ -418,47 +433,7 @@ export default function MatrizLegalPage() {
       'anios',
   });
 
-  /* =======================================================
-     ÁREAS OBTENIDAS DEL CATÁLOGO
-  ======================================================= */
-
-  const areasDisponibles =
-    useMemo<AreaLegal[]>(() => {
-      const mapa =
-        new Map<number, AreaLegal>();
-
-      catalogoTramites.forEach(
-        (tramite) => {
-          if (
-            !mapa.has(
-              tramite.id_Area,
-            )
-          ) {
-            mapa.set(
-              tramite.id_Area,
-              {
-                id_Area:
-                  tramite.id_Area,
-
-                nombre_Area:
-                  tramite.nombre_Area,
-              },
-            );
-          }
-        },
-      );
-
-      return Array.from(
-        mapa.values(),
-      ).sort(
-        (a, b) =>
-          a.nombre_Area.localeCompare(
-            b.nombre_Area,
-          ),
-      );
-    }, [
-      catalogoTramites,
-    ]);
+  const areasDisponibles = areasLegales;
 
   /* =======================================================
      TRÁMITES DEL ÁREA SELECCIONADA
@@ -595,6 +570,32 @@ export default function MatrizLegalPage() {
   ======================================================= */
 
   useEffect(() => {
+    const cargarAreasLegales = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/areas-legales`);
+        if (!response.ok) {
+          throw new Error(`Error HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        if (!Array.isArray(data)) {
+          throw new Error('La respuesta de áreas legales no es un arreglo.');
+        }
+        setAreasLegales(data.map((area) => ({
+          id_Area: Number(area.id_Area),
+          nombre_Area: String(area.nombre_Area ?? ''),
+        })));
+      } catch (error) {
+        console.error('Error cargando áreas legales:', error);
+        alert('No fue posible cargar las áreas legales.');
+      } finally {
+        setCargandoAreasLegales(false);
+      }
+    };
+
+    void cargarAreasLegales();
+  }, []);
+
+  useEffect(() => {
     const cargarCatalogo =
       async () => {
         try {
@@ -676,7 +677,7 @@ export default function MatrizLegalPage() {
       };
 
     cargarCatalogo();
-  }, []);
+  }, [catalogoRevision]);
 
   /* =======================================================
      CARGAR MATRIZ LEGAL
@@ -839,6 +840,7 @@ export default function MatrizLegalPage() {
     const onTramiteCreado = refrescar;
     const onTramiteActualizado = refrescar;
     const onTramiteEliminado = refrescar;
+    const onCatalogoCreado = () => setCatalogoRevision(value => value + 1);
 
     socket.on(
       'TRAMITE_CREADO',
@@ -855,6 +857,8 @@ export default function MatrizLegalPage() {
       onTramiteEliminado,
     );
 
+    socket.on('TRAMITE_CATALOGO_CREADO', onCatalogoCreado);
+
     return () => {
       socket.off(
         'TRAMITE_CREADO',
@@ -870,6 +874,8 @@ export default function MatrizLegalPage() {
         'TRAMITE_ELIMINADO',
         onTramiteEliminado,
       );
+
+      socket.off('TRAMITE_CATALOGO_CREADO', onCatalogoCreado);
     };
   }, [socket]);
 
@@ -1010,6 +1016,76 @@ export default function MatrizLegalPage() {
         }),
       );
     };
+
+  const guardarCatalogo = async (confirmarCoincidencias: boolean) => {
+    const nombre = nuevoCatalogo.nombre.trim();
+    if (!nuevoCatalogo.idArea) {
+      setErrorCatalogo('Selecciona un área.');
+      return;
+    }
+    if (!nombre) {
+      setErrorCatalogo('Escribe el nombre del trámite.');
+      return;
+    }
+
+    setGuardandoCatalogo(true);
+    setErrorCatalogo('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/catalogo-tramites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_Area: nuevoCatalogo.idArea,
+          nombre_Tramite: nombre,
+          confirmar_coincidencias: confirmarCoincidencias,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const mensaje = Array.isArray(data?.message)
+          ? data.message.join(', ')
+          : data?.message || `Error HTTP ${response.status}`;
+        throw new Error(mensaje);
+      }
+
+      if (data?.requiere_confirmacion) {
+        setCoincidenciasCatalogo(
+          Array.isArray(data.coincidencias) ? data.coincidencias : [],
+        );
+        setConfirmacionCatalogoPendiente(true);
+        return;
+      }
+      if (!data?.success || !data?.tramite) {
+        throw new Error('No se pudo agregar el trámite al catálogo.');
+      }
+
+      const nuevo: CatalogoTramite = {
+        id_Tramite_Catalogo: Number(data.tramite.id_Tramite_Catalogo),
+        id_Area: Number(data.tramite.id_Area),
+        nombre_Tramite: String(data.tramite.nombre_Tramite),
+        nombre_Area: String(data.tramite.nombre_Area),
+      };
+      setCatalogoTramites(prev => [...prev, nuevo]);
+      setMostrarModalCatalogo(false);
+      setNuevoCatalogo({ idArea: 0, nombre: '' });
+      setCoincidenciasCatalogo([]);
+      setConfirmacionCatalogoPendiente(false);
+
+      if (Number(data.coincidencias_detectadas) > 0) {
+        alert('Alerta: el trámite se agregó aunque existen nombres parecidos. Revisa que no sea un duplicado.');
+      } else {
+        alert('Trámite agregado al catálogo.');
+      }
+    } catch (error) {
+      setErrorCatalogo(
+        error instanceof Error
+          ? error.message
+          : 'No fue posible agregar el trámite al catálogo.',
+      );
+    } finally {
+      setGuardandoCatalogo(false);
+    }
+  };
 
   /* =======================================================
      GUARDAR TRÁMITE
@@ -1531,6 +1607,19 @@ export default function MatrizLegalPage() {
           <a href="/manifiestos" className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-50">
             Manifiestos
           </a>
+          <button
+            type="button"
+            onClick={() => {
+              setNuevoCatalogo({ idArea: 0, nombre: '' });
+              setCoincidenciasCatalogo([]);
+              setConfirmacionCatalogoPendiente(false);
+              setErrorCatalogo('');
+              setMostrarModalCatalogo(true);
+            }}
+            className="rounded-lg border border-blue-200 bg-white px-4 py-2 font-semibold text-blue-800 transition hover:bg-blue-50"
+          >
+            + Agregar al catálogo
+          </button>
           <button
             onClick={
               abrirNuevoTramite
@@ -2395,6 +2484,154 @@ export default function MatrizLegalPage() {
 
           </div>
 
+        </div>
+      )}
+
+      {mostrarModalCatalogo && (
+        <div className="fixed inset-0 z-[54] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="titulo-nuevo-catalogo"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-5 flex items-start justify-between gap-4 border-b pb-3">
+              <div>
+                <h2 id="titulo-nuevo-catalogo" className="text-lg font-bold text-slate-900">
+                  Agregar trámite al catálogo
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Registra el nombre y el área. Se buscarán nombres parecidos en todas las áreas antes de guardar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMostrarModalCatalogo(false)}
+                disabled={guardandoCatalogo}
+                aria-label="Cerrar"
+                className="rounded px-2 text-xl text-slate-400 hover:text-red-600 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+
+            <form
+              onSubmit={event => {
+                event.preventDefault();
+                void guardarCatalogo(false);
+              }}
+              className="space-y-4"
+            >
+              <label className="block text-sm font-semibold text-slate-700">
+                Área
+                <select
+                  required
+                  value={nuevoCatalogo.idArea || ''}
+                  disabled={guardandoCatalogo || cargandoAreasLegales}
+                  onChange={event => {
+                    setNuevoCatalogo(prev => ({ ...prev, idArea: Number(event.target.value) }));
+                    setCoincidenciasCatalogo([]);
+                    setConfirmacionCatalogoPendiente(false);
+                    setErrorCatalogo('');
+                  }}
+                  className="mt-1 w-full rounded border bg-white p-2 font-normal"
+                >
+                  <option value="">Seleccione un área</option>
+                  {areasDisponibles.map(area => (
+                    <option key={area.id_Area} value={area.id_Area}>{area.nombre_Area}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700">
+                Nombre del trámite
+                <input
+                  required
+                  maxLength={300}
+                  value={nuevoCatalogo.nombre}
+                  disabled={guardandoCatalogo}
+                  onChange={event => {
+                    setNuevoCatalogo(prev => ({ ...prev, nombre: event.target.value }));
+                    setCoincidenciasCatalogo([]);
+                    setConfirmacionCatalogoPendiente(false);
+                    setErrorCatalogo('');
+                  }}
+                  placeholder="Escribe el nombre completo del trámite"
+                  className="mt-1 w-full rounded border p-2 font-normal"
+                />
+                <span className="mt-1 block text-right text-xs font-normal text-slate-400">
+                  {nuevoCatalogo.nombre.length}/300
+                </span>
+              </label>
+
+              <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+                La comparación usa solo el nombre, ignora mayúsculas, acentos y signos, y muestra coincidencias aproximadas del 50% al 100%. El área se muestra como referencia.
+              </p>
+
+              {confirmacionCatalogoPendiente && (
+                <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+                  <h3 className="font-bold text-amber-950">
+                    Se encontraron {coincidenciasCatalogo.length} nombre(s) parecido(s)
+                  </h3>
+                  <p className="mt-1 text-xs text-amber-900">
+                    Revisa si alguno corresponde al mismo trámite antes de continuar.
+                  </p>
+                  <ul className="mt-3 space-y-2">
+                    {coincidenciasCatalogo.map(coincidencia => (
+                      <li key={coincidencia.id_Tramite_Catalogo} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white p-3 text-sm">
+                        <span>
+                          <strong>{coincidencia.nombre_Tramite}</strong>
+                          <span className="ml-2 text-slate-600">· {coincidencia.nombre_Area}</span>
+                          {!coincidencia.activo && <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Inactivo</span>}
+                        </span>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-950">
+                          {coincidencia.coincidencia}%
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-xs text-amber-900">
+                    Si lo agregas, quedará en el catálogo aunque haya coincidencias. Verifica el resultado después de guardarlo.
+                  </p>
+                </div>
+              )}
+
+              {errorCatalogo && (
+                <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  {errorCatalogo}
+                </p>
+              )}
+
+              <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalCatalogo(false)}
+                  disabled={guardandoCatalogo}
+                  className="rounded border px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                {confirmacionCatalogoPendiente ? (
+                  <button
+                    type="button"
+                    onClick={() => void guardarCatalogo(true)}
+                    disabled={guardandoCatalogo}
+                    className="rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {guardandoCatalogo ? 'Guardando...' : 'Agregar de todos modos'}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={guardandoCatalogo || cargandoAreasLegales || !areasDisponibles.length}
+                    className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {guardandoCatalogo ? 'Revisando...' : 'Verificar y agregar'}
+                  </button>
+                )}
+              </div>
+            </form>
+          </section>
         </div>
       )}
 
