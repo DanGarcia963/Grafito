@@ -10,6 +10,10 @@ import { Prisma, tramites_legales_estatus_Tramite } from '@prisma/client';
 type MulterFile = Express.Multer.File;
 
 import { PrismaService } from '../prisma.service';
+import {
+  porcentajeCoincidenciaNombre,
+  umbralCoincidenciaNombre,
+} from './catalogo-tramites.logic';
 
 /* =========================================================
    DTO
@@ -32,6 +36,12 @@ export interface CrearTramiteDto {
   fecha_vencimiento?: string | Date;
 
   observaciones?: string;
+}
+
+export interface CrearCatalogoTramiteDto {
+  id_Area: number | string;
+  nombre_Tramite: string;
+  confirmar_coincidencias?: boolean | string;
 }
 
 /* =========================================================
@@ -101,6 +111,107 @@ export class SeguridadService {
         `Error al obtener el catálogo de trámites: ${message}`,
       );
     }
+  }
+
+  async obtenerAreasLegales() {
+    return this.prisma.areas_legales.findMany({
+      where: { activo: true },
+      select: {
+        id_Area: true,
+        nombre_Area: true,
+      },
+      orderBy: { nombre_Area: 'asc' },
+    });
+  }
+
+  /**
+   * Registra un nombre nuevo en el catálogo. La primera petición devuelve
+   * coincidencias antes de insertar; el usuario puede confirmar y repetirla.
+   */
+  async crearCatalogoTramite(dto: CrearCatalogoTramiteDto) {
+    const nombre = String(dto.nombre_Tramite ?? '').trim();
+    const idArea = Number(dto.id_Area);
+
+    if (!nombre) {
+      throw new BadRequestException('El nombre del trámite es obligatorio.');
+    }
+    if (nombre.length > 300) {
+      throw new BadRequestException(
+        'El nombre del trámite no puede superar 300 caracteres.',
+      );
+    }
+    if (!Number.isInteger(idArea) || idArea <= 0) {
+      throw new BadRequestException('Selecciona un área válida.');
+    }
+
+    const area = await this.prisma.areas_legales.findUnique({
+      where: { id_Area: idArea },
+    });
+    if (!area || area.activo === false) {
+      throw new BadRequestException('El área seleccionada no está disponible.');
+    }
+
+    const catalogo = await this.prisma.catalogo_tramites.findMany({
+      include: {
+        areas_legales: { select: { nombre_Area: true } },
+      },
+    });
+    const coincidencias = catalogo
+      .map((item) => ({
+        id_Tramite_Catalogo: item.id_Tramite_Catalogo,
+        id_Area: item.id_Area,
+        nombre_Tramite: item.nombre_Tramite,
+        nombre_Area: item.areas_legales.nombre_Area,
+        activo: item.activo ?? true,
+        coincidencia: porcentajeCoincidenciaNombre(
+          nombre,
+          item.nombre_Tramite,
+        ),
+      }))
+      .filter((item) => item.coincidencia >= umbralCoincidenciaNombre)
+      .sort(
+        (a, b) =>
+          b.coincidencia - a.coincidencia ||
+          a.nombre_Tramite.localeCompare(b.nombre_Tramite),
+      );
+
+    const confirmar =
+      dto.confirmar_coincidencias === true ||
+      dto.confirmar_coincidencias === 'true';
+    if (coincidencias.length > 0 && !confirmar) {
+      return {
+        success: false,
+        requiere_confirmacion: true,
+        coincidencias,
+      };
+    }
+
+    const nuevo = await this.prisma.catalogo_tramites.create({
+      data: {
+        id_Area: idArea,
+        nombre_Tramite: nombre,
+        activo: true,
+      },
+      include: {
+        areas_legales: { select: { nombre_Area: true } },
+      },
+    });
+
+    this.eventos.notificar('TRAMITE_CATALOGO_CREADO', {
+      id_Tramite_Catalogo: nuevo.id_Tramite_Catalogo,
+    });
+
+    return {
+      success: true,
+      requiere_confirmacion: false,
+      coincidencias_detectadas: coincidencias.length,
+      tramite: {
+        id_Tramite_Catalogo: nuevo.id_Tramite_Catalogo,
+        id_Area: nuevo.id_Area,
+        nombre_Tramite: nuevo.nombre_Tramite,
+        nombre_Area: nuevo.areas_legales.nombre_Area,
+      },
+    };
   }
 
   /* =======================================================
