@@ -31,6 +31,23 @@ export function escaparHtmlCorreo(value: unknown): string {
   });
 }
 
+/** URL absoluta del logo público para que lo carguen los clientes de correo. */
+export function urlLogoCorreo(): string {
+  const configurada = process.env.FRONTEND_URL?.split(',')[0]?.trim();
+  const origen = configurada || 'https://siust.netlify.app';
+  try {
+    const url = new URL(origen);
+    if (!['https:', 'http:'].includes(url.protocol)) throw new Error('protocol');
+    return `${url.origin}/brand/us-technologies.png`;
+  } catch {
+    return 'https://siust.netlify.app/brand/us-technologies.png';
+  }
+}
+
+export function logoCorreoHtml(): string {
+  return `<img src="${escaparHtmlCorreo(urlLogoCorreo())}" alt="US Technologies, S.A. de C.V." width="220" style="display:block;box-sizing:content-box;width:220px;max-width:100%;height:auto;padding:5px 8px;background:#ffffff;border:0;border-radius:4px;outline:none;text-decoration:none">`;
+}
+
 @Injectable()
 export class MailjetService {
   async enviar(correo: CorreoMailjet): Promise<void> {

@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { urlLogoCorreo } from '../correo/mailjet.service';
 import { PrismaService } from '../prisma.service';
 import {
   construirCorreoAlertaVencimiento,
@@ -24,6 +25,7 @@ type ConfiguracionMailjet = {
   nombreRemitente: string;
   destinatario: string;
   urlMatriz: string;
+  urlLogo: string;
 };
 
 const condicionesDisponibles = (
@@ -98,6 +100,7 @@ export class AlertasVencimientoService
         process.env.MATRIZ_LEGAL_ALERT_EMAIL?.trim() ||
         DESTINATARIO_PREDETERMINADO,
       urlMatriz: baseMatrizUrl(),
+      urlLogo: urlLogoCorreo(),
     };
   }
 
@@ -227,6 +230,7 @@ export class AlertasVencimientoService
           mesesAnticipacion:
             alerta.meses_anticipacion as MesesAlertaVencimiento,
           urlMatriz: configuracion.urlMatriz,
+          urlLogo: configuracion.urlLogo,
         });
         await this.enviarMailjet(correo, configuracion);
         await this.prisma.tramites_alertas_vencimiento.update({
