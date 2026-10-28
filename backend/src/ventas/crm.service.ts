@@ -24,7 +24,7 @@ import {
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
 import { Usuario } from '../auth/auth.service';
-import { escaparHtmlCorreo, MailjetService } from '../correo/mailjet.service';
+import { escaparHtmlCorreo, logoCorreoHtml, MailjetService } from '../correo/mailjet.service';
 import { texto, idValido, fichaValida } from '../investigacion/id.logic';
 import {
   abierta,
@@ -1376,7 +1376,7 @@ export class CrmService {
         `Resumen: ${reporte.resumen ?? '—'}`,
         ...resumenMediciones,
       ];
-      const html = `<div style="margin:0;background:#f1f5f9;padding:28px 12px;font-family:Arial,sans-serif;color:#0f172a"><div style="max-width:640px;margin:auto;background:#fff;border:1px solid #dbe4ee;border-radius:14px;overflow:hidden"><header style="background:#082f49;padding:22px 26px;color:#ecfeff"><small style="color:#67e8f9;letter-spacing:2px">US Technologies · Investigación y Desarrollo</small><h1 style="margin:8px 0 0;font-size:22px">Reporte de análisis · v${reporte.version}</h1></header><div style="padding:26px"><p>Se publicó un reporte de I+D para la oportunidad <b>${escaparHtmlCorreo(oportunidad.folio)}</b>.</p><p><b>Cliente:</b> ${escaparHtmlCorreo(cliente?.nombre ?? '—')}</p><p><b>Resultado:</b> ${escaparHtmlCorreo(reporte.resultado)}</p><p>${escaparHtmlCorreo(reporte.resumen ?? '—')}</p>${resumenMediciones.length ? `<h2 style="font-size:15px">Resultados de caracterización</h2><ul>${resumenMediciones.map((x) => `<li style="margin:8px 0">${escaparHtmlCorreo(x)}</li>`).join('')}</ul>` : ''}<p>${reporte.nombre_archivo ? 'El reporte se adjunta a este correo.' : 'Consulta el resumen anterior; este reporte no incluye un archivo adjunto.'}</p><p style="font-size:12px;color:#64748b">Este envío fue solicitado manualmente por I+D.</p></div></div></div>`;
+      const html = `<div style="margin:0;background:#f1f5f9;padding:28px 12px;font-family:Arial,sans-serif;color:#0f172a"><div style="max-width:640px;margin:auto;background:#fff;border:1px solid #dbe4ee;border-radius:14px;overflow:hidden"><header style="background:#082f49;padding:22px 26px;color:#ecfeff"><div style="margin-bottom:14px">${logoCorreoHtml()}</div><small style="color:#67e8f9;letter-spacing:2px">US Technologies · Investigación y Desarrollo</small><h1 style="margin:8px 0 0;font-size:22px">Reporte de análisis · v${reporte.version}</h1></header><div style="padding:26px"><p>Se publicó un reporte de I+D para la oportunidad <b>${escaparHtmlCorreo(oportunidad.folio)}</b>.</p><p><b>Cliente:</b> ${escaparHtmlCorreo(cliente?.nombre ?? '—')}</p><p><b>Resultado:</b> ${escaparHtmlCorreo(reporte.resultado)}</p><p>${escaparHtmlCorreo(reporte.resumen ?? '—')}</p>${resumenMediciones.length ? `<h2 style="font-size:15px">Resultados de caracterización</h2><ul>${resumenMediciones.map((x) => `<li style="margin:8px 0">${escaparHtmlCorreo(x)}</li>`).join('')}</ul>` : ''}<p>${reporte.nombre_archivo ? 'El reporte se adjunta a este correo.' : 'Consulta el resumen anterior; este reporte no incluye un archivo adjunto.'}</p><p style="font-size:12px;color:#64748b">Este envío fue solicitado manualmente por I+D.</p></div></div></div>`;
       await this.correo.enviar({
         destinatario,
         asunto: `Reporte de I+D v${reporte.version} · ${oportunidad.folio}`,
@@ -1633,6 +1633,7 @@ export class CrmService {
           <div style="margin:0;background:#f1f5f9;padding:32px 12px;font-family:Arial,sans-serif;color:#0f172a">
             <div style="max-width:640px;margin:0 auto;overflow:hidden;border:1px solid #dbe4ee;border-radius:16px;background:#fff">
               <div style="background:#082f49;padding:24px 28px;color:#ecfeff">
+                <div style="margin-bottom:14px">${logoCorreoHtml()}</div>
                 <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#67e8f9">US Technologies · Ventas</div>
                 <h1 style="margin:8px 0 0;font-size:24px">Cotización ${escaparHtmlCorreo(cotizacion.folio)}</h1>
               </div>

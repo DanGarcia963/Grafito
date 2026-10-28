@@ -8,7 +8,7 @@ import { Prisma, manifiestos } from '@prisma/client';
 import { EventsGateway } from './events.gateway';
 import { PrismaService } from './prisma.service';
 import { Usuario } from './auth/auth.service';
-import { escaparHtmlCorreo, MailjetService } from './correo/mailjet.service';
+import { escaparHtmlCorreo, logoCorreoHtml, MailjetService } from './correo/mailjet.service';
 import {
   ChecklistManifiesto,
   checklistPendiente,
@@ -844,6 +844,7 @@ export class ManifiestosService {
       <div style="margin:0;background:#f1f5f9;padding:32px 12px;font-family:Arial,sans-serif;color:#0f172a">
         <div style="max-width:640px;margin:0 auto;overflow:hidden;border:1px solid #dbe4ee;border-radius:16px;background:#fff">
           <div style="background:#082f49;padding:24px 28px;color:#ecfeff">
+            <div style="margin-bottom:14px">${logoCorreoHtml()}</div>
             <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#67e8f9">US Technologies · SHyMA</div>
             <h1 style="margin:8px 0 0;font-size:24px">Manifiesto resguardado</h1>
           </div>
