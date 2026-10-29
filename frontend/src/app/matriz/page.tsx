@@ -1,6 +1,6 @@
 'use client';
 
-import { API_URL, apiFetch as fetch } from '@/utils/api';
+import { API_URL, apiFetch as fetch, sesionActual } from '@/utils/api';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -350,6 +350,17 @@ function agruparGastoPorAnio(registros: TramiteLegal[]) {
 }
 
 export default function MatrizLegalPage() {
+  const [puedeAdministrar, setPuedeAdministrar] = useState(false);
+  useEffect(() => {
+    const sincronizarPermisos = () => setPuedeAdministrar(sesionActual()?.area === 'seguridad');
+    sincronizarPermisos();
+    window.addEventListener('sesion-cambiada', sincronizarPermisos);
+    window.addEventListener('storage', sincronizarPermisos);
+    return () => {
+      window.removeEventListener('sesion-cambiada', sincronizarPermisos);
+      window.removeEventListener('storage', sincronizarPermisos);
+    };
+  }, []);
   const [revision, setRevision] = useState(0);
   const [catalogoRevision, setCatalogoRevision] = useState(0);
   const socket = useSocket();
@@ -1649,27 +1660,27 @@ export default function MatrizLegalPage() {
           <a href="/manifiestos" className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-50">
             Manifiestos
           </a>
-          <button
-            type="button"
-            onClick={() => {
-              setNuevoCatalogo({ idArea: 0, nombre: '' });
-              setCoincidenciasCatalogo([]);
-              setConfirmacionCatalogoPendiente(false);
-              setErrorCatalogo('');
-              setMostrarModalCatalogo(true);
-            }}
-            className="rounded-lg border border-blue-200 bg-white px-4 py-2 font-semibold text-blue-800 transition hover:bg-blue-50"
-          >
-            + Agregar al catálogo
-          </button>
-          <button
-            onClick={
-              abrirNuevoTramite
-            }
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
-          >
-            + Registrar Nuevo Trámite
-          </button>
+          {puedeAdministrar && <>
+            <button
+              type="button"
+              onClick={() => {
+                setNuevoCatalogo({ idArea: 0, nombre: '' });
+                setCoincidenciasCatalogo([]);
+                setConfirmacionCatalogoPendiente(false);
+                setErrorCatalogo('');
+                setMostrarModalCatalogo(true);
+              }}
+              className="rounded-lg border border-blue-200 bg-white px-4 py-2 font-semibold text-blue-800 transition hover:bg-blue-50"
+            >
+              + Agregar al catálogo
+            </button>
+            <button
+              onClick={abrirNuevoTramite}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
+            >
+              + Registrar Nuevo Trámite
+            </button>
+          </>}
         </div>
 
       </div>
@@ -1893,11 +1904,11 @@ export default function MatrizLegalPage() {
                                       Ver PDF
                                     </button>
                                   )}
-                                  <button type="button" onClick={() => abrirEdicionDocumento(tramite)}
+                                  {puedeAdministrar && <button type="button" onClick={() => abrirEdicionDocumento(tramite)}
                                     aria-label={`${tramite.nombreArchivo ? 'Editar' : 'Adjuntar'} documento de ${tramite.nombreTramite}`}
                                     className="shrink-0 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100">
                                     {tramite.nombreArchivo ? 'Editar documento' : 'Adjuntar PDF'}
-                                  </button>
+                                  </button>}
                                 </div>
                               </div>
                             </td>
