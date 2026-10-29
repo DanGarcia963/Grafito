@@ -300,6 +300,34 @@ function anioExpedicion(fecha?: string | null): string {
 const centavos = (valor: number) => Number.isFinite(valor) ? Math.round(valor * 100) : 0;
 const nombreArea = (tramite: TramiteLegal) => tramite.areaRelacionada.trim() || 'Sin área';
 
+type GrupoVencimiento = 'sinRenovacion' | 'critico' | 'proximo' | 'vigente';
+const gruposVencimiento: { id: GrupoVencimiento; titulo: string; color: string }[] = [
+  { id: 'sinRenovacion', titulo: 'Vencidos · sin renovación', color: 'bg-rose-600' },
+  { id: 'critico', titulo: 'Críticos · 15 días o menos', color: 'bg-orange-500' },
+  { id: 'proximo', titulo: 'Próximos · hasta 60 días', color: 'bg-amber-400' },
+  { id: 'vigente', titulo: 'Vigentes · más de 60 días', color: 'bg-emerald-600' },
+];
+
+function diasParaVencimiento(fecha: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(fecha);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const fechaUtc = Date.UTC(Number(year), Number(month) - 1, Number(day));
+  const parsed = new Date(fechaUtc);
+  if (!Number.isFinite(fechaUtc) || parsed.toISOString().slice(0, 10) !== `${year}-${month}-${day}`) return null;
+  const ahora = new Date();
+  const hoyUtc = Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+  return Math.floor((fechaUtc - hoyUtc) / 86_400_000);
+}
+
+function grupoVencimiento(tramite: TramiteLegal): GrupoVencimiento {
+  const dias = diasParaVencimiento(tramite.fechaVencimiento);
+  if (tramite.estatus === 'VENCIDO' || dias === null || dias < 0) return 'sinRenovacion';
+  if (dias <= 15) return 'critico';
+  if (dias <= 60) return 'proximo';
+  return 'vigente';
+}
+
 function agruparGastoPorAnio(registros: TramiteLegal[]) {
   const grupos = new Map<string, { anio: string; registros: TramiteLegal[]; centavos: number }>();
   for (const tramite of registros) {
@@ -511,6 +539,20 @@ export default function MatrizLegalPage() {
   const gruposAnuales = useMemo(() => agruparGastoPorAnio(tramitesFiltrados), [tramitesFiltrados]);
   const totalGasto = gruposAnuales.reduce((suma, grupo) => suma + grupo.centavos, 0) / 100;
   const datosAnuales = [...gruposAnuales].reverse().map(g => ({ anio: g.anio, gasto: g.gasto }));
+  const resumenVencimiento = useMemo(() => {
+    const conteos = new Map<GrupoVencimiento, number>(gruposVencimiento.map(grupo => [grupo.id, 0]));
+    for (const tramite of tramitesFiltrados) {
+      const grupo = grupoVencimiento(tramite);
+      conteos.set(grupo, (conteos.get(grupo) ?? 0) + 1);
+    }
+    return gruposVencimiento.map(grupo => ({
+      ...grupo,
+      cantidad: conteos.get(grupo.id) ?? 0,
+      porcentaje: tramitesFiltrados.length
+        ? ((conteos.get(grupo.id) ?? 0) / tramitesFiltrados.length) * 100
+        : 0,
+    }));
+  }, [tramitesFiltrados]);
   const resumenAreas = useMemo(() => {
     const areas = new Map<string, { area: string; centavos: number; cantidad: number }>();
     for (const tramite of tramitesFiltrados) {
@@ -1694,6 +1736,43 @@ export default function MatrizLegalPage() {
                 <p className="mt-2 break-words text-2xl font-bold text-slate-900">{tarjeta.valor}</p>
               </div>
             ))}
+          </section>
+          <section aria-label="Estado de vencimiento de trámites" className="mb-6 rounded-xl border bg-white p-5 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 className="font-bold text-slate-800">Estado de renovación</h2>
+                <p className="mt-1 text-xs text-slate-500">Distribución de los {tramitesFiltrados.length} trámites visibles según su fecha de vencimiento.</p>
+              </div>
+              <span className="text-sm font-semibold text-slate-700">{tramitesFiltrados.length ? '100%' : '0%'} del total filtrado</span>
+            </div>
+            <div
+              role="img"
+              aria-label={resumenVencimiento.map(grupo => `${grupo.titulo}: ${grupo.porcentaje.toFixed(1)}%`).join('; ')}
+              className="flex h-5 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200"
+            >
+              {resumenVencimiento.map(grupo => grupo.porcentaje > 0 && (
+                <span
+                  key={grupo.id}
+                  title={`${grupo.titulo}: ${grupo.porcentaje.toFixed(1)}%`}
+                  className={`${grupo.color} h-full transition-[width] duration-500`}
+                  style={{ width: `${grupo.porcentaje}%` }}
+                />
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {resumenVencimiento.map(grupo => (
+                <div key={grupo.id} className="flex items-start gap-2 rounded-lg border border-slate-100 p-3">
+                  <span aria-hidden="true" className={`mt-1.5 h-3 w-3 shrink-0 rounded-full ${grupo.color}`} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-700">{grupo.titulo}</p>
+                    <p className="mt-1 text-sm font-bold text-slate-900">
+                      {grupo.cantidad} · {grupo.porcentaje.toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[11px] text-slate-500">“Próximo” incluye los avisos urgentes y próximos del semáforo actual (hasta 60 días). El estado “EN RENOVACIÓN” sigue visible en cada registro; el indicador mide la vigencia por fecha.</p>
           </section>
           <p className="mb-5 text-xs text-slate-600">
             Base: costo total por vigencia asignado al año de expedición, sin prorrateo. No representa pagos realizados.

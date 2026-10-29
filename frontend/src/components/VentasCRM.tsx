@@ -24,6 +24,18 @@ const base = "/api/ventas/crm",
   ];
 const nombre = (x: string) => x.replaceAll("_", " "),
   fecha = (x: string | null) => (x ? new Date(x).toLocaleString("es-MX") : "—");
+const opcionesPrioridad = [
+  { value: "BAJA", label: "Baja" },
+  { value: "MEDIA", label: "Media" },
+  { value: "ALTA", label: "Alta" },
+  { value: "URGENTE", label: "Urgente" },
+];
+const clasePrioridad: Record<string, string> = {
+  BAJA: s.prioritybaja,
+  MEDIA: s.prioritymedia,
+  ALTA: s.priorityalta,
+  URGENTE: s.priorityurgente,
+};
 const documentoTipos = [
   ["CONSTANCIA_FISCAL", "Constancia de situación fiscal (CSF/CFS)"],
   ["OPINION_CUMPLIMIENTO", "Opinión de cumplimiento (OP)"],
@@ -428,6 +440,7 @@ export default function VentasCRM() {
     title = `Nueva venta para ${cuenta?.persona.nombre ?? "cliente"}`;
     fields = [
       field("titulo", "Título de la oportunidad", "text", true),
+      select("prioridad", "Prioridad", opcionesPrioridad, "MEDIA"),
       field("necesidad", "Descripción / necesidad", "textarea"),
       ...(!reutilizarAnalisis
         ? [
@@ -525,6 +538,7 @@ export default function VentasCRM() {
         cuenta?.persona.id_Persona,
       ),
       field("titulo", "Título / necesidad de compra", "text", true),
+      select("prioridad", "Prioridad", opcionesPrioridad, "MEDIA"),
       field("necesidad", "Descripción", "textarea"),
       field(
         "fecha_recoleccion_agendada",
@@ -731,6 +745,7 @@ export default function VentasCRM() {
           const r = await pedir(`${base}/cuentas/${personaId}/recompras`, {
             cotizacion_origen_id: Number(b.cotizacion_origen_id),
             titulo: b.titulo,
+            prioridad: b.prioridad,
             necesidad: b.necesidad,
             cantidad_estimada: b.cantidad_estimada,
             unidad: b.unidad,
@@ -1146,6 +1161,11 @@ export default function VentasCRM() {
                       <small>
                         #{o.id} · {o.cliente.nombre}
                       </small>
+                      <span
+                        className={`${s.priorityBadge} ${clasePrioridad[o.prioridad ?? "MEDIA"] ?? s.prioritymedia}`}
+                      >
+                        Prioridad {nombre(o.prioridad ?? "MEDIA")}
+                      </span>
                       <strong>{o.titulo}</strong>
                       <span>
                         {o.producto?.nombre_Producto ?? "Producto pendiente"}
@@ -1471,7 +1491,7 @@ export default function VentasCRM() {
           </div>
           <p>
             {detalle.cliente.nombre} · {nombre(detalle.etapa)} ·{" "}
-            {nombre(detalle.estado_tecnico)}
+            {nombre(detalle.estado_tecnico)} · Prioridad {nombre(detalle.prioridad ?? "MEDIA")}
           </p>
           <p>{detalle.necesidad}</p>
           {analisisReutilizado && (

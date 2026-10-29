@@ -139,12 +139,13 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     assert.equal(documentosCuenta.length, 2);
     assert.equal(documentosCuenta.filter((doc) => doc.vigente).length, 1);
     assert.equal((await crm.documentoCuenta(reemplazo.data.id, seller)).nombre_archivo, 'constancia-actualizada.pdf');
-    const open = async () =>
+    const open = async (prioridad = 'MEDIA') =>
       (
         await crm.crear(
           {
             persona_id: account.persona_id,
             titulo: 'Purificación',
+            prioridad,
             producto_id: prod.id_Produc_Mater,
             cantidad_estimada: '100',
             unidad: 'L',
@@ -266,7 +267,8 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
           seller,
         );
     };
-    const o = await open();
+    const o = await open('URGENTE');
+    assert.equal(o.prioridad, 'URGENTE');
     assert.equal(o.etapa, 'RECOLECCION_AGENDADA');
     await crm.guardar(o.id, {
       version: await version(o.id),
@@ -388,6 +390,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
       {
         cotizacion_origen_id: c2.id,
         titulo: 'Recompra con análisis anterior',
+        prioridad: 'ALTA',
         cantidad_estimada: '100',
         unidad: 'Litros',
       },
@@ -395,6 +398,7 @@ test('CRM integral: prospecto, varias muestras, reporte, revisiones, compra, rec
     )).data;
     assert.equal(recompraReutilizada.etapa, 'COTIZACION');
     assert.equal(recompraReutilizada.estado_tecnico, 'VIABLE');
+    assert.equal(recompraReutilizada.prioridad, 'ALTA');
     const reporteReutilizado = await p.id_reportes_oportunidad.findFirstOrThrow({
       where: { oportunidad_id: recompraReutilizada.id },
     });

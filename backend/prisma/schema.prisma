@@ -851,6 +851,7 @@ model crm_oportunidades {
   necesidad                  String?                     @db.Text
   cantidad_estimada          Decimal?                    @db.Decimal(14, 4)
   unidad                     String?                     @db.VarChar(30)
+  prioridad                  crm_oportunidad_prioridad   @default(MEDIA)
   etapa                      crm_oportunidad_etapa       @default(REGISTRADA)
   estado_tecnico             crm_oportunidad_estado_id   @default(PENDIENTE)
   fecha_apertura             DateTime                    @default(now())
@@ -1267,6 +1268,13 @@ enum crm_oportunidad_etapa {
   GANADA
   PERDIDA
   CANCELADA
+}
+
+enum crm_oportunidad_prioridad {
+  BAJA
+  MEDIA
+  ALTA
+  URGENTE
 }
 
 enum crm_oportunidad_estado_id {

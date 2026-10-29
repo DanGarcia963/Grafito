@@ -20,6 +20,7 @@ import {
   crm_tipo_contacto,
   crm_documento_cliente_tipo,
   crm_pedido_preparacion_estado,
+  crm_oportunidad_prioridad,
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
@@ -41,6 +42,12 @@ import { calcularCumplimientoOV } from './crm.fulfillment';
 type Archivo = Parameters<typeof fichaValida>[0];
 const opc = (v: unknown, max = 4000) =>
   v == null || v === '' ? null : texto(v, max);
+function prioridadCrm(value: unknown): crm_oportunidad_prioridad {
+  const prioridad = String(value ?? 'MEDIA').trim().toUpperCase();
+  if (!Object.values(crm_oportunidad_prioridad).includes(prioridad as crm_oportunidad_prioridad))
+    throw new BadRequestException('Prioridad de oportunidad inválida.');
+  return prioridad as crm_oportunidad_prioridad;
+}
 const sinArchivo = { contenido: true } as const;
 type ArchivoCuenta = { buffer: Buffer; originalname: string; size: number; mimetype?: string };
 const correoValido = (value: unknown): value is string =>
@@ -858,6 +865,7 @@ export class CrmService {
           vendedor_id: u.personaId,
           producto_id: origen.producto_id,
           titulo: texto(b.titulo || `Recompra · ${origen.producto.nombre_Producto}`, 180),
+          prioridad: prioridadCrm(b.prioridad),
           necesidad: opc(b.necesidad),
           cantidad_estimada: decimalCrm(b.cantidad_estimada, 4),
           unidad: origen.unidad,
@@ -1023,6 +1031,7 @@ export class CrmService {
           persona_id,
           vendedor_id: u.personaId,
           titulo: texto(body.titulo, 180),
+          prioridad: prioridadCrm(body.prioridad),
           necesidad: opc(body.necesidad),
           producto_id: body.producto_id ? idValido(body.producto_id) : null,
           cantidad_estimada: body.cantidad_estimada
