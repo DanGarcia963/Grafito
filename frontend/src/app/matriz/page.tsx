@@ -1939,7 +1939,7 @@ export default function MatrizLegalPage() {
                             <td className="min-w-[170px] p-3 font-bold text-blue-900">{tramite.nombreTramite}</td>
                             <td className="whitespace-nowrap p-3 font-mono">{tramite.fechaExpedicion || 'Sin fecha'}</td>
                             <td className="whitespace-nowrap p-3 font-mono">{tramite.fechaVencimiento}</td>
-                            <td className="whitespace-nowrap p-3">{String(tramite.estatus).replace(/_/g, ' ')}</td>
+                            <td className="whitespace-nowrap p-3">{idsRenovados.has(tramite.id) ? 'RENOVADO' : String(tramite.estatus).replace(/_/g, ' ')}</td>
                             <td className="whitespace-nowrap p-3">{formatoImporte(tramite.costoVigencia)}</td>
                             <td className="p-3"><BadgeVariacion comparativa={analisisCostos.get(tramite.id)} /></td>
                             <td className="whitespace-nowrap p-3">{formatoImporte(tramite.costoPorAnio)}</td>
