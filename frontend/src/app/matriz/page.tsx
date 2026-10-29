@@ -242,7 +242,18 @@ function BadgeVariacion({
 
 function getSemaforoBadge(
   semaforo?: SemaforoTramite,
+  renovado = false,
 ) {
+  if (renovado) {
+    return (
+      <span
+        className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300"
+        title="Existe un registro posterior del mismo trámite en esta área."
+      >
+        🔵 Renovado
+      </span>
+    );
+  }
   switch (semaforo) {
     case 'rojo':
       return (
@@ -326,6 +337,38 @@ function grupoVencimiento(tramite: TramiteLegal): GrupoVencimiento {
   if (dias <= 15) return 'critico';
   if (dias <= 60) return 'proximo';
   return 'vigente';
+}
+
+function fechaComparacion(fecha?: string | null): string | null {
+  const dia = /^(\d{4}-\d{2}-\d{2})/.exec(fecha ?? '')?.[1];
+  if (!dia) return null;
+  const fechaValidada = new Date(`${dia}T12:00:00Z`);
+  return Number.isFinite(fechaValidada.getTime()) &&
+    fechaValidada.toISOString().slice(0, 10) === dia
+    ? dia
+    : null;
+}
+
+/** Marca como renovados los registros anteriores del mismo elemento de catálogo.
+ * El catálogo ya identifica conjuntamente el trámite y su área; no agrega datos a la BD.
+ */
+function obtenerIdsTramitesRenovados(registros: TramiteLegal[]): Set<string> {
+  const fechaMasRecientePorCatalogo = new Map<number, string>();
+  for (const tramite of registros) {
+    if (!Number.isSafeInteger(tramite.idTramiteCatalogo) || tramite.idTramiteCatalogo <= 0) continue;
+    const fecha = fechaComparacion(tramite.fechaExpedicion);
+    if (!fecha) continue;
+    const actual = fechaMasRecientePorCatalogo.get(tramite.idTramiteCatalogo);
+    if (!actual || fecha > actual) fechaMasRecientePorCatalogo.set(tramite.idTramiteCatalogo, fecha);
+  }
+
+  const renovados = new Set<string>();
+  for (const tramite of registros) {
+    const fecha = fechaComparacion(tramite.fechaExpedicion);
+    const fechaMasReciente = fechaMasRecientePorCatalogo.get(tramite.idTramiteCatalogo);
+    if (fecha && fechaMasReciente && fecha < fechaMasReciente) renovados.add(tramite.id);
+  }
+  return renovados;
 }
 
 function agruparGastoPorAnio(registros: TramiteLegal[]) {
@@ -547,23 +590,29 @@ export default function MatrizLegalPage() {
     );
   }, [tramites, filtroArea, filtroTramite, aniosSeleccionados, busqueda]);
 
+  const idsRenovados = useMemo(() => obtenerIdsTramitesRenovados(tramites), [tramites]);
+  const tramitesNoRenovadosFiltrados = useMemo(
+    () => tramitesFiltrados.filter(tramite => !idsRenovados.has(tramite.id)),
+    [tramitesFiltrados, idsRenovados],
+  );
+  const cantidadRenovadosFiltrados = tramitesFiltrados.length - tramitesNoRenovadosFiltrados.length;
   const gruposAnuales = useMemo(() => agruparGastoPorAnio(tramitesFiltrados), [tramitesFiltrados]);
   const totalGasto = gruposAnuales.reduce((suma, grupo) => suma + grupo.centavos, 0) / 100;
   const datosAnuales = [...gruposAnuales].reverse().map(g => ({ anio: g.anio, gasto: g.gasto }));
   const resumenVencimiento = useMemo(() => {
     const conteos = new Map<GrupoVencimiento, number>(gruposVencimiento.map(grupo => [grupo.id, 0]));
-    for (const tramite of tramitesFiltrados) {
+    for (const tramite of tramitesNoRenovadosFiltrados) {
       const grupo = grupoVencimiento(tramite);
       conteos.set(grupo, (conteos.get(grupo) ?? 0) + 1);
     }
     return gruposVencimiento.map(grupo => ({
       ...grupo,
       cantidad: conteos.get(grupo.id) ?? 0,
-      porcentaje: tramitesFiltrados.length
-        ? ((conteos.get(grupo.id) ?? 0) / tramitesFiltrados.length) * 100
+      porcentaje: tramitesNoRenovadosFiltrados.length
+        ? ((conteos.get(grupo.id) ?? 0) / tramitesNoRenovadosFiltrados.length) * 100
         : 0,
     }));
-  }, [tramitesFiltrados]);
+  }, [tramitesNoRenovadosFiltrados]);
   const resumenAreas = useMemo(() => {
     const areas = new Map<string, { area: string; centavos: number; cantidad: number }>();
     for (const tramite of tramitesFiltrados) {
@@ -1752,9 +1801,9 @@ export default function MatrizLegalPage() {
             <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
               <div>
                 <h2 className="font-bold text-slate-800">Estado de renovación</h2>
-                <p className="mt-1 text-xs text-slate-500">Distribución de los {tramitesFiltrados.length} trámites visibles según su fecha de vencimiento.</p>
+                <p className="mt-1 text-xs text-slate-500">Distribución de {tramitesNoRenovadosFiltrados.length} registros no sustituidos por una renovación.</p>
               </div>
-              <span className="text-sm font-semibold text-slate-700">{tramitesFiltrados.length ? '100%' : '0%'} del total filtrado</span>
+              <span className="text-sm font-semibold text-slate-700">{tramitesNoRenovadosFiltrados.length ? '100%' : '0%'} del total contabilizado</span>
             </div>
             <div
               role="img"
@@ -1770,6 +1819,11 @@ export default function MatrizLegalPage() {
                 />
               ))}
             </div>
+            {cantidadRenovadosFiltrados > 0 && (
+              <p role="note" className="mt-2 text-xs text-slate-500">
+                Se excluyen {cantidadRenovadosFiltrados} registro(s) renovado(s) de esta distribución; se conservan en el historial.
+              </p>
+            )}
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {resumenVencimiento.map(grupo => (
                 <div key={grupo.id} className="flex items-start gap-2 rounded-lg border border-slate-100 p-3">
@@ -1880,7 +1934,7 @@ export default function MatrizLegalPage() {
                         </tr></thead>
                         <tbody className="divide-y">
                           {grupo.registros.map(tramite => <tr key={tramite.id} className="hover:bg-slate-50">
-                            <td className="whitespace-nowrap p-3">{getSemaforoBadge(tramite.semaforo ?? calcularSemaforo(tramite.fechaVencimiento))}</td>
+                            <td className="whitespace-nowrap p-3">{getSemaforoBadge(tramite.semaforo ?? calcularSemaforo(tramite.fechaVencimiento), idsRenovados.has(tramite.id))}</td>
                             <td className="p-3 font-semibold">{nombreArea(tramite)}</td>
                             <td className="min-w-[170px] p-3 font-bold text-blue-900">{tramite.nombreTramite}</td>
                             <td className="whitespace-nowrap p-3 font-mono">{tramite.fechaExpedicion || 'Sin fecha'}</td>
