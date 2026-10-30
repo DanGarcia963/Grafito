@@ -34,7 +34,7 @@ return ( <main className="min-h-screen bg-slate-100 flex items-center justify-ce
      onSubmit={handleSubmit}
      className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8"
    > <h1 className="text-2xl font-bold text-slate-800 text-center">
-US Technologies · Muestras y procesos </h1>
+US Technologies </h1>
     <p className="text-center text-slate-500 mt-1 mb-6">
       Iniciar sesión por Área
     </p>
