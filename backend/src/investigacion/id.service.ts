@@ -100,8 +100,34 @@ if (!v) throw new BadRequestException(`Viabilidad no encontrada o inactiva para 
  }
  async listar(u:Usuario,paginaEntrada?:string){
   const pagina=paginaEntrada?idValido(paginaEntrada):1,where=this.filtro(u);
-  const [total,data]=await this.prisma.$transaction([this.prisma.muestras.count({where}),this.prisma.muestras.findMany({where,select:seleccion,orderBy:{id_Muestra:'desc'},take:50,skip:(pagina-1)*50})]);
-  return {success:true,total,pagina,data:data.map(m=>({...m,procesos_id:m.id_ejecuciones.map(p=>({...p,...metricas(p)}))}))};
+  const resultado=await this.prisma.$transaction(async tx=>{
+   const total=await tx.muestras.count({where});
+   if(u.area!=='id'){
+    const data=await tx.muestras.findMany({where,select:seleccion,orderBy:{id_Muestra:'desc'},take:50,skip:(pagina-1)*50});
+    return {total,data,prioridadPorMuestra:new Map<number,string|null>()};
+   }
+   const ids=await tx.$queryRaw<Array<{id_Muestra:number;prioridad:string|null}>>`
+    SELECT m."id_Muestra", o.prioridad::text AS prioridad
+    FROM public.muestras AS m
+    LEFT JOIN public.crm_oportunidades AS o ON o.id=m.oportunidad_id
+    WHERE m."area_Muestra"='INVESTIGACION_DESARROLLO'
+    ORDER BY CASE o.prioridad::text
+     WHEN 'URGENTE' THEN 0
+     WHEN 'ALTA' THEN 1
+     WHEN 'MEDIA' THEN 2
+     WHEN 'BAJA' THEN 3
+     ELSE 4
+    END ASC, m."id_Muestra" DESC
+    LIMIT ${50} OFFSET ${(pagina-1)*50}
+   `;
+   const registros=ids.length?await tx.muestras.findMany({where:{...where,id_Muestra:{in:ids.map(x=>x.id_Muestra)}},select:seleccion}):[];
+   const porId=new Map(registros.map(m=>[m.id_Muestra,m] as const));
+   const prioridadPorMuestra=new Map<number,string|null>();
+   for(const row of ids)prioridadPorMuestra.set(row.id_Muestra,row.prioridad);
+   const data=ids.flatMap(({id_Muestra})=>{const muestra=porId.get(id_Muestra);return muestra?[muestra]:[];});
+   return {total,data,prioridadPorMuestra};
+  });
+  return {success:true,total:resultado.total,pagina,data:resultado.data.map(m=>({...m,...(u.area==='id'?{prioridad_oportunidad:resultado.prioridadPorMuestra.get(m.id_Muestra)??null}:{}),procesos_id:m.id_ejecuciones.map(p=>({...p,...metricas(p)}))}))};
  }
  async detalle(id:number,u:Usuario){const m=await this.muestra(this.prisma,id,u);return {success:true,data:{...m,procesos_id:m.id_ejecuciones.map(p=>({...p,...metricas(p)})),eventos:await this.prisma.proceso_eventos.findMany({where:{entidad:'MUESTRA_ID',entidad_id:id},orderBy:{id:'desc'},take:500})}};}
  async ficha(id:number,u:Usuario){await this.muestra(this.prisma,id,u);const f=await this.prisma.muestras.findUnique({where:{id_Muestra:id},select:{ficha_contenido:true,ficha_nombre:true,ficha_mime:true}});if(!f?.ficha_contenido)throw new NotFoundException('Sin ficha técnica');return f;}
