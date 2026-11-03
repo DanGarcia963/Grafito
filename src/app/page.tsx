@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { pedir } from '@/utils/api';
 
-type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria';
+type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'crm_admin' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria';
 
 export default function LoginPage() {
 const [area, setArea] = useState<Area>('produccion');
@@ -25,7 +25,7 @@ try {
   throw new Error('El servidor no devolvió un token de sesión. Revisa la respuesta de /api/auth/login.');
  }
  localStorage.setItem('sesion',JSON.stringify(sesion));window.dispatchEvent(new Event('sesion-cambiada'));
- router.push(area ==='seguridad'?'/matriz':area==='calidad'?'/calidad':area==='produccion'?'/tanques':area==='ventas'?'/ventas-muestras':area==='costos'?'/costos':['logistica','almacen','contaduria'].includes(area)?'/manifiestos':'/investigacion');
+ router.push(area === 'seguridad' || area === 'contaduria' ? '/matriz' : area === 'calidad' ? '/calidad' : area === 'produccion' ? '/tanques' : area === 'ventas' || area === 'crm_admin' ? '/ventas-muestras' : area === 'costos' ? '/costos' : area === 'logistica' || area === 'almacen' ? '/manifiestos' : '/investigacion');
 } catch(e){setError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
 
 };
@@ -34,7 +34,7 @@ return ( <main className="min-h-screen bg-slate-100 flex items-center justify-ce
      onSubmit={handleSubmit}
      className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8"
    > <h1 className="text-2xl font-bold text-slate-800 text-center">
-US Technologies · Muestras y procesos </h1>
+US Technologies </h1>
     <p className="text-center text-slate-500 mt-1 mb-6">
       Iniciar sesión por Área
     </p>
@@ -52,11 +52,12 @@ US Technologies · Muestras y procesos </h1>
       <option value="calidad">Muestras · Calidad</option>
       <option value="id">I+D · Análisis de muestras</option>
       <option value="ventas">Ventas · CRM de muestras I+D</option>
+      <option value="crm_admin">Administrador · CRM global</option>
       <option value="costos">Costos · Precios objetivo</option>
       <option value="seguridad">Seguridad · SHyMA</option>
       <option value="logistica">Logística · Manifiestos</option>
       <option value="almacen">Almacén · Manifiestos</option>
-      <option value="contaduria">Contaduría · Manifiestos</option>
+      <option value="contaduria">Contaduría · Matriz Legal y Manifiestos</option>
     </select>
 
     <label className="block text-sm font-medium text-slate-700 mb-1">

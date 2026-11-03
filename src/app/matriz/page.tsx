@@ -1,6 +1,6 @@
 'use client';
 
-import { API_URL, apiFetch as fetch } from '@/utils/api';
+import { API_URL, apiFetch as fetch, sesionActual } from '@/utils/api';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -242,7 +242,18 @@ function BadgeVariacion({
 
 function getSemaforoBadge(
   semaforo?: SemaforoTramite,
+  renovado = false,
 ) {
+  if (renovado) {
+    return (
+      <span
+        className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300"
+        title="Existe un registro posterior del mismo trámite en esta área."
+      >
+        🔵 Renovado
+      </span>
+    );
+  }
   switch (semaforo) {
     case 'rojo':
       return (
@@ -328,6 +339,45 @@ function grupoVencimiento(tramite: TramiteLegal): GrupoVencimiento {
   return 'vigente';
 }
 
+function fechaComparacion(fecha?: string | null): string | null {
+  const dia = /^(\d{4}-\d{2}-\d{2})/.exec(fecha ?? '')?.[1];
+  if (!dia) return null;
+  const fechaValidada = new Date(`${dia}T12:00:00Z`);
+  return Number.isFinite(fechaValidada.getTime()) &&
+    fechaValidada.toISOString().slice(0, 10) === dia
+    ? dia
+    : null;
+}
+
+function fechaEnVista(fecha?: string | null): string {
+  const dia = fechaComparacion(fecha);
+  if (!dia) return 'Sin fecha';
+  const [year, month, day] = dia.split('-');
+  return day + '/' + month + '/' + year;
+}
+
+/** Marca como renovados los registros anteriores del mismo elemento de catálogo.
+ * El catálogo ya identifica conjuntamente el trámite y su área; no agrega datos a la BD.
+ */
+function obtenerIdsTramitesRenovados(registros: TramiteLegal[]): Set<string> {
+  const fechaMasRecientePorCatalogo = new Map<number, string>();
+  for (const tramite of registros) {
+    if (!Number.isSafeInteger(tramite.idTramiteCatalogo) || tramite.idTramiteCatalogo <= 0) continue;
+    const fecha = fechaComparacion(tramite.fechaExpedicion);
+    if (!fecha) continue;
+    const actual = fechaMasRecientePorCatalogo.get(tramite.idTramiteCatalogo);
+    if (!actual || fecha > actual) fechaMasRecientePorCatalogo.set(tramite.idTramiteCatalogo, fecha);
+  }
+
+  const renovados = new Set<string>();
+  for (const tramite of registros) {
+    const fecha = fechaComparacion(tramite.fechaExpedicion);
+    const fechaMasReciente = fechaMasRecientePorCatalogo.get(tramite.idTramiteCatalogo);
+    if (fecha && fechaMasReciente && fecha < fechaMasReciente) renovados.add(tramite.id);
+  }
+  return renovados;
+}
+
 function agruparGastoPorAnio(registros: TramiteLegal[]) {
   const grupos = new Map<string, { anio: string; registros: TramiteLegal[]; centavos: number }>();
   for (const tramite of registros) {
@@ -350,6 +400,17 @@ function agruparGastoPorAnio(registros: TramiteLegal[]) {
 }
 
 export default function MatrizLegalPage() {
+  const [puedeAdministrar, setPuedeAdministrar] = useState(false);
+  useEffect(() => {
+    const sincronizarPermisos = () => setPuedeAdministrar(sesionActual()?.area === 'seguridad');
+    sincronizarPermisos();
+    window.addEventListener('sesion-cambiada', sincronizarPermisos);
+    window.addEventListener('storage', sincronizarPermisos);
+    return () => {
+      window.removeEventListener('sesion-cambiada', sincronizarPermisos);
+      window.removeEventListener('storage', sincronizarPermisos);
+    };
+  }, []);
   const [revision, setRevision] = useState(0);
   const [catalogoRevision, setCatalogoRevision] = useState(0);
   const socket = useSocket();
@@ -380,6 +441,8 @@ export default function MatrizLegalPage() {
     mostrarModal,
     setMostrarModal,
   ] = useState(false);
+  const [categoriaTramitesAbierta, setCategoriaTramitesAbierta] = useState<GrupoVencimiento | null>(null);
+  const [tramiteRenovando, setTramiteRenovando] = useState<TramiteLegal | null>(null);
 
   const [mostrarModalCatalogo, setMostrarModalCatalogo] = useState(false);
   const [nuevoCatalogo, setNuevoCatalogo] = useState({ idArea: 0, nombre: '' });
@@ -536,23 +599,36 @@ export default function MatrizLegalPage() {
     );
   }, [tramites, filtroArea, filtroTramite, aniosSeleccionados, busqueda]);
 
+  const idsRenovados = useMemo(() => obtenerIdsTramitesRenovados(tramites), [tramites]);
+  const tramitesNoRenovadosFiltrados = useMemo(
+    () => tramitesFiltrados.filter(tramite => !idsRenovados.has(tramite.id)),
+    [tramitesFiltrados, idsRenovados],
+  );
+  const cantidadRenovadosFiltrados = tramitesFiltrados.length - tramitesNoRenovadosFiltrados.length;
   const gruposAnuales = useMemo(() => agruparGastoPorAnio(tramitesFiltrados), [tramitesFiltrados]);
   const totalGasto = gruposAnuales.reduce((suma, grupo) => suma + grupo.centavos, 0) / 100;
   const datosAnuales = [...gruposAnuales].reverse().map(g => ({ anio: g.anio, gasto: g.gasto }));
   const resumenVencimiento = useMemo(() => {
     const conteos = new Map<GrupoVencimiento, number>(gruposVencimiento.map(grupo => [grupo.id, 0]));
-    for (const tramite of tramitesFiltrados) {
+    for (const tramite of tramitesNoRenovadosFiltrados) {
       const grupo = grupoVencimiento(tramite);
       conteos.set(grupo, (conteos.get(grupo) ?? 0) + 1);
     }
     return gruposVencimiento.map(grupo => ({
       ...grupo,
       cantidad: conteos.get(grupo.id) ?? 0,
-      porcentaje: tramitesFiltrados.length
-        ? ((conteos.get(grupo.id) ?? 0) / tramitesFiltrados.length) * 100
+      porcentaje: tramitesNoRenovadosFiltrados.length
+        ? ((conteos.get(grupo.id) ?? 0) / tramitesNoRenovadosFiltrados.length) * 100
         : 0,
     }));
-  }, [tramitesFiltrados]);
+  }, [tramitesNoRenovadosFiltrados]);
+  const tramitesCategoriaAbierta = useMemo(() => {
+    if (!categoriaTramitesAbierta) return [];
+    return tramitesNoRenovadosFiltrados
+      .filter(tramite => grupoVencimiento(tramite) === categoriaTramitesAbierta)
+      .sort((a, b) => (fechaComparacion(a.fechaVencimiento) ?? '9999-12-31')
+        .localeCompare(fechaComparacion(b.fechaVencimiento) ?? '9999-12-31'));
+  }, [categoriaTramitesAbierta, tramitesNoRenovadosFiltrados]);
   const resumenAreas = useMemo(() => {
     const areas = new Map<string, { area: string; centavos: number; cantidad: number }>();
     for (const tramite of tramitesFiltrados) {
@@ -932,6 +1008,7 @@ export default function MatrizLegalPage() {
           .toISOString()
           .split('T')[0];
 
+      setTramiteRenovando(null);
       setArchivoSeleccionado(
         null,
       );
@@ -974,6 +1051,37 @@ export default function MatrizLegalPage() {
         true,
       );
     };
+
+  const abrirFormularioRenovacion = (tramite: TramiteLegal) => {
+    const hoy = new Date().toISOString().split('T')[0];
+    const catalogo = catalogoTramites.find(
+      item => item.id_Tramite_Catalogo === tramite.idTramiteCatalogo,
+    );
+    const idArea = catalogo?.id_Area ?? areasDisponibles.find(
+      area => area.nombre_Area.trim().toLocaleLowerCase('es-MX') ===
+        tramite.areaRelacionada.trim().toLocaleLowerCase('es-MX'),
+    )?.id_Area ?? 0;
+
+    setTramiteRenovando(tramite);
+    setArchivoSeleccionado(null);
+    setForm({
+      idArea,
+      idTramiteCatalogo: tramite.idTramiteCatalogo,
+      nombreTramite: tramite.nombreTramite,
+      areaRelacionada: tramite.areaRelacionada,
+      duracion: 1,
+      costoVigencia: 0,
+      responsable: '',
+      proveedor: '',
+      estatus: 'VIGENTE',
+      fechaExpedicion: hoy,
+      fechaVencimiento: calcularFechaVencimiento(hoy, 1, 'anios'),
+      observaciones: '',
+      unidadDuracion: 'anios',
+    });
+    setCategoriaTramitesAbierta(null);
+    setMostrarModal(true);
+  };
 
   /* =======================================================
      CAMBIAR ÁREA
@@ -1471,6 +1579,7 @@ export default function MatrizLegalPage() {
         setMostrarModal(
           false,
         );
+        setTramiteRenovando(null);
 
         setArchivoSeleccionado(
           null,
@@ -1649,27 +1758,27 @@ export default function MatrizLegalPage() {
           <a href="/manifiestos" className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-50">
             Manifiestos
           </a>
-          <button
-            type="button"
-            onClick={() => {
-              setNuevoCatalogo({ idArea: 0, nombre: '' });
-              setCoincidenciasCatalogo([]);
-              setConfirmacionCatalogoPendiente(false);
-              setErrorCatalogo('');
-              setMostrarModalCatalogo(true);
-            }}
-            className="rounded-lg border border-blue-200 bg-white px-4 py-2 font-semibold text-blue-800 transition hover:bg-blue-50"
-          >
-            + Agregar al catálogo
-          </button>
-          <button
-            onClick={
-              abrirNuevoTramite
-            }
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
-          >
-            + Registrar Nuevo Trámite
-          </button>
+          {puedeAdministrar && <>
+            <button
+              type="button"
+              onClick={() => {
+                setNuevoCatalogo({ idArea: 0, nombre: '' });
+                setCoincidenciasCatalogo([]);
+                setConfirmacionCatalogoPendiente(false);
+                setErrorCatalogo('');
+                setMostrarModalCatalogo(true);
+              }}
+              className="rounded-lg border border-blue-200 bg-white px-4 py-2 font-semibold text-blue-800 transition hover:bg-blue-50"
+            >
+              + Agregar al catálogo
+            </button>
+            <button
+              onClick={abrirNuevoTramite}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
+            >
+              + Registrar Nuevo Trámite
+            </button>
+          </>}
         </div>
 
       </div>
@@ -1741,9 +1850,9 @@ export default function MatrizLegalPage() {
             <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
               <div>
                 <h2 className="font-bold text-slate-800">Estado de renovación</h2>
-                <p className="mt-1 text-xs text-slate-500">Distribución de los {tramitesFiltrados.length} trámites visibles según su fecha de vencimiento.</p>
+                <p className="mt-1 text-xs text-slate-500">Distribución de {tramitesNoRenovadosFiltrados.length} registros no sustituidos por una renovación.</p>
               </div>
-              <span className="text-sm font-semibold text-slate-700">{tramitesFiltrados.length ? '100%' : '0%'} del total filtrado</span>
+              <span className="text-sm font-semibold text-slate-700">{tramitesNoRenovadosFiltrados.length ? '100%' : '0%'} del total contabilizado</span>
             </div>
             <div
               role="img"
@@ -1759,6 +1868,11 @@ export default function MatrizLegalPage() {
                 />
               ))}
             </div>
+            {cantidadRenovadosFiltrados > 0 && (
+              <p role="note" className="mt-2 text-xs text-slate-500">
+                Se excluyen {cantidadRenovadosFiltrados} registro(s) renovado(s) de esta distribución; se conservan en el historial.
+              </p>
+            )}
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {resumenVencimiento.map(grupo => (
                 <div key={grupo.id} className="flex items-start gap-2 rounded-lg border border-slate-100 p-3">
@@ -1768,12 +1882,67 @@ export default function MatrizLegalPage() {
                     <p className="mt-1 text-sm font-bold text-slate-900">
                       {grupo.cantidad} · {grupo.porcentaje.toFixed(1)}%
                     </p>
+                    {grupo.id !== 'vigente' && (
+                      <button
+                        type="button"
+                        onClick={() => setCategoriaTramitesAbierta(grupo.id)}
+                        aria-label={'Ver trámites de ' + grupo.titulo}
+                        className="mt-2 text-xs font-semibold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
+                      >
+                        Ver trámites
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
             <p className="mt-3 text-[11px] text-slate-500">“Próximo” incluye los avisos urgentes y próximos del semáforo actual (hasta 60 días). El estado “EN RENOVACIÓN” sigue visible en cada registro; el indicador mide la vigencia por fecha.</p>
           </section>
+          {categoriaTramitesAbierta && (
+            <div className="fixed inset-0 z-[45] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+              <section role="dialog" aria-modal="true" aria-labelledby="titulo-tramites-categoria"
+                className="max-h-[82vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b pb-3">
+                  <div>
+                    <h2 id="titulo-tramites-categoria" className="text-lg font-bold text-slate-900">
+                      {gruposVencimiento.find(grupo => grupo.id === categoriaTramitesAbierta)?.titulo ?? 'Trámites'}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {tramitesCategoriaAbierta.length} trámite(s) dentro de los filtros actuales.
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setCategoriaTramitesAbierta(null)}
+                    aria-label="Cerrar lista de trámites"
+                    className="rounded border px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                    Cerrar
+                  </button>
+                </div>
+                {tramitesCategoriaAbierta.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-500">No hay trámites en esta categoría con los filtros seleccionados.</p>
+                ) : (
+                  <ul className="mt-4 space-y-3">
+                    {tramitesCategoriaAbierta.map(tramite => (
+                      <li key={tramite.id} className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
+                        <div className="min-w-0">
+                          <h3 className="break-words font-bold text-slate-900">{tramite.nombreTramite}</h3>
+                          <p className="mt-1 text-sm text-slate-600">Área: {nombreArea(tramite)}</p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            Vigencia: {fechaEnVista(tramite.fechaExpedicion)} al {fechaEnVista(tramite.fechaVencimiento)}
+                          </p>
+                        </div>
+                        {puedeAdministrar && (
+                          <button type="button" onClick={() => abrirFormularioRenovacion(tramite)}
+                            className="shrink-0 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">
+                            Renovar
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          )}
           <p className="mb-5 text-xs text-slate-600">
             Base: costo total por vigencia asignado al año de expedición, sin prorrateo. No representa pagos realizados.
             Los años en curso pueden tener información parcial. Todos los importes deben estar en la misma moneda.
@@ -1869,12 +2038,12 @@ export default function MatrizLegalPage() {
                         </tr></thead>
                         <tbody className="divide-y">
                           {grupo.registros.map(tramite => <tr key={tramite.id} className="hover:bg-slate-50">
-                            <td className="whitespace-nowrap p-3">{getSemaforoBadge(tramite.semaforo ?? calcularSemaforo(tramite.fechaVencimiento))}</td>
+                            <td className="whitespace-nowrap p-3">{getSemaforoBadge(tramite.semaforo ?? calcularSemaforo(tramite.fechaVencimiento), idsRenovados.has(tramite.id))}</td>
                             <td className="p-3 font-semibold">{nombreArea(tramite)}</td>
                             <td className="min-w-[170px] p-3 font-bold text-blue-900">{tramite.nombreTramite}</td>
                             <td className="whitespace-nowrap p-3 font-mono">{tramite.fechaExpedicion || 'Sin fecha'}</td>
                             <td className="whitespace-nowrap p-3 font-mono">{tramite.fechaVencimiento}</td>
-                            <td className="whitespace-nowrap p-3">{String(tramite.estatus).replace(/_/g, ' ')}</td>
+                            <td className="whitespace-nowrap p-3">{idsRenovados.has(tramite.id) ? 'RENOVADO' : String(tramite.estatus).replace(/_/g, ' ')}</td>
                             <td className="whitespace-nowrap p-3">{formatoImporte(tramite.costoVigencia)}</td>
                             <td className="p-3"><BadgeVariacion comparativa={analisisCostos.get(tramite.id)} /></td>
                             <td className="whitespace-nowrap p-3">{formatoImporte(tramite.costoPorAnio)}</td>
@@ -1893,11 +2062,11 @@ export default function MatrizLegalPage() {
                                       Ver PDF
                                     </button>
                                   )}
-                                  <button type="button" onClick={() => abrirEdicionDocumento(tramite)}
+                                  {puedeAdministrar && <button type="button" onClick={() => abrirEdicionDocumento(tramite)}
                                     aria-label={`${tramite.nombreArchivo ? 'Editar' : 'Adjuntar'} documento de ${tramite.nombreTramite}`}
                                     className="shrink-0 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100">
                                     {tramite.nombreArchivo ? 'Editar documento' : 'Adjuntar PDF'}
-                                  </button>
+                                  </button>}
                                 </div>
                               </div>
                             </td>
@@ -1929,12 +2098,13 @@ export default function MatrizLegalPage() {
               <div>
 
                 <h2 className="text-lg font-bold text-slate-800">
-                  Nuevo Trámite Legal
+                  {tramiteRenovando ? 'Renovar trámite legal' : 'Nuevo Trámite Legal'}
                 </h2>
 
                 <p className="text-[11px] text-slate-500 mt-1">
-                  El trámite se asociará automáticamente
-                  con el catálogo seleccionado.
+                  {tramiteRenovando
+                    ? <>Nombre y área precargados para renovar <strong>{tramiteRenovando.nombreTramite}</strong>. Completa manualmente los datos de la nueva vigencia y adjunta su documento.</>
+                    : <>El trámite se asociará automáticamente con el catálogo seleccionado.</>}
                 </p>
 
               </div>
@@ -1946,6 +2116,7 @@ export default function MatrizLegalPage() {
                     false,
                   );
 
+                  setTramiteRenovando(null);
                   setArchivoSeleccionado(
                     null,
                   );
@@ -1999,6 +2170,9 @@ export default function MatrizLegalPage() {
                       : 'Seleccione un área'}
                   </option>
 
+                  {form.idArea > 0 && !areasDisponibles.some(area => area.id_Area === form.idArea) && (
+                    <option value={form.idArea}>{form.areaRelacionada}</option>
+                  )}
                   {areasDisponibles.map(
                     (area) => (
 
@@ -2061,6 +2235,9 @@ export default function MatrizLegalPage() {
                         : 'Seleccione un trámite'}
                   </option>
 
+                  {form.idTramiteCatalogo > 0 && !tramitesDisponibles.some(tramite => tramite.id_Tramite_Catalogo === form.idTramiteCatalogo) && (
+                    <option value={form.idTramiteCatalogo}>{form.nombreTramite}</option>
+                  )}
                   {tramitesDisponibles.map(
                     (tramite) => (
 
@@ -2530,6 +2707,7 @@ export default function MatrizLegalPage() {
                       false,
                     );
 
+                    setTramiteRenovando(null);
                     setArchivoSeleccionado(
                       null,
                     );
