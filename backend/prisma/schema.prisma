@@ -824,6 +824,9 @@ model crm_perfiles_comerciales {
   puesto_contacto                 String?            @db.VarChar(120)
   correo                          String?            @db.VarChar(180)
   telefono                        String?            @db.VarChar(60)
+  origen_prospecto_tipo            crm_origen_prospecto_tipo?
+  origen_prospecto_detalle         String?            @db.VarChar(180)
+  /// Texto histórico compatible; los registros nuevos también se guardan en campos tipados.
   origen_prospecto                String?            @db.VarChar(120)
   fecha_alta_prospecto            DateTime           @default(now())
   fecha_primera_conversion        DateTime?
@@ -838,6 +841,7 @@ model crm_perfiles_comerciales {
 
   @@index([estado_comercial, activo], map: "idx_crm_perfil_estado")
   @@index([vendedor_responsable_id], map: "idx_crm_perfil_vendedor")
+  @@index([origen_prospecto_tipo, vendedor_responsable_id], map: "idx_crm_perfil_origen_vendedor")
   @@index([fecha_alta_prospecto], map: "idx_crm_perfil_alta")
 }
 
@@ -1256,6 +1260,12 @@ model id_viabilidades {
 enum crm_estado_persona {
   PROSPECTO
   CLIENTE
+}
+
+enum crm_origen_prospecto_tipo {
+  MARKETING_DIGITAL
+  EXPOSICION
+  REFERENCIA
 }
 
 enum crm_oportunidad_etapa {

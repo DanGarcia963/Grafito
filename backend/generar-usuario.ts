@@ -80,7 +80,39 @@ const usuarios: UsuarioConfig[] = [
 
 ];
 
-const cuentas = usuarios.map(({ usuario, password, areas, personaId }) => {
+// El administrador CRM se agrega al JSON generado cuando se definen estos datos
+// en el entorno local. No se guardan credenciales reales en el repositorio.
+const adminUsuario = process.env.CRM_ADMIN_USUARIO?.trim();
+const adminPassword = process.env.CRM_ADMIN_PASSWORD;
+const adminPersonaIdRaw = process.env.CRM_ADMIN_PERSONA_ID;
+const adminConfigPresente = Boolean(adminUsuario || adminPassword || adminPersonaIdRaw);
+const usuariosFinales = [...usuarios];
+
+if (adminConfigPresente) {
+  const adminPersonaId = Number(adminPersonaIdRaw);
+  if (
+    !adminUsuario ||
+    !adminPassword ||
+    !Number.isSafeInteger(adminPersonaId) ||
+    adminPersonaId <= 0
+  ) {
+    throw new Error(
+      'Para generar Administrador CRM define CRM_ADMIN_USUARIO, CRM_ADMIN_PASSWORD y CRM_ADMIN_PERSONA_ID.',
+    );
+  }
+  if (adminPassword.length < 12)
+    throw new Error('La contraseña del administrador CRM debe tener al menos 12 caracteres.');
+  if (usuarios.some((u) => u.usuario.toLowerCase() === adminUsuario.toLowerCase()))
+    throw new Error('El usuario administrador CRM ya está definido en la lista.');
+  usuariosFinales.push({
+    usuario: adminUsuario,
+    password: adminPassword,
+    areas: ['crm_admin'],
+    personaId: adminPersonaId,
+  });
+}
+
+const cuentas = usuariosFinales.map(({ usuario, password, areas, personaId }) => {
   const salt = randomBytes(16).toString('hex');
 
   const hash = scryptSync(password, salt, 64).toString('hex');
@@ -96,7 +128,7 @@ const cuentas = usuarios.map(({ usuario, password, areas, personaId }) => {
 
 console.log('\n=== USUARIOS ===\n');
 
-for (const usuario of usuarios) {
+for (const usuario of usuariosFinales) {
   console.log(
     `${usuario.usuario} -> contraseña: ${usuario.password}`
   );
