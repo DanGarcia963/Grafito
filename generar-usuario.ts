@@ -74,26 +74,72 @@ const adminUsuario = process.env.CRM_ADMIN_USUARIO?.trim();
 const adminPassword = process.env.CRM_ADMIN_PASSWORD;
 const adminPersonaIdRaw = process.env.CRM_ADMIN_PERSONA_ID;
 const adminConfigPresente = Boolean(adminUsuario || adminPassword || adminPersonaIdRaw);
-const usuariosPasswordJson = process.env.UST_USUARIOS_PASSWORDS_JSON;
-if (!usuariosPasswordJson)
-  throw new Error(
-    'Define UST_USUARIOS_PASSWORDS_JSON como un objeto JSON con las contraseñas por usuario.',
-  );
-let passwords: Record<string, unknown>;
-try {
-  const parsed = JSON.parse(usuariosPasswordJson);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-  passwords = parsed as Record<string, unknown>;
-} catch {
-  throw new Error('UST_USUARIOS_PASSWORDS_JSON debe ser un objeto JSON válido.');
+type CuentaGenerada = {
+  usuario: string;
+  areas: string[];
+  personaId: number;
+  salt: string;
+  hash: string;
+};
+const cuentaConPassword = ({ usuario, password, areas, personaId }: UsuarioConfig): CuentaGenerada => {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
+  return { usuario, areas, personaId, salt, hash };
+};
+
+// Para agregar el admin a las cuentas ya configuradas, se puede pasar el JSON
+// actual de Railway y conservar sus hashes sin conocer ni regenerar contraseñas.
+const baseJson = process.env.UST_USUARIOS_BASE_JSON;
+let cuentas: CuentaGenerada[];
+if (baseJson) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(baseJson);
+  } catch {
+    throw new Error('UST_USUARIOS_BASE_JSON debe contener un JSON válido.');
+  }
+  if (!Array.isArray(parsed))
+    throw new Error('UST_USUARIOS_BASE_JSON debe ser un arreglo de cuentas.');
+  cuentas = parsed.map((cuenta: any) => {
+    if (
+      typeof cuenta?.usuario !== 'string' ||
+      !Array.isArray(cuenta.areas) ||
+      !cuenta.areas.every((area: unknown) => typeof area === 'string') ||
+      !Number.isSafeInteger(cuenta.personaId) ||
+      cuenta.personaId <= 0 ||
+      typeof cuenta.salt !== 'string' ||
+      typeof cuenta.hash !== 'string'
+    )
+      throw new Error('UST_USUARIOS_BASE_JSON contiene una cuenta inválida.');
+    return {
+      usuario: cuenta.usuario,
+      areas: cuenta.areas,
+      personaId: cuenta.personaId,
+      salt: cuenta.salt,
+      hash: cuenta.hash,
+    };
+  });
+} else {
+  const usuariosPasswordJson = process.env.UST_USUARIOS_PASSWORDS_JSON;
+  if (!usuariosPasswordJson)
+    throw new Error(
+      'Define UST_USUARIOS_BASE_JSON o UST_USUARIOS_PASSWORDS_JSON para las cuentas existentes.',
+    );
+  let passwords: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(usuariosPasswordJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+    passwords = parsed as Record<string, unknown>;
+  } catch {
+    throw new Error('UST_USUARIOS_PASSWORDS_JSON debe ser un objeto JSON válido.');
+  }
+  cuentas = usuarios.map((usuario) => {
+    const password = passwords[usuario.usuario];
+    if (typeof password !== 'string' || password.length === 0)
+      throw new Error(`Falta la contraseña local para ${usuario.usuario}.`);
+    return cuentaConPassword({ ...usuario, password });
+  });
 }
-const usuariosConPassword: UsuarioConfig[] = usuarios.map((usuario) => {
-  const password = passwords[usuario.usuario];
-  if (typeof password !== 'string' || password.length === 0)
-    throw new Error(`Falta la contraseña local para ${usuario.usuario}.`);
-  return { ...usuario, password };
-});
-const usuariosFinales = [...usuariosConPassword];
 
 if (adminConfigPresente) {
   const adminPersonaId = Number(adminPersonaIdRaw);
@@ -109,35 +155,23 @@ if (adminConfigPresente) {
   }
   if (adminPassword.length < 12)
     throw new Error('La contraseña del administrador CRM debe tener al menos 12 caracteres.');
-  if (usuarios.some((u) => u.usuario.toLowerCase() === adminUsuario.toLowerCase()))
+  if (cuentas.some((u) => u.usuario.toLowerCase() === adminUsuario.toLowerCase()))
     throw new Error('El usuario administrador CRM ya está definido en la lista.');
-  usuariosFinales.push({
-    usuario: adminUsuario,
-    password: adminPassword,
-    areas: ['crm_admin'],
-    personaId: adminPersonaId,
-  });
+  cuentas.push(
+    cuentaConPassword({
+      usuario: adminUsuario,
+      password: adminPassword,
+      areas: ['crm_admin'],
+      personaId: adminPersonaId,
+    }),
+  );
 }
-
-const cuentas = usuariosFinales.map(({ usuario, password, areas, personaId }) => {
-  const salt = randomBytes(16).toString('hex');
-
-  const hash = scryptSync(password, salt, 64).toString('hex');
-
-  return {
-    usuario,
-    areas,
-    personaId,
-    salt,
-    hash,
-  };
-});
 
 console.log('\n=== USUARIOS ===\n');
 
-for (const usuario of usuariosFinales) {
+for (const usuario of cuentas) {
   console.log(
-    `${usuario.usuario} -> áreas: ${usuario.areas.join(', ')}`
+    `${usuario.usuario} -> áreas: ${usuario.areas.join(', ')}`,
   );
 }
 
