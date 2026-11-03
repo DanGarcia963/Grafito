@@ -824,6 +824,9 @@ model crm_perfiles_comerciales {
   puesto_contacto                 String?            @db.VarChar(120)
   correo                          String?            @db.VarChar(180)
   telefono                        String?            @db.VarChar(60)
+  origen_prospecto_tipo            crm_origen_prospecto_tipo?
+  origen_prospecto_detalle         String?            @db.VarChar(180)
+  /// Texto histórico compatible; los registros nuevos también se guardan en campos tipados.
   origen_prospecto                String?            @db.VarChar(120)
   fecha_alta_prospecto            DateTime           @default(now())
   fecha_primera_conversion        DateTime?
@@ -838,6 +841,7 @@ model crm_perfiles_comerciales {
 
   @@index([estado_comercial, activo], map: "idx_crm_perfil_estado")
   @@index([vendedor_responsable_id], map: "idx_crm_perfil_vendedor")
+  @@index([origen_prospecto_tipo, vendedor_responsable_id], map: "idx_crm_perfil_origen_vendedor")
   @@index([fecha_alta_prospecto], map: "idx_crm_perfil_alta")
 }
 
@@ -851,6 +855,7 @@ model crm_oportunidades {
   necesidad                  String?                     @db.Text
   cantidad_estimada          Decimal?                    @db.Decimal(14, 4)
   unidad                     String?                     @db.VarChar(30)
+  prioridad                  crm_oportunidad_prioridad   @default(MEDIA)
   etapa                      crm_oportunidad_etapa       @default(REGISTRADA)
   estado_tecnico             crm_oportunidad_estado_id   @default(PENDIENTE)
   fecha_apertura             DateTime                    @default(now())
@@ -1257,6 +1262,12 @@ enum crm_estado_persona {
   CLIENTE
 }
 
+enum crm_origen_prospecto_tipo {
+  MARKETING_DIGITAL
+  EXPOSICION
+  REFERENCIA
+}
+
 enum crm_oportunidad_etapa {
   REGISTRADA
   RECOLECCION_AGENDADA
@@ -1267,6 +1278,13 @@ enum crm_oportunidad_etapa {
   GANADA
   PERDIDA
   CANCELADA
+}
+
+enum crm_oportunidad_prioridad {
+  BAJA
+  MEDIA
+  ALTA
+  URGENTE
 }
 
 enum crm_oportunidad_estado_id {
