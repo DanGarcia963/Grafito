@@ -7,6 +7,7 @@ import { productos_materiales_UM, crm_tipo_venta } from '@prisma/client';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -20,6 +21,8 @@ import {
   crm_tipo_contacto,
   crm_documento_cliente_tipo,
   crm_pedido_preparacion_estado,
+  crm_oportunidad_prioridad,
+  crm_origen_prospecto_tipo,
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EventsGateway } from '../events.gateway';
@@ -38,9 +41,45 @@ import {
   versionValida,
 } from './crm.workflow';
 import { calcularCumplimientoOV } from './crm.fulfillment';
+import { etiquetaOrigenProspecto, etapaProspeccion } from './crm.admin.logic';
 type Archivo = Parameters<typeof fichaValida>[0];
 const opc = (v: unknown, max = 4000) =>
   v == null || v === '' ? null : texto(v, max);
+function prioridadCrm(value: unknown): crm_oportunidad_prioridad {
+  const prioridad = String(value ?? 'MEDIA').trim().toUpperCase();
+  if (!Object.values(crm_oportunidad_prioridad).includes(prioridad as crm_oportunidad_prioridad))
+    throw new BadRequestException('Prioridad de oportunidad inválida.');
+  return prioridad as crm_oportunidad_prioridad;
+}
+function datosOrigenProspecto(body: any, requerido: boolean) {
+  const valor = String(body?.origen_prospecto_tipo ?? '').trim().toUpperCase();
+  if (!valor) {
+    if (requerido)
+      throw new BadRequestException('Selecciona el origen del prospecto.');
+    return null;
+  }
+  if (!Object.values(crm_origen_prospecto_tipo).includes(valor as crm_origen_prospecto_tipo))
+    throw new BadRequestException('Origen de prospecto inválido.');
+  const tipo = valor as crm_origen_prospecto_tipo;
+  const detalle = opc(body.origen_prospecto_detalle, 180);
+  if (tipo !== 'MARKETING_DIGITAL' && !detalle)
+    throw new BadRequestException(
+      tipo === 'EXPOSICION'
+        ? 'Indica a cuál exposición asistió el prospecto.'
+        : 'Indica quién refirió al prospecto.',
+    );
+  const origen_prospecto =
+    tipo === 'MARKETING_DIGITAL'
+      ? 'Marketing Digital'
+      : tipo === 'EXPOSICION'
+        ? 'Exposición'
+        : 'Referencia';
+  return {
+    origen_prospecto_tipo: tipo,
+    origen_prospecto_detalle: tipo === 'MARKETING_DIGITAL' ? null : detalle,
+    origen_prospecto,
+  };
+}
 const sinArchivo = { contenido: true } as const;
 type ArchivoCuenta = { buffer: Buffer; originalname: string; size: number; mimetype?: string };
 const correoValido = (value: unknown): value is string =>
@@ -84,7 +123,21 @@ function origenFrontend(): string {
   }
 }
 const incluir = {
-  cliente: { select: { id_Persona: true, nombre: true } },
+  cliente: {
+    select: {
+      id_Persona: true,
+      nombre: true,
+      crm_perfil_comercial: {
+        select: {
+          origen_prospecto_tipo: true,
+          origen_prospecto_detalle: true,
+          origen_prospecto: true,
+          vendedor_responsable: { select: { id_Persona: true, nombre: true } },
+        },
+      },
+    },
+  },
+  vendedor: { select: { id_Persona: true, nombre: true } },
   producto: { select: { id_Produc_Mater: true, nombre_Producto: true } },
   _count: { select: { muestras: true } },
   orden_venta: true,
@@ -305,12 +358,128 @@ export class CrmService {
         id_Persona: true,
         nombre: true,
         tipo_persona: true,
-        crm_perfil_comercial: true,
+        crm_perfil_comercial: {
+          include: {
+            vendedor_responsable: {
+              select: { id_Persona: true, nombre: true },
+            },
+          },
+        },
       },
       orderBy: { nombre: 'asc' },
       take: 100,
     });
     return { success: true, data };
+  }
+  async dashboardProspeccion(u: Usuario) {
+    if (u.area !== 'crm_admin')
+      throw new ForbiddenException(
+        'Dashboard disponible solo para administrador CRM.',
+      );
+    const [perfiles, oportunidades] = await Promise.all([
+      this.prisma.crm_perfiles_comerciales.findMany({
+        include: {
+          persona: {
+            select: { id_Persona: true, nombre: true, tipo_persona: true },
+          },
+          vendedor_responsable: {
+            select: { id_Persona: true, nombre: true },
+          },
+        },
+        orderBy: [{ fecha_alta_prospecto: 'desc' }, { persona_id: 'asc' }],
+      }),
+      this.prisma.crm_oportunidades.findMany({
+        select: {
+          persona_id: true,
+          etapa: true,
+          fecha_recoleccion_agendada: true,
+          historial: {
+            select: {
+              accion: true,
+              etapa_nueva: true,
+              fecha_contacto: true,
+            },
+          },
+        },
+      }),
+    ]);
+    const oportunidadesPorPersona = new Map<number, typeof oportunidades>();
+    for (const oportunidad of oportunidades) {
+      const previas = oportunidadesPorPersona.get(oportunidad.persona_id) ?? [];
+      previas.push(oportunidad);
+      oportunidadesPorPersona.set(oportunidad.persona_id, previas);
+    }
+    const registros = perfiles.map((perfil) => {
+      const ops = oportunidadesPorPersona.get(perfil.persona_id) ?? [];
+      return {
+        persona_id: perfil.persona_id,
+        nombre: perfil.persona.nombre,
+        tipo_persona: perfil.persona.tipo_persona,
+        estado_comercial: perfil.estado_comercial,
+        activo: perfil.activo,
+        vendedor_id: perfil.vendedor_responsable_id,
+        vendedor: perfil.vendedor_responsable?.nombre ?? 'Sin vendedor asignado',
+        origen_tipo: perfil.origen_prospecto_tipo,
+        origen_detalle: perfil.origen_prospecto_detalle,
+        origen: etiquetaOrigenProspecto(
+          perfil.origen_prospecto_tipo,
+          perfil.origen_prospecto_detalle,
+          perfil.origen_prospecto,
+        ),
+        etapa: etapaProspeccion(ops),
+        fecha_alta: perfil.fecha_alta_prospecto,
+        oportunidades: ops.length,
+      };
+    });
+    const conteoEtapas = () => ({ REGISTRADA: 0, CONTACTADO: 0, CITA: 0, total: 0 });
+    const porOrigen = new Map<
+      string,
+      ReturnType<typeof conteoEtapas> & { origen: string }
+    >();
+    const porVendedor = new Map<
+      number,
+      ReturnType<typeof conteoEtapas> & {
+        vendedor_id: number | null;
+        vendedor: string;
+      }
+    >();
+    const etapas = conteoEtapas();
+    for (const registro of registros) {
+      etapas[registro.etapa]++;
+      etapas.total++;
+      const origen = porOrigen.get(registro.origen) ?? {
+        ...conteoEtapas(),
+        origen: registro.origen,
+      };
+      origen[registro.etapa]++;
+      origen.total++;
+      porOrigen.set(registro.origen, origen);
+      const vendedorId = registro.vendedor_id;
+      const vendedor = porVendedor.get(vendedorId ?? 0) ?? {
+        ...conteoEtapas(),
+        vendedor_id: vendedorId,
+        vendedor: registro.vendedor,
+      };
+      vendedor[registro.etapa]++;
+      vendedor.total++;
+      porVendedor.set(vendedorId ?? 0, vendedor);
+    }
+    return {
+      success: true,
+      data: {
+        total: registros.length,
+        etapas,
+        por_origen: [...porOrigen.values()].sort(
+          (a, b) =>
+            b.total - a.total || a.origen.localeCompare(b.origen, 'es'),
+        ),
+        por_vendedor: [...porVendedor.values()].sort(
+          (a, b) =>
+            b.total - a.total || a.vendedor.localeCompare(b.vendedor, 'es'),
+        ),
+        registros,
+      },
+    };
   }
   async guardarCuenta(body: any, u: Usuario) {
     const data = await this.prisma.$transaction(async (tx) => {
@@ -368,12 +537,16 @@ export class CrmService {
       const frecuencia = body.frecuencia_esperada_dias
         ? idValido(body.frecuencia_esperada_dias)
         : null;
+      const origen = datosOrigenProspecto(body, !anterior);
+      const actualizaOrigen =
+        body.origen_prospecto_tipo !== undefined &&
+        body.origen_prospecto_tipo !== null &&
+        body.origen_prospecto_tipo !== '';
       const campos = {
         nombre_contacto: opc(body.nombre_contacto, 150),
         puesto_contacto: opc(body.puesto_contacto, 120),
         correo: opc(body.correo, 180),
         telefono: opc(body.telefono, 60),
-        origen_prospecto: opc(body.origen_prospecto, 120),
         frecuencia_esperada_dias: frecuencia,
         frecuencia_esperada_descripcion: opc(
           body.frecuencia_esperada_descripcion,
@@ -385,6 +558,7 @@ export class CrmService {
         where: { persona_id: p.id_Persona },
         create: {
           ...campos,
+          ...origen!,
           persona_id: p.id_Persona,
           vendedor_responsable_id: u.personaId,
           estado_comercial:
@@ -396,6 +570,7 @@ export class CrmService {
           ...Object.fromEntries(
             Object.entries(campos).filter(([key]) => body[key] !== undefined),
           ),
+          ...(actualizaOrigen ? origen! : {}),
           ...(anterior?.vendedor_responsable_id == null
             ? { vendedor_responsable_id: u.personaId }
             : {}),
@@ -407,7 +582,15 @@ export class CrmService {
   async cuenta(id: number, u: Usuario) {
     const persona = await this.prisma.personas.findFirst({
       where: { id_Persona: id, ...this.cuentaScope(u) },
-      include: { crm_perfil_comercial: true },
+      include: {
+        crm_perfil_comercial: {
+          include: {
+            vendedor_responsable: {
+              select: { id_Persona: true, nombre: true },
+            },
+          },
+        },
+      },
     });
     if (!persona) throw new NotFoundException('Cuenta no encontrada');
     const documentos = await this.prisma.crm_documentos_cliente.findMany({
@@ -427,6 +610,8 @@ export class CrmService {
     const ordenes = await this.prisma.crm_ordenes_venta.findMany({
       where: { persona_id: id, ...this.scope(u) },
       include: {
+        producto: { select: { nombre_Producto: true } },
+        vendedor: { select: { id_Persona: true, nombre: true } },
         produccion_asignada: { include: { orden_produccion: true } },
         pedido_preparacion_detalle: {
           include: { pedido: { select: { id: true, folio: true, estado: true } } },
@@ -858,6 +1043,7 @@ export class CrmService {
           vendedor_id: u.personaId,
           producto_id: origen.producto_id,
           titulo: texto(b.titulo || `Recompra · ${origen.producto.nombre_Producto}`, 180),
+          prioridad: prioridadCrm(b.prioridad),
           necesidad: opc(b.necesidad),
           cantidad_estimada: decimalCrm(b.cantidad_estimada, 4),
           unidad: origen.unidad,
@@ -999,6 +1185,10 @@ export class CrmService {
         throw new BadRequestException('Selecciona una cuenta comercial');
       if (p.crm_perfil_comercial && !p.crm_perfil_comercial.activo)
         throw new BadRequestException('Cuenta inactiva');
+      if (!p.crm_perfil_comercial)
+        throw new BadRequestException(
+          'Registra primero el perfil del prospecto y clasifica su origen desde “Prospectos y clientes”.',
+        );
       await this.validarAsignacionCuenta(
         tx,
         persona_id,
@@ -1023,6 +1213,7 @@ export class CrmService {
           persona_id,
           vendedor_id: u.personaId,
           titulo: texto(body.titulo, 180),
+          prioridad: prioridadCrm(body.prioridad),
           necesidad: opc(body.necesidad),
           producto_id: body.producto_id ? idValido(body.producto_id) : null,
           cantidad_estimada: body.cantidad_estimada
@@ -2015,6 +2206,7 @@ export class CrmService {
       where: this.scope(u),
       include: {
         cliente: { select: { nombre: true } },
+        vendedor: { select: { id_Persona: true, nombre: true } },
         producto: {
           select: {
             nombre_Producto: true,
@@ -2291,7 +2483,10 @@ export class CrmService {
     const [ops, perfiles, ordenes] = await Promise.all([
       this.prisma.crm_oportunidades.findMany({ where: this.scope(u) }),
       this.prisma.crm_perfiles_comerciales.findMany({
-        where: { vendedor_responsable_id: u.personaId },
+        where:
+          u.area === 'ventas'
+            ? { vendedor_responsable_id: u.personaId }
+            : {},
       }),
       this.prisma.crm_ordenes_venta.findMany({
         where: {

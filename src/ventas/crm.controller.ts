@@ -26,12 +26,14 @@ const archivo = () =>
 @Areas('ventas')
 export class CrmController {
   constructor(private crm: CrmService) {}
+  @Areas('ventas', 'crm_admin')
   @Get('cuentas') cuentas(@Req() r: any, @Query('q') q: string) {
     return this.crm.cuentas(r.usuario, q);
   }
   @Post('cuentas') guardarCuenta(@Req() r: any, @Body() b: any) {
     return this.crm.guardarCuenta(b, r.usuario);
   }
+  @Areas('ventas', 'crm_admin')
   @Get('cuentas/:id') cuenta(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,
@@ -89,6 +91,7 @@ export class CrmController {
   ) {
     return this.crm.subirDocumentoCuenta(id, b.tipo_documento, f, r.usuario);
   }
+  @Areas('ventas', 'crm_admin')
   @Get('documentos-cuenta/:id') async documentoCuenta(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,
@@ -101,10 +104,15 @@ export class CrmController {
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.nombre_archivo)}`);
     res.send(Buffer.from(f.contenido));
   }
+  @Areas('ventas', 'crm_admin')
   @Get('metricas') metricas(@Req() r: any, @Query() q: any) {
     return this.crm.metricas(r.usuario, q);
   }
-  @Areas('ventas', 'id')
+  @Areas('crm_admin')
+  @Get('admin/prospeccion') dashboardProspeccion(@Req() r: any) {
+    return this.crm.dashboardProspeccion(r.usuario);
+  }
+  @Areas('ventas', 'id', 'crm_admin')
   @Get('oportunidades')
   @Header('Cache-Control', 'private, no-store')
   listar(@Req() r: any, @Query() q: any) {
@@ -113,7 +121,7 @@ export class CrmController {
   @Post('oportunidades') crear(@Req() r: any, @Body() b: any) {
     return this.crm.crear(b, r.usuario);
   }
-  @Areas('ventas', 'id')
+  @Areas('ventas', 'id', 'crm_admin')
   @Get('oportunidades/:id')
   @Header('Cache-Control', 'private, no-store')
   detalle(@Param('id', ParseIntPipe) id: number, @Req() r: any) {
@@ -194,6 +202,7 @@ export class CrmController {
   ) {
     return this.crm.confirmar(id, b, r.usuario);
   }
+  @Areas('ventas', 'crm_admin')
   @Get('ordenes') ordenes(@Req() r: any) {
     return this.crm.ordenes(r.usuario);
   }
@@ -204,6 +213,7 @@ export class CrmController {
   ) {
     return this.crm.confirmarOrdenVenta(id, b, r.usuario);
   }
+  @Areas('ventas', 'crm_admin')
   @Get('ordenes/:id/materiales') materiales(
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,
@@ -224,7 +234,7 @@ export class CrmController {
   ) {
     return this.crm.cancelarOrden(id, b, r.usuario);
   }
-  @Areas('ventas', 'id') @Get('documentos/:tipo/:id') async documento(
+  @Areas('ventas', 'id', 'crm_admin') @Get('documentos/:tipo/:id') async documento(
     @Param('tipo') tipo: string,
     @Param('id', ParseIntPipe) id: number,
     @Req() r: any,

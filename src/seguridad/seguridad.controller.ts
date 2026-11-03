@@ -49,12 +49,14 @@ export class SeguridadController {
      /api/seguridad/catalogo-tramites
   ===================================================== */
 
+  @Areas('seguridad', 'contaduria')
   @Get('catalogo-tramites')
   async obtenerCatalogoTramites() {
     return this.seguridadService
       .obtenerCatalogoTramites();
   }
 
+  @Areas('seguridad', 'contaduria')
   @Get('areas-legales')
   async obtenerAreasLegales() {
     return this.seguridadService.obtenerAreasLegales();
@@ -74,6 +76,7 @@ export class SeguridadController {
      /api/seguridad/tramites
   ===================================================== */
 
+  @Areas('seguridad', 'contaduria')
   @Get('tramites')
   async obtenerTramites() {
     return this.seguridadService
@@ -87,6 +90,7 @@ export class SeguridadController {
      /api/seguridad/tramites/:id
   ===================================================== */
 
+  @Areas('seguridad', 'contaduria')
   @Get('tramites/:id')
   async obtenerTramitePorId(
     @Param(
@@ -100,6 +104,7 @@ export class SeguridadController {
   }
 
   /* PDF asociado al trámite: devuelve bytes, no JSON. */
+  @Areas('seguridad', 'contaduria')
   @Get('tramites/:id/documento')
   @Header('Cache-Control', 'private, no-store')
   @Header('X-Content-Type-Options', 'nosniff')
