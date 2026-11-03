@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { pedir } from '@/utils/api';
 
-type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria';
+type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'crm_admin' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria';
 
 export default function LoginPage() {
 const [area, setArea] = useState<Area>('produccion');
@@ -25,7 +25,7 @@ try {
   throw new Error('El servidor no devolvió un token de sesión. Revisa la respuesta de /api/auth/login.');
  }
  localStorage.setItem('sesion',JSON.stringify(sesion));window.dispatchEvent(new Event('sesion-cambiada'));
- router.push(area === 'seguridad' || area === 'contaduria' ? '/matriz' : area === 'calidad' ? '/calidad' : area === 'produccion' ? '/tanques' : area === 'ventas' ? '/ventas-muestras' : area === 'costos' ? '/costos' : area === 'logistica' || area === 'almacen' ? '/manifiestos' : '/investigacion');
+ router.push(area === 'seguridad' || area === 'contaduria' ? '/matriz' : area === 'calidad' ? '/calidad' : area === 'produccion' ? '/tanques' : area === 'ventas' || area === 'crm_admin' ? '/ventas-muestras' : area === 'costos' ? '/costos' : area === 'logistica' || area === 'almacen' ? '/manifiestos' : '/investigacion');
 } catch(e){setError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
 
 };
@@ -52,6 +52,7 @@ US Technologies </h1>
       <option value="calidad">Muestras · Calidad</option>
       <option value="id">I+D · Análisis de muestras</option>
       <option value="ventas">Ventas · CRM de muestras I+D</option>
+      <option value="crm_admin">Administrador · CRM global</option>
       <option value="costos">Costos · Precios objetivo</option>
       <option value="seguridad">Seguridad · SHyMA</option>
       <option value="logistica">Logística · Manifiestos</option>
