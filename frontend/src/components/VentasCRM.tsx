@@ -9,6 +9,7 @@ import { API_URL, apiFetch, pedir, sesionActual } from "@/utils/api";
 import { useSocket } from "@/context/SocketContext";
 import MuestrasID from "./MuestrasID";
 import { descargarCrm } from "./CrmReportes";
+import VentasCRMAdmin from "./VentasCRMAdmin";
 import s from "./VentasCRM.module.css";
 const base = "/api/ventas/crm",
   etapas = [
@@ -24,6 +25,14 @@ const base = "/api/ventas/crm",
   ];
 const nombre = (x: string) => x.replaceAll("_", " "),
   fecha = (x: string | null) => (x ? new Date(x).toLocaleString("es-MX") : "—");
+const etiquetaOrigenCuenta = (perfil: any) => {
+  if (perfil?.origen_prospecto_tipo === "MARKETING_DIGITAL") return "Marketing Digital";
+  if (perfil?.origen_prospecto_tipo === "EXPOSICION")
+    return `Exposición${perfil.origen_prospecto_detalle ? ` · ${perfil.origen_prospecto_detalle}` : ""}`;
+  if (perfil?.origen_prospecto_tipo === "REFERENCIA")
+    return `Referencia${perfil.origen_prospecto_detalle ? ` · ${perfil.origen_prospecto_detalle}` : ""}`;
+  return perfil?.origen_prospecto ?? "Sin clasificar";
+};
 const opcionesPrioridad = [
   { value: "BAJA", label: "Baja" },
   { value: "MEDIA", label: "Media" },
@@ -292,6 +301,50 @@ function Form({
     </FloatingModal>
   );
 }
+
+function OrigenProspectoFields({
+  initialType,
+  initialDetail,
+  required,
+}: {
+  initialType?: string | null;
+  initialDetail?: string | null;
+  required: boolean;
+}) {
+  const [tipo, setTipo] = useState(initialType ?? "");
+  const necesitaDetalle = tipo === "EXPOSICION" || tipo === "REFERENCIA";
+  return (
+    <>
+      <label>
+        Origen del prospecto
+        <select
+          name="origen_prospecto_tipo"
+          value={tipo}
+          required={required}
+          onChange={(event) => setTipo(event.target.value)}
+        >
+          <option value="">Selecciona el origen</option>
+          <option value="MARKETING_DIGITAL">Marketing Digital</option>
+          <option value="EXPOSICION">Exposición</option>
+          <option value="REFERENCIA">Referencia</option>
+        </select>
+      </label>
+      {necesitaDetalle && (
+        <label>
+          {tipo === "EXPOSICION" ? "¿Cuál exposición?" : "¿Quién lo refirió?"}
+          <input
+            name="origen_prospecto_detalle"
+            type="text"
+            required
+            maxLength={180}
+            defaultValue={initialDetail ?? ""}
+            placeholder={tipo === "EXPOSICION" ? "Nombre de la exposición" : "Nombre de la persona o empresa"}
+          />
+        </label>
+      )}
+    </>
+  );
+}
 export default function VentasCRM() {
   const router = useRouter(),
     socket = useSocket();
@@ -330,7 +383,7 @@ export default function VentasCRM() {
     [productoQ, setProductoQ] = useState("");
   useEffect(() => {
     const u = sesionActual();
-    if (u?.area !== "ventas" || !u.token) {
+    if (!['ventas', 'crm_admin'].includes(u?.area ?? '') || !u.token) {
       router.replace("/");
       return;
     }
@@ -357,7 +410,8 @@ export default function VentasCRM() {
     setMetricas(m.data);
   }, [q, etapa, desde, hasta, pagina]);
   useEffect(() => {
-    if (user) void cargar().catch((e) => setError(e.message));
+    if (user?.area === "ventas")
+      void cargar().catch((e) => setError(e.message));
   }, [user, cargar]);
   useEffect(() => {
     const f = () => void cargar().catch((e) => setError(e.message));
@@ -369,11 +423,11 @@ export default function VentasCRM() {
       "TANQUE_ACTUALIZADO",
       "ESTATUS_TANQUE_CAMBIADO",
     ];
-    eventos.forEach((evento) => socket?.on(evento, f));
+    if (user?.area === "ventas") eventos.forEach((evento) => socket?.on(evento, f));
     return () => {
-      eventos.forEach((evento) => socket?.off(evento, f));
+      if (user?.area === "ventas") eventos.forEach((evento) => socket?.off(evento, f));
     };
-  }, [socket, cargar]);
+  }, [socket, cargar, user?.area]);
   const abrir = async (id: number) => {
     const r = await pedir(`${base}/oportunidades/${id}`, undefined, "GET");
     setDetalle(r.data);
@@ -494,7 +548,6 @@ export default function VentasCRM() {
         "puesto_contacto",
         "correo",
         "telefono",
-        "origen_prospecto",
         "frecuencia_esperada_dias",
         "frecuencia_esperada_descripcion",
         "observaciones",
@@ -813,6 +866,7 @@ export default function VentasCRM() {
       setForm("");
     });
   if (!user) return <p className="p-6">Verificando sesión…</p>;
+  if (user.area === "crm_admin") return <VentasCRMAdmin user={user} />;
   const abierta =
     detalle && !["GANADA", "PERDIDA", "CANCELADA"].includes(detalle.etapa);
   const analisisReutilizado = Boolean(
@@ -1004,7 +1058,7 @@ export default function VentasCRM() {
                 </span>
                 <small>
                   {c.crm_perfil_comercial?.nombre_contacto} ·{" "}
-                  {c.crm_perfil_comercial?.correo}
+                  {c.crm_perfil_comercial?.correo} · Origen: {etiquetaOrigenCuenta(c.crm_perfil_comercial)}
                 </small>
               </button>
             ))}
@@ -1283,6 +1337,13 @@ export default function VentasCRM() {
           }
           hideSubmit={form === "seleccionVenta"}
         >
+          {form === "cuenta" && (
+            <OrigenProspectoFields
+              initialType={cuenta?.persona.crm_perfil_comercial?.origen_prospecto_tipo}
+              initialDetail={cuenta?.persona.crm_perfil_comercial?.origen_prospecto_detalle}
+              required={!cuenta?.persona.crm_perfil_comercial}
+            />
+          )}
           {form === "seleccionVenta" && (
             <div className="grid gap-3 sm:grid-cols-2">
               <button
