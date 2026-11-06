@@ -624,7 +624,7 @@ export class CalidadService {
               };
             } else if (
               esGrafito &&
-              nombreParametro.includes('BROOKFIELD') &&
+              nombreParametro.includes('BROOKFIELD') && nombreParametro.includes('SPIN 4') &&
               etapa === 'MUESTRA_POR_AJUSTE'
             ) {
               const medicion = this.leerDecimalCalculo(
@@ -638,7 +638,7 @@ export class CalidadService {
               };
             } else if (
               esGrafito &&
-              nombreParametro.includes('BROOKFIELD') &&
+              nombreParametro.includes('BROOKFIELD') && nombreParametro.includes('SPIN 4') &&
               etapa === 'MUESTRA_AJUSTADO'
             ) {
               const medicion = this.leerDecimalCalculo(
