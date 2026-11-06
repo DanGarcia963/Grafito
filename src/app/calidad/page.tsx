@@ -83,9 +83,9 @@ function resolverFormulaGrafito(
     return 'HUMEDAD_INICIAL';
   if (parametro.includes('HUMEDAD') && categoria === 'MUESTRA_EVAPOR_DESMETAL')
     return 'HUMEDAD_FINAL';
-  if (parametro.includes('BROOKFIELD') && categoria === 'MUESTRA_POR_AJUSTE')
+  if (parametro.includes('BROOKFIELD') && parametro.includes('SPIN 4') && categoria === 'MUESTRA_POR_AJUSTE')
     return 'BROOKFIELD_INICIAL';
-  if (parametro.includes('BROOKFIELD') && categoria === 'MUESTRA_AJUSTADO')
+  if (parametro.includes('BROOKFIELD') && parametro.includes('SPIN 4') && categoria === 'MUESTRA_AJUSTADO')
     return 'BROOKFIELD_FINAL';
   if (parametro.includes('GRAFITO') && categoria === 'MUESTRA_POR_AJUSTE')
     return 'GRAFITO_INICIAL';
