@@ -46,6 +46,39 @@ export class CalidadService {
     private readonly tiempos: TrazabilidadService,
     private readonly eventos: EventsGateway,
   ) {}
+
+  private normalizarTexto(valor: unknown): string {
+    return String(valor ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toUpperCase();
+  }
+
+  private esMuestraGrafito(muestra: any): boolean {
+    const producto = this.normalizarTexto(
+      muestra?.productos_materiales?.nombre_Producto,
+    );
+    const linea = this.normalizarTexto(
+      muestra?.lotes_produccion?.ordenes_produccion?.linea_Produccion,
+    );
+    return producto.includes('GRAFITO') || linea.includes('GRAFITO');
+  }
+
+  private leerDecimalCalculo(
+    entrada: unknown,
+    etiqueta: string,
+    permitirCero = true,
+  ): { texto: string; valor: Prisma.Decimal } {
+    const texto = String(entrada ?? '').trim();
+    if (!/^\d{1,8}(?:\.\d{1,6})?$/.test(texto))
+      throw new BadRequestException(etiqueta + ': captura un número válido.');
+    const valor = new Prisma.Decimal(texto);
+    if (!valor.isFinite() || valor.isNegative() || (!permitirCero && valor.isZero()))
+      throw new BadRequestException(etiqueta + ': el valor debe ser positivo.');
+    return { texto, valor };
+  }
+
   async obtenerParametrosCalidad() {
     try {
       const parametros = await this.prisma.parametros_laboratorio.findMany();
@@ -81,7 +114,11 @@ export class CalidadService {
               id_Lote_Produccion: true,
               no_Lote: true,
               ordenes_produccion: {
-                select: { cantidad_Planificada: true, unidad: true },
+                select: {
+                  cantidad_Planificada: true,
+                  unidad: true,
+                  linea_Produccion: true,
+                },
               },
               equipos_tanques: {
                 select: {
@@ -134,6 +171,7 @@ export class CalidadService {
         result: await Promise.all(
           muestras.map(async (m) => ({
             ...m,
+            esGrafito: this.esMuestraGrafito(m),
             resultado_analisis: m.resultado_analisis.map((r) => ({
               ...r,
               valor_Obtenido_Num: r.valor_Obtenido_Num,
@@ -354,6 +392,7 @@ export class CalidadService {
         select: {
           valor_Obtenido_Num: true,
           valor_Obtenido_Texto: true,
+          calculo_aplicado: true,
           ciclo_analisis: true,
           fecha_Resultado: true,
           cumple_Especificacion: true,
@@ -477,101 +516,213 @@ export class CalidadService {
   private async crearResultadosMuestraCalidad(payload: {
     ciclo_analisis: number;
     id_Muestra: number;
-    mediciones: Array<{ id_Parametro: number; valor: string }>;
+    mediciones: Array<{
+      id_Parametro: number;
+      valor?: string;
+      entradas?: Record<string, unknown>;
+    }>;
     observaciones?: string;
   }) {
     try {
       const { id_Muestra, mediciones } = payload;
-
-      // 1. Obtener la muestra con la relación al producto para conocer el id_Producto
       const muestra = await this.prisma.muestras.findUnique({
         where: { id_Muestra },
         select: {
-          producto_id: true, // Asegúrate de que el campo FK al producto se llame así en tu schema
+          producto_id: true,
+          categoria_Muestra: true,
+          productos_materiales: { select: { nombre_Producto: true } },
+          lotes_produccion: {
+            select: {
+              ordenes_produccion: { select: { linea_Produccion: true } },
+            },
+          },
         },
       });
+      if (!muestra) return { success: false, error: 'Muestra no encontrada' };
 
-      if (!muestra) {
-        return { success: false, error: 'Muestra no encontrada' };
-      }
-
-      const idProducto = muestra.producto_id;
+      const esGrafito = this.esMuestraGrafito(muestra);
       const ahora = new Date();
-      const fechaActualIso = new Date(); // Objeto Date que Prisma mapea perfecto a DateTime
-      const horaActual = ahora.toTimeString().split(' ')[0]; // "HH:MM:SS"
-
-      // 2. Procesar cada medición
       const resultadosAInsertar = await Promise.all(
         mediciones.map(async (med) => {
-          // Consultar el tipo de parámetro
-          const parametro = await this.prisma.parametros_laboratorio.findUnique(
-            {
-              where: { id_Parametro: med.id_Parametro },
+          const parametro = await this.prisma.parametros_laboratorio.findUnique({
+            where: { id_Parametro: med.id_Parametro },
+          });
+          if (!parametro) throw new BadRequestException('Parámetro inexistente');
+
+          const especificacion = await this.prisma.especificaciones_producto.findFirst({
+            where: {
+              producto_id: muestra.producto_id,
+              parametro_id: med.id_Parametro,
             },
-          );
-
-          // Consultar la especificación configurada para este producto y parámetro
-          const especificacion =
-            await this.prisma.especificaciones_producto.findFirst({
-              where: {
-                producto_id: idProducto,
-                parametro_id: med.id_Parametro,
-              },
-            });
-
-          let cumpleEspecificacion = false;
-          // Convertimos el valor ingresado asegurando que siempre sea un string limpio
-          const valorIngresado = String(med.valor ?? '').trim();
-
-          // Evaluamos el tipo de dato del parámetro de forma segura
-          if (!parametro)
-            throw new BadRequestException('Parámetro inexistente');
+          });
           const tipoDato = String(parametro.tipo_Dato).toUpperCase();
-          if (
-            tipoDato === 'NUMERICO' &&
-            !/^[+-]?\d{1,8}(?:\.\d{1,4})?$/.test(valorIngresado)
-          ) {
-            throw new BadRequestException(
-              'Resultado numérico inválido: máximo 8 enteros y 4 decimales',
-            );
+          const nombreParametro = this.normalizarTexto(parametro.nombre_Parametro);
+          const etapa = String(muestra.categoria_Muestra);
+          const entradas = med.entradas ?? {};
+          let valorIngresado = String(med.valor ?? '').trim();
+          let valorNumerico: Prisma.Decimal | null = null;
+          let calculoAplicado:
+            | { version: number; formula: string; etapa: string; entradas: Record<string, string>; resultado: string }
+            | undefined;
+
+          if (tipoDato === 'BOOLEANO') {
+            valorIngresado = this.normalizarTexto(valorIngresado);
+            if (!['SI', 'NO'].includes(valorIngresado))
+              throw new BadRequestException('Metales debe registrarse como Sí o No.');
+          } else if (tipoDato === 'NUMERICO') {
+            let calculo:
+              | { valor: Prisma.Decimal; formula: string; entradas: Record<string, string> }
+              | null = null;
+
+            if (esGrafito && nombreParametro.includes('GRAVEDAD ESPECIFICA')) {
+              const masa = this.leerDecimalCalculo(entradas.masaMuestra, 'Peso de la muestra', false);
+              const picometroVacio = this.leerDecimalCalculo(
+                entradas.picometroVacio,
+                'Peso del picnómetro vacío',
+              );
+              const picometroLleno = masa.valor.plus(picometroVacio.valor);
+              const resultado = picometroLleno
+                .minus(picometroVacio.valor)
+                .div('97.4729')
+                .toDecimalPlaces(4);
+              calculo = {
+                valor: resultado,
+                formula: '(picnómetro lleno - picnómetro vacío) / 97.4729; picnómetro lleno = muestra + picnómetro vacío',
+                entradas: {
+                  masaMuestra: masa.texto,
+                  picometroVacio: picometroVacio.texto,
+                  picometroLleno: picometroLleno.toString(),
+                },
+              };
+            } else if (
+              esGrafito &&
+              nombreParametro.includes('HUMEDAD') &&
+              etapa === 'MUESTRA_INICIAL'
+            ) {
+              const medicion = this.leerDecimalCalculo(
+                entradas.medicion ?? med.valor,
+                'Medición de humedad inicial',
+              );
+              calculo = {
+                valor: medicion.valor.times(4).toDecimalPlaces(4),
+                formula: 'medición × 4 = % humedad inicial',
+                entradas: { medicion: medicion.texto },
+              };
+            } else if (
+              esGrafito &&
+              nombreParametro.includes('HUMEDAD') &&
+              etapa === 'MUESTRA_EVAPOR_DESMETAL'
+            ) {
+              const medicion = this.leerDecimalCalculo(
+                entradas.medicion ?? med.valor,
+                'Medición de humedad final',
+              );
+              calculo = {
+                valor: medicion.valor.times(10).toDecimalPlaces(4),
+                formula: 'medición × 10 = % humedad final',
+                entradas: { medicion: medicion.texto },
+              };
+            } else if (
+              esGrafito &&
+              nombreParametro.includes('BROOKFIELD') &&
+              etapa === 'MUESTRA_POR_AJUSTE'
+            ) {
+              const medicion = this.leerDecimalCalculo(
+                entradas.medicion ?? med.valor,
+                'Lectura del viscosímetro Brookfield inicial',
+              );
+              calculo = {
+                valor: medicion.valor.times(99).toDecimalPlaces(4),
+                formula: 'medición del viscosímetro × 99 = viscosidad Brookfield inicial',
+                entradas: { medicion: medicion.texto, factor: '99' },
+              };
+            } else if (
+              esGrafito &&
+              nombreParametro.includes('BROOKFIELD') &&
+              etapa === 'MUESTRA_AJUSTADO'
+            ) {
+              const medicion = this.leerDecimalCalculo(
+                entradas.medicion ?? med.valor,
+                'Lectura del viscosímetro Brookfield final',
+              );
+              calculo = {
+                valor: medicion.valor.times(99).toDecimalPlaces(4),
+                formula: 'medición del viscosímetro × 99 = viscosidad Brookfield final',
+                entradas: { medicion: medicion.texto, factor: '99' },
+              };
+            } else if (
+              esGrafito &&
+              nombreParametro.includes('GRAFITO') &&
+              etapa === 'MUESTRA_POR_AJUSTE'
+            ) {
+              const pesoFinal = this.leerDecimalCalculo(entradas.pesoFinal, 'Peso final');
+              const pesoPapel = this.leerDecimalCalculo(entradas.pesoPapel, 'Peso del papel');
+              const pesoMuestra = this.leerDecimalCalculo(entradas.pesoMuestra, 'Peso de la muestra', false);
+              if (pesoFinal.valor.lessThan(pesoPapel.valor))
+                throw new BadRequestException('El peso final no puede ser menor al peso del papel.');
+              calculo = {
+                valor: pesoFinal.valor
+                  .minus(pesoPapel.valor)
+                  .div(pesoMuestra.valor)
+                  .times(100)
+                  .toDecimalPlaces(4),
+                formula: '((peso final - peso papel) / peso muestra) × 100 = % grafito inicial',
+                entradas: {
+                  pesoFinal: pesoFinal.texto,
+                  pesoPapel: pesoPapel.texto,
+                  pesoMuestra: pesoMuestra.texto,
+                },
+              };
+            }
+
+            if (calculo) {
+              valorNumerico = calculo.valor;
+              valorIngresado = valorNumerico.toFixed(4);
+              calculoAplicado = {
+                version: 1,
+                formula: calculo.formula,
+                etapa,
+                entradas: calculo.entradas,
+                resultado: valorIngresado,
+              };
+            } else {
+              if (!/^[+-]?\d{1,8}(?:\.\d{1,4})?$/.test(valorIngresado))
+                throw new BadRequestException(
+                  'Resultado numérico inválido: máximo 8 enteros y 4 decimales',
+                );
+              valorNumerico = new Prisma.Decimal(valorIngresado);
+            }
+            if (
+              !valorNumerico ||
+              !valorNumerico.isFinite() ||
+              valorNumerico.abs().greaterThan('99999999.9999')
+            )
+              throw new BadRequestException('El resultado excede la precisión permitida (12,4).');
+          } else if (!valorIngresado) {
+            throw new BadRequestException('Resultado vacío');
           }
 
-          if (tipoDato === 'NUMERICO') {
-            // Lógica NUMÉRICA
-            const valorNum = parseFloat(valorIngresado);
-
-            // Convertimos a String primero para evitar fallos con Decimal de Prisma o nulls
-            const minStr =
-              especificacion?.valor_Minimo != null
-                ? String(especificacion.valor_Minimo).trim()
-                : null;
-            const maxStr =
-              especificacion?.valor_Maximo != null
-                ? String(especificacion.valor_Maximo).trim()
-                : null;
-
-            const minNum =
-              minStr && minStr !== '' ? parseFloat(minStr) : -Infinity;
-            const maxNum =
-              maxStr && maxStr !== '' ? parseFloat(maxStr) : Infinity;
-
-            if (!isNaN(valorNum)) {
-              cumpleEspecificacion = valorNum >= minNum && valorNum <= maxNum;
-            } else {
-              cumpleEspecificacion = false; // Si no es un número válido, no cumple
-            }
+          let cumpleEspecificacion = false;
+          if (tipoDato === 'NUMERICO' && valorNumerico) {
+            const valorNum = valorNumerico.toNumber();
+            const minStr = especificacion?.valor_Minimo != null
+              ? String(especificacion.valor_Minimo).trim()
+              : null;
+            const maxStr = especificacion?.valor_Maximo != null
+              ? String(especificacion.valor_Maximo).trim()
+              : null;
+            const minNum = minStr ? parseFloat(minStr) : -Infinity;
+            const maxNum = maxStr ? parseFloat(maxStr) : Infinity;
+            cumpleEspecificacion = valorNum >= minNum && valorNum <= maxNum;
           } else {
-            // Lógica TEXTO / CUALITATIVO
-            const valorMinimoEsperado =
-              especificacion?.valor_Minimo != null
-                ? String(especificacion.valor_Minimo).trim().toLowerCase()
-                : '';
-
+            const valorMinimoEsperado = especificacion?.valor_Minimo != null
+              ? String(especificacion.valor_Minimo).trim()
+              : '';
             if (valorMinimoEsperado.length > 0) {
-              cumpleEspecificacion =
-                valorIngresado.toLowerCase() === valorMinimoEsperado;
+              cumpleEspecificacion = tipoDato === 'BOOLEANO'
+                ? this.normalizarTexto(valorIngresado) === this.normalizarTexto(valorMinimoEsperado)
+                : valorIngresado.toLowerCase() === valorMinimoEsperado.toLowerCase();
             } else {
-              // Si no hay especificación definida, cumple si ingresó algún texto
               cumpleEspecificacion = valorIngresado.length > 0;
             }
           }
@@ -580,25 +731,20 @@ export class CalidadService {
             muestra_id: id_Muestra,
             ciclo_analisis: payload.ciclo_analisis,
             parametro_id: med.id_Parametro,
-            valor_Obtenido_Num:
-              tipoDato === 'NUMERICO'
-                ? new Prisma.Decimal(valorIngresado)
-                : null,
-
-            valor_Obtenido_Texto:
-              tipoDato === 'NUMERICO' ? null : valorIngresado,
+            valor_Obtenido_Num: tipoDato === 'NUMERICO' ? valorNumerico : null,
+            valor_Obtenido_Texto: tipoDato === 'NUMERICO' ? null : valorIngresado,
             cumple_Especificacion: cumpleEspecificacion,
-            fecha_Resultado: fechaActualIso,
-            //hora_Resultado: horaActual,
+            fecha_Resultado: ahora,
+            ...(calculoAplicado
+              ? { calculo_aplicado: calculoAplicado as Prisma.InputJsonValue }
+              : {}),
           };
         }),
       );
 
-      // 3. Insertar todos los resultados en lote en la base de datos
       const res = await this.prisma.resultado_analisis.createMany({
         data: resultadosAInsertar,
       });
-
       return { success: true, count: res.count };
     } catch (error: any) {
       console.error('Error al guardar resultados:', error);
@@ -620,13 +766,11 @@ export class CalidadService {
   private async actualizarEstadoMuestra({
     idMuestra,
     dictamen,
-    tipoMuestra,
     observaciones,
     analistaNombre,
   }: {
     idMuestra: number;
     dictamen: string;
-    tipoMuestra: string;
     observaciones: string;
     analistaNombre?: string;
   }) {
@@ -683,7 +827,6 @@ export class CalidadService {
         },
         data: {
           estado_Muestra: dictamen as muestras_estado_Muestra,
-          categoria_Muestra: tipoMuestra as muestras_categoria_Muestra,
           observaciones: observaciones,
           analista_id: idAnalista, // <--- Asignamos la llave foránea
         },
@@ -926,8 +1069,12 @@ export class CalidadService {
 
   async finalizarAnalisis(payload: any) {
     const id = this.tiempos.id(payload?.idMuestra);
-        if (
-      !Object.values(muestras_categoria_Muestra).includes(payload?.tipoMuestra)
+    const tipoMuestraPayload = payload?.tipoMuestra
+      ? String(payload.tipoMuestra).trim().toUpperCase().replace(/\s+/g, '_')
+      : null;
+    if (
+      tipoMuestraPayload &&
+      !Object.values(muestras_categoria_Muestra).includes(tipoMuestraPayload as muestras_categoria_Muestra)
     )
       throw new BadRequestException('Tipo de muestra inválido');
     if (!['APROBADO', 'RECHAZADO'].includes(payload?.dictamen))
@@ -941,8 +1088,13 @@ export class CalidadService {
       throw new BadRequestException('Parámetros duplicados');
     for (const m of payload.mediciones) {
       this.tiempos.id(m?.id_Parametro);
-      if (typeof m.valor !== 'string' || !m.valor.trim())
-        throw new BadRequestException('Resultado vacío');
+      const tieneValor = typeof m?.valor === 'string' && m.valor.trim().length > 0;
+      const tieneEntrada =
+        m?.entradas &&
+        typeof m.entradas === 'object' &&
+        Object.values(m.entradas).some((valor: any) => String(valor ?? '').trim().length > 0);
+      if (!tieneValor && !tieneEntrada)
+        throw new BadRequestException('Captura la medición o los datos requeridos para calcular el resultado.');
     }
     const resultado = await this.prisma.$transaction(
       async (tx) => {
@@ -952,6 +1104,8 @@ export class CalidadService {
         });
         if (!muestra || muestra.area_Muestra !== 'CALIDAD')
           throw new NotFoundException('Muestra de Calidad no encontrada');
+        if (tipoMuestraPayload && tipoMuestraPayload !== muestra.categoria_Muestra)
+          throw new BadRequestException('La categoría de muestra es fija y no coincide con el registro.');
         if (muestra.estado_Muestra === 'APROBADO' || muestra.estado_Muestra === 'RECHAZADO')
           throw new BadRequestException('La muestra ya cuenta con dictamen.');
         await this.bloquearOrigen(tx, muestra);
@@ -982,7 +1136,6 @@ export class CalidadService {
         const dictamen = await worker.actualizarEstadoMuestra({
           idMuestra: id,
           dictamen: payload.dictamen,
-          tipoMuestra: payload.tipoMuestra,
           observaciones: String(payload.observaciones ?? ''),
           analistaNombre: payload.analistaNombre,
         });
@@ -1014,7 +1167,7 @@ export class CalidadService {
         await this.tiempos.transicion(tx, ctx, null);
         await this.tiempos.evento(tx, ctx, tramo.ciclo, 'FIN_ANALISIS', {
           dictamen: payload.dictamen,
-          tipoMuestra: payload.tipoMuestra,
+          tipoMuestra: muestra.categoria_Muestra,
           analistaDeclarado: payload.analistaNombre ?? null,
           observaciones: payload.observaciones ?? null,
         });

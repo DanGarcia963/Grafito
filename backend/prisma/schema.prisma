@@ -541,6 +541,7 @@ model resultado_analisis {
   parametro_id           Int
   valor_Obtenido_Num     Decimal?               @db.Decimal(12, 4)
   valor_Obtenido_Texto   String?                @db.Text
+  calculo_aplicado       Json?                  @db.JsonB
   cumple_Especificacion  Boolean?               @default(true)
   fecha_Resultado        DateTime               @db.Date
   hora_Resultado         DateTime?              @db.Time(0)
