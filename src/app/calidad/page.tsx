@@ -56,6 +56,106 @@ interface ContenedorState {
   observaciones: string;
 }
 
+type FormulaGrafito =
+  | 'HUMEDAD_INICIAL'
+  | 'HUMEDAD_FINAL'
+  | 'BROOKFIELD_INICIAL'
+  | 'GRAFITO_INICIAL'
+  | 'BROOKFIELD_FINAL'
+  | 'GRAVEDAD_ESPECIFICA';
+
+const normalizarCalidad = (valor: unknown) =>
+  String(valor ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+
+function resolverFormulaGrafito(
+  nombre: string,
+  categoria: string,
+  esGrafito: boolean,
+): FormulaGrafito | null {
+  if (!esGrafito) return null;
+  const parametro = normalizarCalidad(nombre);
+  if (parametro.includes('GRAVEDAD ESPECIFICA')) return 'GRAVEDAD_ESPECIFICA';
+  if (parametro.includes('HUMEDAD') && categoria === 'MUESTRA_INICIAL')
+    return 'HUMEDAD_INICIAL';
+  if (parametro.includes('HUMEDAD') && categoria === 'MUESTRA_EVAPOR_DESMETAL')
+    return 'HUMEDAD_FINAL';
+  if (parametro.includes('BROOKFIELD') && categoria === 'MUESTRA_POR_AJUSTE')
+    return 'BROOKFIELD_INICIAL';
+  if (parametro.includes('BROOKFIELD') && categoria === 'MUESTRA_AJUSTADO')
+    return 'BROOKFIELD_FINAL';
+  if (parametro.includes('GRAFITO') && categoria === 'MUESTRA_POR_AJUSTE')
+    return 'GRAFITO_INICIAL';
+  return null;
+}
+
+const camposFormulaGrafito: Record<FormulaGrafito, Array<{ key: string; label: string }>> = {
+  HUMEDAD_INICIAL: [{ key: 'medicion', label: 'Lectura del medidor' }],
+  HUMEDAD_FINAL: [{ key: 'medicion', label: 'Lectura del medidor' }],
+  BROOKFIELD_INICIAL: [{ key: 'medicion', label: 'Lectura del viscosímetro' }],
+  BROOKFIELD_FINAL: [{ key: 'medicion', label: 'Lectura del viscosímetro' }],
+  GRAFITO_INICIAL: [
+    { key: 'pesoFinal', label: 'Peso final' },
+    { key: 'pesoPapel', label: 'Peso del papel' },
+    { key: 'pesoMuestra', label: 'Peso de la muestra' },
+  ],
+  GRAVEDAD_ESPECIFICA: [
+    { key: 'masaMuestra', label: 'Peso de la muestra' },
+    { key: 'picometroVacio', label: 'Peso del picnómetro vacío' },
+  ],
+};
+
+const descripcionFormulaGrafito: Record<FormulaGrafito, string> = {
+  HUMEDAD_INICIAL: 'Resultado = lectura × 4',
+  HUMEDAD_FINAL: 'Resultado = lectura × 10',
+  BROOKFIELD_INICIAL: 'Viscosidad inicial = lectura Brookfield × 99',
+  BROOKFIELD_FINAL: 'Viscosidad final = lectura Brookfield × 99',
+  GRAFITO_INICIAL: '% grafito = ((peso final − peso papel) / peso muestra) × 100',
+  GRAVEDAD_ESPECIFICA:
+    'G.E. = (picnómetro lleno − picnómetro vacío) / 97.4729; lleno = muestra + picnómetro vacío',
+};
+
+function previsualizarFormulaGrafito(
+  formula: FormulaGrafito,
+  entradas: Record<string, string>,
+): string | null {
+  const numero = (key: string) => {
+    const texto = entradas[key]?.trim();
+    if (!texto) return null;
+    const valor = Number(texto);
+    return Number.isFinite(valor) ? valor : null;
+  };
+  let resultado: number | null = null;
+  if (formula === 'HUMEDAD_INICIAL') {
+    const lectura = numero('medicion');
+    if (lectura !== null) resultado = lectura * 4;
+  } else if (formula === 'HUMEDAD_FINAL') {
+    const lectura = numero('medicion');
+    if (lectura !== null) resultado = lectura * 10;
+  } else if (formula === 'BROOKFIELD_INICIAL' || formula === 'BROOKFIELD_FINAL') {
+    const lectura = numero('medicion');
+    if (lectura !== null) resultado = lectura * 99;
+  } else if (formula === 'GRAFITO_INICIAL') {
+    const final = numero('pesoFinal');
+    const papel = numero('pesoPapel');
+    const muestra = numero('pesoMuestra');
+    if (final !== null && papel !== null && muestra !== null && muestra > 0)
+      resultado = ((final - papel) / muestra) * 100;
+  } else if (formula === 'GRAVEDAD_ESPECIFICA') {
+    const muestra = numero('masaMuestra');
+    const vacio = numero('picometroVacio');
+    if (muestra !== null && vacio !== null) {
+      const lleno = muestra + vacio;
+      resultado = (lleno - vacio) / 97.4729;
+    }
+  }
+  return resultado !== null && Number.isFinite(resultado) ? resultado.toFixed(4) : null;
+}
+
+
 const CalidadMuestrasScreen: React.FC = () => {
   const socket = useSocket();
   const router = useRouter();
@@ -121,6 +221,7 @@ const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
   const [loadingParametros, setLoadingParametros] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [mediciones, setMediciones] = useState<{ [paramId: number]: string }>({});
+  const [entradasCalculo, setEntradasCalculo] = useState<Record<number, Record<string, string>>>({});
   const [observaciones, setObservaciones] = useState('');
   const [dictamen, setDictamen] = useState<'APROBADO' | 'RECHAZADO'>('APROBADO');
 
@@ -170,6 +271,10 @@ const getMuestraData = (muestra: any) => {
       muestra.fecha,
 
 tipoMuestra: obtenerTipoMuestra(muestra),
+    esGrafito: muestra.esGrafito ?? (
+      normalizarCalidad(muestra.productos_materiales?.nombre_Producto).includes('GRAFITO') ||
+      normalizarCalidad(muestra.lotes_produccion?.ordenes_produccion?.linea_Produccion).includes('GRAFITO')
+    ),
   };
 };
 
@@ -547,6 +652,7 @@ const muestraData = getMuestraData(muestra);
     // --- MODO CAPTURA/EDICIÓN ---
     setEsModoLectura(false);
     setMediciones({});
+    setEntradasCalculo({});
     setObservaciones('');
     setDictamen('APROBADO');
     setAnalistaNombre('');
@@ -601,6 +707,13 @@ const cerrarModal = () => {
     }));
   };
 
+  const handleEntradaCalculoChange = (paramId: number, campo: string, valor: string) => {
+    setEntradasCalculo((prev) => ({
+      ...prev,
+      [paramId]: { ...(prev[paramId] ?? {}), [campo]: valor },
+    }));
+  };
+
 const guardarResultados = async (e: React.FormEvent) => {
   e.preventDefault();
   if (!muestraSeleccionada) return;
@@ -609,16 +722,23 @@ const guardarResultados = async (e: React.FormEvent) => {
 
   setSubmitting(true);
   try {
-    // 1. Mapear mediciones en una lista de objetos
-    const listaMediciones = Object.entries(mediciones).map(([paramId, valor]) => ({
-      id_Parametro: Number(paramId),
-      valor: String(valor),
-    }));
+    // El cliente envía lecturas crudas; el backend calcula y valida el resultado final.
+    const datosMuestra = getMuestraData(muestraSeleccionada);
+    const listaMediciones = parametrosSeleccionados.map((paramId) => {
+      const parametro = parametros.find((p) => (p.id_Parametro ?? p.id ?? 0) === paramId);
+      const nombre = parametro?.nombre_Parametro ?? parametro?.nombre ?? '';
+      const formula = resolverFormulaGrafito(nombre, tipoMuestra, Boolean(datosMuestra.esGrafito));
+      return {
+        id_Parametro: paramId,
+        valor: formula ? '' : String(mediciones[paramId] ?? ''),
+        ...(formula ? { entradas: entradasCalculo[paramId] ?? {} } : {}),
+      };
+    });
 
     const respuesta = await fetch(`${API_URL}/api/calidad/finalizarAnalisis`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idMuestra: Number(idMuestra), mediciones: listaMediciones,
-        dictamen, tipoMuestra, observaciones, analistaNombre: analistaNombre.trim() }),
+        dictamen, observaciones, analistaNombre: analistaNombre.trim() }),
     });
     const resultado = await respuesta.json();
     if (!respuesta.ok || !resultado.success) throw new Error(resultado.message || resultado.error || 'No se pudo finalizar');
@@ -1397,8 +1517,16 @@ return (
                                     <span className="block text-xs text-slate-500">Ciclo {spec.ciclo_analisis ?? 'histórico sin ciclo'} · {spec.fecha_Resultado ? new Date(spec.fecha_Resultado).toLocaleString('es-MX') : ''}</span>
                                   </td>
                                   <td className="p-3 font-mono text-cyan-400">
-                                    {spec.valor_Obtenido_Num ?? spec.valor_Obtenido_Texto ?? 'N/A'}
-                                  </td>
+                                     {spec.valor_Obtenido_Num ?? spec.valor_Obtenido_Texto ?? 'N/A'}
+                                     {spec.calculo_aplicado?.formula && (
+                                       <span className="block mt-1 max-w-md whitespace-normal font-sans text-[11px] leading-4 text-slate-500">
+                                         {spec.calculo_aplicado.formula}
+                                         {spec.calculo_aplicado.entradas && ' · ' + Object.entries(spec.calculo_aplicado.entradas)
+                                           .map(([clave, valor]) => clave + ': ' + String(valor))
+                                           .join(' · ')}
+                                       </span>
+                                     )}
+                                   </td>
                                   <td className="p-3">
                                     {spec.cumple_Especificacion ? (
                                       <span className="text-emerald-400 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
@@ -1500,19 +1628,23 @@ return (
                             })
                             .map((p) => {
                               const idParam = p.id_Parametro ?? p.id ?? 0;
-                              const nombre = p.nombre_Parametro ?? p.nombre ?? `Parámetro #${idParam}`;
+                              const nombre = p.nombre_Parametro ?? p.nombre ?? ('Parámetro #' + idParam);
                               const unidad = p.unidad_Medida ?? p.unidad;
                               const tipoDato = String(p.tipo_Dato ?? '').toUpperCase();
                               const esTexto = tipoDato === 'TEXTO';
+                              const esBooleano = tipoDato === 'BOOLEANO' || normalizarCalidad(nombre).includes('METALES');
+                              const datosMuestra = getMuestraData(muestraSeleccionada);
+                              const formula = resolverFormulaGrafito(nombre, tipoMuestra, Boolean(datosMuestra.esGrafito));
+                              const entradas = entradasCalculo[idParam] ?? {};
+                              const vistaPrevia = formula ? previsualizarFormulaGrafito(formula, entradas) : null;
 
                               return (
-                                <div key={idParam} className="space-y-1 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
+                                <div key={idParam} className="space-y-2 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
                                   <div className="flex justify-between items-center">
                                     <label className="text-xs font-medium text-slate-300 flex items-center gap-1">
                                       <span>{nombre}</span>
                                       {unidad && <span className="text-slate-500">({unidad})</span>}
                                     </label>
-
                                     <button
                                       type="button"
                                       onClick={() => handleEliminarParametro(idParam)}
@@ -1523,37 +1655,64 @@ return (
                                     </button>
                                   </div>
 
-                                  <input
-                                    type={esTexto ? "text" : "number"}
-                                    step={esTexto ? undefined : "any"}
-                                    required
-                                    placeholder={esTexto ? "Ej. Cumple / Incoloro" : "0.00"}
-                                    value={mediciones[idParam] || ''}
-                                    onChange={(e) => handleMedicionChange(idParam, e.target.value)}
-                                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                                  />
+                                  {formula ? (
+                                    <div className="space-y-2">
+                                      <p className="text-[11px] text-cyan-300">{descripcionFormulaGrafito[formula]}</p>
+                                      {camposFormulaGrafito[formula].map((campo) => (
+                                        <label key={campo.key} className="block space-y-1">
+                                          <span className="text-[11px] text-slate-400">{campo.label}</span>
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            step="any"
+                                            required
+                                            placeholder="0.0000"
+                                            value={entradas[campo.key] ?? ''}
+                                            onChange={(e) => handleEntradaCalculoChange(idParam, campo.key, e.target.value)}
+                                            className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                                          />
+                                        </label>
+                                      ))}
+                                      {formula === 'GRAVEDAD_ESPECIFICA' && (
+                                        <p className="text-[10px] text-slate-500">El peso del picnómetro lleno se obtiene sumando el peso de la muestra y el peso vacío.</p>
+                                      )}
+                                      {vistaPrevia !== null && (
+                                        <p className="text-xs font-medium text-emerald-300">Resultado calculado: {vistaPrevia}{unidad ? ' ' + unidad : ''}</p>
+                                      )}
+                                    </div>
+                                  ) : esBooleano ? (
+                                    <select
+                                      required
+                                      value={mediciones[idParam] || ''}
+                                      onChange={(e) => handleMedicionChange(idParam, e.target.value)}
+                                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                                    >
+                                      <option value="">Selecciona una respuesta</option>
+                                      <option value="SI">Sí</option>
+                                      <option value="NO">No</option>
+                                    </select>
+                                  ) : (
+                                    <input
+                                      type={esTexto ? 'text' : 'number'}
+                                      step={esTexto ? undefined : 'any'}
+                                      required
+                                      placeholder={esTexto ? 'Ej. Cumple / Incoloro' : '0.00'}
+                                      value={mediciones[idParam] || ''}
+                                      onChange={(e) => handleMedicionChange(idParam, e.target.value)}
+                                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                                    />
+                                  )}
                                 </div>
                               );
-                            })}
+                            })
                         </div>
                       )}
                     </div>
 
-                    {/* El tipo está definido al crear la muestra; Calidad no puede cambiarlo al dictaminar. */}
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                        Tipo de Muestra
-                      </label>
-                      <select
-                        value={tipoMuestra}
-                        onChange={(e) => setTipoMuestra(e.target.value)}
-                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
-                      >
-                        <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
-                        <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
-                        <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
-                        <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
-                      </select>
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2.5">
+                      <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Etapa de la muestra</span>
+                      <span className="text-sm font-medium text-slate-200">{tipoMuestra.replace(/_/g, ' ')}</span>
+                      <p className="mt-1 text-[11px] text-slate-500">La etapa viene fijada desde Producción y determina qué cálculo se aplica.</p>
                     </div>
 
                     {/* Buscador / Creador de Analista */}
