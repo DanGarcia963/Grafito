@@ -1275,9 +1275,10 @@ return (
             <h2 className="font-semibold text-cyan-100">Control de contenedores de grafito</h2>
             <p className="mt-1 text-sm text-slate-300">El contenido se calcula desde los movimientos de inventario. La reserva solo compromete kilos; no vacía el contenedor. La recepción y su checklist inicial se muestran desde el lote de llegada.</p>
           </div>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
             {([
               ['Llenos', resumenContenedores.LLENO ?? 0, 'text-cyan-300'],
+              ['Parciales', resumenContenedores.PARCIAL ?? 0, 'text-indigo-300'],
               ['Checklist inicial pendiente', resumenContenedores.PENDIENTE_CHECKLIST ?? 0, 'text-amber-300'],
               ['Vacíos sucios', resumenContenedores.VACIO_SUCIOS ?? 0, 'text-rose-300'],
               ['Vacíos limpios', resumenContenedores.VACIO_LIMPIOS ?? 0, 'text-sky-300'],
