@@ -210,10 +210,19 @@ const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
   const [revisoNombre, setRevisoNombre] = useState<string>('');
   const [guardandoChecklist, setGuardandoChecklist] = useState<boolean>(false);
 
-  const [contenedores, setContenedores] = useState<ContenedorState[]>([])
+  const [contenedores, setContenedores] = useState<ContenedorState[]>([]);
+  const [contenedoresGrafito, setContenedoresGrafito] = useState<any[]>([]);
+  const [resumenContenedores, setResumenContenedores] = useState<Record<string, number>>({});
+  const [cargandoContenedoresGrafito, setCargandoContenedoresGrafito] = useState(false);
+  const [contenedorRevisionActivo, setContenedorRevisionActivo] = useState<any | null>(null);
+  const [confirmacionRevisionContenedor, setConfirmacionRevisionContenedor] = useState(false);
+  const [guardandoAccionContenedor, setGuardandoAccionContenedor] = useState(false);
+  const [formRevisionContenedor, setFormRevisionContenedor] = useState({
+    tapa_valvula: false, rejilla_danada: false, base_danada: false, derrame: false, observaciones: '',
+  });
 
 // Pestañas de muestras, certificados y checklist de recepción.
-  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CERTIFICADOS' | 'CHECKLIST'>('MUESTRAS');
+  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CERTIFICADOS' | 'CHECKLIST' | 'CONTENEDORES'>('MUESTRAS');
 
   // Estado del Modal de Captura
   const [muestraSeleccionada, setMuestraSeleccionada] = useState<any | null>(null);
@@ -278,7 +287,27 @@ tipoMuestra: obtenerTipoMuestra(muestra),
   };
 };
 
-const cargarLotesLlegada = async () => {
+const cargarContenedoresGrafito = useCallback(async () => {
+    setCargandoContenedoresGrafito(true);
+    try {
+      const response = await fetch(`${API_URL}/api/calidad/contenedores-grafito`);
+      const data = await response.json();
+      if (!response.ok || !data.success)
+        throw new Error(data.message || data.error || 'No se pudieron cargar los contenedores de grafito');
+      setErroresCarga((prev) => ({ ...prev, Contenedores: '' }));
+      setContenedoresGrafito(Array.isArray(data.result) ? data.result : []);
+      setResumenContenedores(data.resumen ?? {});
+    } catch (error) {
+      setErroresCarga((prev) => ({
+        ...prev,
+        Contenedores: error instanceof Error ? error.message : 'Error al cargar los contenedores',
+      }));
+    } finally {
+      setCargandoContenedoresGrafito(false);
+    }
+  }, []);
+
+  const cargarLotesLlegada = async () => {
     setCargandoLotes(true);
     try {
       const response = await fetch(
@@ -299,10 +328,18 @@ const cargarLotesLlegada = async () => {
   };
 
   useEffect(() => {
-    if (sesionLista && vistaActiva === 'CHECKLIST') {
-      cargarLotesLlegada();
-    }
-  }, [vistaActiva, sesionLista]);
+    if (sesionLista && vistaActiva === 'CHECKLIST') void cargarLotesLlegada();
+    if (sesionLista && vistaActiva === 'CONTENEDORES') void cargarContenedoresGrafito();
+  }, [vistaActiva, sesionLista, cargarContenedoresGrafito]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const actualizarContenedores = () => {
+      if (vistaActiva === 'CONTENEDORES') void cargarContenedoresGrafito();
+    };
+    socket.on('INVENTARIO_CONTENEDORES_ACTUALIZADO', actualizarContenedores);
+    return () => socket.off('INVENTARIO_CONTENEDORES_ACTUALIZADO', actualizarContenedores);
+  }, [socket, vistaActiva, cargarContenedoresGrafito]);
 
 // ============================================================
   // MANEJO DEL MODAL Y EXTRACCIÓN DINÁMICA DE CONTENEDORES
@@ -353,7 +390,52 @@ const cargarLotesLlegada = async () => {
 // ============================================================
   // GUARDAR CHECKLIST (POST)
   // ============================================================
-  const handleGuardarChecklist = async () => {
+  const marcarLimpiezaContenedor = async (contenedor: any) => {
+    if (guardandoAccionContenedor) return;
+    setGuardandoAccionContenedor(true);
+    try {
+      const response = await fetch(`${API_URL}/api/calidad/contenedores-grafito/${contenedor.lote_inventario_id}/limpieza`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: contenedor.codigo }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success)
+        throw new Error(data.message || data.error || 'No se pudo registrar la limpieza');
+      await cargarContenedoresGrafito();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo registrar la limpieza');
+    } finally {
+      setGuardandoAccionContenedor(false);
+    }
+  };
+
+  const abrirRevisionContenedor = (contenedor: any) => {
+    setContenedorRevisionActivo(contenedor);
+    setConfirmacionRevisionContenedor(false);
+    setFormRevisionContenedor({ tapa_valvula: false, rejilla_danada: false, base_danada: false, derrame: false, observaciones: '' });
+  };
+
+  const guardarRevisionContenedor = async () => {
+    if (!contenedorRevisionActivo || !confirmacionRevisionContenedor || guardandoAccionContenedor) return;
+    setGuardandoAccionContenedor(true);
+    try {
+      const response = await fetch(`${API_URL}/api/calidad/contenedores-grafito/${contenedorRevisionActivo.lote_inventario_id}/inspeccion`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: contenedorRevisionActivo.codigo, ...formRevisionContenedor }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success)
+        throw new Error(data.message || data.error || 'No se pudo guardar la inspección');
+      setContenedorRevisionActivo(null);
+      await cargarContenedoresGrafito();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo guardar la inspección');
+    } finally {
+      setGuardandoAccionContenedor(false);
+    }
+  };
+
+const handleGuardarChecklist = async () => {
     if (!revisoNombre.trim()) {
       alert('Por favor ingresa el nombre de quien revisó.');
       return;
@@ -512,6 +594,30 @@ const obtenerTipoMuestra = (muestra: any): string => {
     .replace(/\s+/g, '_');
 };
 
+const parametrosPredeterminadosMuestra = (catalogo: ParametroLaboratorio[], muestra: any): number[] => {
+  const datos = getMuestraData(muestra);
+  const todos = catalogo.map((p) => Number(p.id_Parametro ?? p.id ?? 0)).filter((id) => id > 0);
+  if (!datos.esGrafito) return todos;
+  const tipo = String(datos.tipoMuestra ?? '').toUpperCase();
+  const nombreParametro = (p: ParametroLaboratorio) => normalizarCalidad(p.nombre_Parametro ?? p.nombre ?? '');
+  const elegir = (predicate: (nombre: string) => boolean) => {
+    const candidato = catalogo.find((p) => predicate(nombreParametro(p)));
+    const id = Number(candidato?.id_Parametro ?? candidato?.id ?? 0);
+    return id > 0 ? id : null;
+  };
+  const esBrookfieldSpin4 = (nombre: string) =>
+    nombre.includes('BROOKFIELD') && (nombre.includes('SPIN 4') || nombre.includes('SPIN4') || nombre.includes('SPINDLE 4') || nombre.includes('SPINDLE4'));
+  const reglas: Record<string, Array<(nombre: string) => boolean>> = {
+    MUESTRA_INICIAL: [(nombre) => nombre.includes('HUMEDAD')],
+    MUESTRA_EVAPOR_DESMETAL: [(nombre) => nombre.includes('HUMEDAD'), (nombre) => nombre.includes('METAL')],
+    MUESTRA_POR_AJUSTE: [esBrookfieldSpin4, (nombre) => nombre.includes('GRAFITO') && !nombre.includes('BROOKFIELD')],
+    MUESTRA_AJUSTADO: [esBrookfieldSpin4, (nombre) => nombre.includes('GRAFITO') && !nombre.includes('BROOKFIELD'), (nombre) => nombre.includes('GRAVEDAD ESPECIFICA')],
+  };
+  const reglasTipo = reglas[tipo];
+  if (!reglasTipo) return todos;
+  return [...new Set(reglasTipo.map(elegir).filter((id): id is number => id !== null))];
+};
+
   // 2. Cargar Parámetros de laboratorio desde la API
   const fetchParametros = useCallback(async () => {
     setLoadingParametros(true);
@@ -539,9 +645,11 @@ const obtenerTipoMuestra = (muestra: any): string => {
       }
 
       setParametros(listaParametros);
+      return listaParametros;
     } catch (err) {
       setErroresCarga(prev => ({ ...prev, 'Parámetros': err instanceof Error ? err.message : 'Error de conexión' }));
       console.error('Error al cargar parámetros:', err);
+      return [];
     } finally {
       setLoadingParametros(false);
     }
@@ -658,12 +766,8 @@ const muestraData = getMuestraData(muestra);
     setAnalistaNombre('');
     setParametroAAgregar('');
 
-    if (parametros.length > 0) {
-      const idsIniciales = parametros.map((p) => p.id_Parametro ?? p.id ?? 0);
-      setParametrosSeleccionados(idsIniciales);
-    } else {
-      setParametrosSeleccionados([]);
-    }
+    const catalogoParametros = parametros.length > 0 ? parametros : await fetchParametros();
+    setParametrosSeleccionados(parametrosPredeterminadosMuestra(catalogoParametros, muestra));
   }
 };
 
@@ -858,7 +962,7 @@ return (
       </div>
 
       {/* Selector de Pestañas Integrado */}
-          <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex items-center">
+          <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex flex-wrap items-center">
             <button
               onClick={() => setVistaActiva('MUESTRAS')}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
@@ -880,6 +984,16 @@ return (
               <Truck className="w-4 h-4" /> Checklist Recepción
             </button>
             <button
+              onClick={() => setVistaActiva('CONTENEDORES')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                vistaActiva === 'CONTENEDORES'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <PackageCheck className="w-4 h-4" /> Contenedores
+            </button>
+            <button
               onClick={() => setVistaActiva('CERTIFICADOS')}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 vistaActiva === 'CERTIFICADOS'
@@ -893,8 +1007,8 @@ return (
           </div>
 
       <button 
-        onClick={() => void Promise.all([fetchMuestras(), fetchMuestrasDictaminadas(), fetchCertificadosPendientes()])}
-        disabled={loadingMuestras || loadingCertificados}
+        onClick={() => void Promise.all([fetchMuestras(), fetchMuestrasDictaminadas(), fetchCertificadosPendientes(), cargarContenedoresGrafito()])}
+        disabled={loadingMuestras || loadingCertificados || cargandoContenedoresGrafito}
         className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
       >
         <RefreshCw className={`w-4 h-4 ${loadingMuestras || loadingCertificados ? 'animate-spin' : ''}`} /> Actualizar Lista
@@ -1155,6 +1269,60 @@ return (
     {/* ==================================================================== */}
       {/* VISTA 2: CHECKLIST MANTENIMIENTO (LOTES DE GRAFITO SUCIO) */}
       {/* ==================================================================== */}
+      {vistaActiva === 'CONTENEDORES' && (
+        <section className="space-y-5">
+          <div className="rounded-xl border border-cyan-900 bg-cyan-950/30 p-4">
+            <h2 className="font-semibold text-cyan-100">Control de contenedores de grafito</h2>
+            <p className="mt-1 text-sm text-slate-300">El contenido se calcula desde los movimientos de inventario. La reserva solo compromete kilos; no vacía el contenedor. La recepción y su checklist inicial se muestran desde el lote de llegada.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            {([
+              ['Llenos', resumenContenedores.LLENO ?? 0, 'text-cyan-300'],
+              ['Checklist inicial pendiente', resumenContenedores.PENDIENTE_CHECKLIST ?? 0, 'text-amber-300'],
+              ['Vacíos sucios', resumenContenedores.VACIO_SUCIOS ?? 0, 'text-rose-300'],
+              ['Vacíos limpios', resumenContenedores.VACIO_LIMPIOS ?? 0, 'text-sky-300'],
+              ['Listos para rellenar', resumenContenedores.LISTO_PARA_RELLENAR ?? 0, 'text-emerald-300'],
+            ] as const).map(([label, value, color]) => (
+              <article key={String(label)} className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
+                <p className={`mt-2 text-2xl font-bold ${color}`}>{value}</p>
+              </article>
+            ))}
+          </div>
+          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60">
+            <table className="w-full text-left text-sm text-slate-300">
+              <thead className="bg-slate-950 text-xs uppercase text-slate-400">
+                <tr><th className="p-3">Lote de inventario</th><th className="p-3">Contenedor</th><th className="p-3">Prensa</th><th className="p-3">Contenido</th><th className="p-3">Estado</th><th className="p-3">Acción</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {cargandoContenedoresGrafito ? (
+                  <tr><td colSpan={6} className="p-6 text-center text-slate-400">Cargando contenedores…</td></tr>
+                ) : contenedoresGrafito.length === 0 ? (
+                  <tr><td colSpan={6} className="p-6 text-center text-slate-500">No hay contenedores de grafito con especificaciones registradas.</td></tr>
+                ) : contenedoresGrafito.map((item) => (
+                  <tr key={`${item.lote_inventario_id}-${item.codigo}`}>
+                    <td className="p-3"><span className="block font-semibold text-white">{item.folio}</span><span className="text-xs text-slate-500">{item.recepcion_folio ? `Recepción ${item.recepcion_folio}` : 'Inventario de apertura o producción'}</span></td>
+                    <td className="p-3 font-medium text-cyan-200">{item.codigo}</td>
+                    <td className="p-3">{item.prensa || 'Sin prensa'}</td>
+                    <td className="p-3">{item.saldo_kg} / {item.peso_kg} kg</td>
+                    <td className="p-3">
+                      <span className="inline-flex rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] font-semibold">{String(item.estado).replaceAll('_', ' ')}</span>
+                      {item.pendiente_checklist_inicial && <span className="ml-1 inline-flex rounded-full border border-amber-700 bg-amber-950/50 px-2 py-1 text-[11px] font-semibold text-amber-200">Checklist inicial pendiente</span>}
+                      {item.estado_revision === 'RECHAZADO' && <span className="ml-1 inline-flex rounded-full border border-rose-700 bg-rose-950/50 px-2 py-1 text-[11px] font-semibold text-rose-200">Requiere nueva limpieza</span>}
+                    </td>
+                    <td className="p-3">
+                      {item.estado === 'VACIO_SUCIO' && <button type="button" disabled={guardandoAccionContenedor} onClick={() => void marcarLimpiezaContenedor(item)} className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs font-semibold text-cyan-200 disabled:opacity-50">Registrar limpieza</button>}
+                      {item.estado === 'VACIO_LIMPIO' && <button type="button" disabled={guardandoAccionContenedor} onClick={() => abrirRevisionContenedor(item)} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-semibold text-emerald-200 disabled:opacity-50">Inspeccionar para relleno</button>}
+                      {item.estado === 'LISTO_PARA_RELLENAR' && <span className="text-xs font-semibold text-emerald-300">Disponible para rellenar</span>}
+                      {['LLENO', 'PARCIAL'].includes(item.estado) && <span className="text-xs text-slate-500">En inventario</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       {vistaActiva === 'CHECKLIST' && (
         <div className="space-y-6">
           {/* KPIs Checklist */}
@@ -1257,6 +1425,36 @@ return (
         </div>
       )}
 {/* ==================================================================== */}
+      {contenedorRevisionActivo && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4">
+          <div role="dialog" aria-modal="true" className="w-full max-w-xl space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl">
+            <div>
+              <h2 className="text-lg font-bold">Inspección del contenedor para relleno</h2>
+              <p className="text-sm text-slate-400">{contenedorRevisionActivo.folio} · {contenedorRevisionActivo.codigo}</p>
+            </div>
+            <p className="text-xs text-slate-400">Marca los defectos observados. Si todos están desmarcados y confirmas la revisión, el envase quedará listo para rellenar.</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {([
+                ['tapa_valvula', 'Tapa o válvula dañada'],
+                ['rejilla_danada', 'Rejilla dañada'],
+                ['base_danada', 'Base dañada'],
+                ['derrame', 'Derrame o fuga'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm">
+                  <input type="checkbox" checked={formRevisionContenedor[key]} onChange={(e) => setFormRevisionContenedor((prev) => ({ ...prev, [key]: e.target.checked }))} />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <label className="block text-sm text-slate-300">Observaciones<textarea value={formRevisionContenedor.observaciones} onChange={(e) => setFormRevisionContenedor((prev) => ({ ...prev, observaciones: e.target.value }))} maxLength={2000} rows={3} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2" /></label>
+            <label className="flex items-start gap-2 text-xs text-slate-300"><input type="checkbox" checked={confirmacionRevisionContenedor} onChange={(e) => setConfirmacionRevisionContenedor(e.target.checked)} />Confirmo que inspeccioné físicamente tapa/válvula, rejilla, base y fugas.</label>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setContenedorRevisionActivo(null)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm">Cancelar</button>
+              <button type="button" disabled={!confirmacionRevisionContenedor || guardandoAccionContenedor} onClick={() => void guardarRevisionContenedor()} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">{guardandoAccionContenedor ? 'Guardando…' : 'Guardar inspección'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* MODAL CHECKLIST CONTENEDORES */}
       {/* ==================================================================== */}
       {loteSeleccionado && (
