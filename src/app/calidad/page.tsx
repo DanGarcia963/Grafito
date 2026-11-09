@@ -1709,11 +1709,22 @@ return (
                       )}
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2.5">
-                      <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Etapa de la muestra</span>
-                      <span className="text-sm font-medium text-slate-200">{tipoMuestra.replace(/_/g, ' ')}</span>
-                      <p className="mt-1 text-[11px] text-slate-500">La etapa viene fijada desde Producción y determina qué cálculo se aplica.</p>
-                    </div>
+                    {/* El tipo está definido al crear la muestra; Calidad no puede cambiarlo al dictaminar. */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Tipo de Muestra
+                      </label>
+                      <select
+                        value={tipoMuestra}
+                        onChange={(e) => setTipoMuestra(e.target.value)}
+                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
+                      >
+                        <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
+                        <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
+                        <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
+                        <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
+                      </select>
+                      </div>
 
                     {/* Buscador / Creador de Analista */}
                     <div className="relative">
