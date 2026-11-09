@@ -1267,6 +1267,314 @@ export class CalidadService {
     }
   }
 
+  private esLoteGrafito(lote: any): boolean {
+    const especificaciones = lote.especificaciones as unknown as Record<string, any> | null;
+    const prensa = this.normalizarTexto(
+      especificaciones?.atributos?.tipo_prensa ??
+        especificaciones?.contenedores?.[0]?.tipo_prensa ??
+        especificaciones?.contenedores?.[0]?.atributos?.tipo_prensa,
+    );
+    return (
+      this.normalizarTexto(lote.producto?.nombre_Producto).includes('GRAFITO') ||
+      this.normalizarTexto(
+        lote.lote_produccion?.ordenes_produccion?.linea_Produccion,
+      ).includes('GRAFITO') ||
+      ['FORGEMASTER', 'POLYMASTER', 'FAGOR'].some((marca) => prensa.includes(marca))
+    );
+  }
+
+  private detallesContenedoresLote(lote: any) {
+    const especificaciones = lote.especificaciones as unknown as Record<string, any> | null;
+    const fuente = Array.isArray(especificaciones?.contenedores)
+      ? especificaciones!.contenedores
+      : [];
+    const items = fuente.map((contenedor: any) => {
+      let peso: Prisma.Decimal;
+      try {
+        peso = new Prisma.Decimal(String(contenedor?.peso_kg ?? '0'));
+      } catch {
+        peso = new Prisma.Decimal(0);
+      }
+      return {
+        contenedor,
+        peso,
+        restante: peso,
+        consumido: new Prisma.Decimal(0),
+        entregado: new Prisma.Decimal(0),
+      };
+    });
+    const movimientos = [...(lote.movimientos ?? [])].sort(
+      (a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime(),
+    );
+    for (const movimiento of movimientos) {
+      const tipo = String(movimiento.tipo ?? '');
+      if (!['SALIDA_CONSUMO', 'SALIDA_ENTREGA'].includes(tipo)) continue;
+      let cantidad = new Prisma.Decimal(movimiento.cantidad).sub(
+        movimiento.reversion?.cantidad ?? 0,
+      );
+      if (!cantidad.gt(0)) continue;
+      for (const item of items) {
+        if (!cantidad.gt(0)) break;
+        if (!item.restante.gt(0)) continue;
+        const retirada = Prisma.Decimal.min(item.restante, cantidad);
+        item.restante = item.restante.sub(retirada);
+        if (tipo === 'SALIDA_CONSUMO')
+          item.consumido = item.consumido.add(retirada);
+        else item.entregado = item.entregado.add(retirada);
+        cantidad = cantidad.sub(retirada);
+      }
+    }
+    const checklistPendiente = ['PENDIENTE', 'EN_REVISION'].includes(
+      String(lote.recepcion?.estado_checklist ?? ''),
+    );
+    return items
+      .filter((item) => item.contenedor?.codigo && item.peso.gt(0))
+      .map((item) => {
+        const contenedor = item.contenedor;
+        const limpieza = String(contenedor.estado_limpieza ?? 'SUCIO').toUpperCase();
+        const revision = contenedor.revision_relleno ?? null;
+        let estado: string;
+        if (item.restante.gt(0))
+          estado = item.restante.lt(item.peso) ? 'PARCIAL' : 'LLENO';
+        else if (item.consumido.gte(item.peso) && item.entregado.isZero()) {
+          if (limpieza === 'LIMPIO' && revision?.resultado === 'APROBADO')
+            estado = 'LISTO_PARA_RELLENAR';
+          else if (limpieza === 'LIMPIO') estado = 'VACIO_LIMPIO';
+          else estado = 'VACIO_SUCIO';
+        } else estado = 'FUERA_DE_PLANTA';
+        const fechas = [
+          lote.creado_en,
+          ...movimientos.map((m: any) => m.fecha),
+          contenedor.actualizado_en,
+          revision?.fecha,
+        ]
+          .map((fecha) => (fecha ? new Date(fecha).getTime() : 0))
+          .filter((fecha) => Number.isFinite(fecha));
+        return {
+          lote_inventario_id: lote.id,
+          folio: lote.folio,
+          producto: lote.producto?.nombre_Producto ?? '',
+          recepcion_folio: lote.recepcion?.no_lote ?? null,
+          codigo: String(contenedor.codigo),
+          peso_kg: item.peso.toFixed(4),
+          saldo_kg: item.restante.toFixed(4),
+          prensa: String(
+            especificaciones?.atributos?.tipo_prensa ??
+              contenedor.tipo_prensa ??
+              contenedor.atributos?.tipo_prensa ??
+              '',
+          ),
+          estado,
+          pendiente_checklist_inicial: checklistPendiente,
+          estado_limpieza: limpieza,
+          estado_revision: revision?.resultado ?? 'PENDIENTE',
+          limpieza,
+          revision,
+          actividad_en: fechas.reduce((max, fecha) => Math.max(max, fecha), 0),
+          condicion: lote.condicion,
+        };
+      });
+  }
+
+  async obtenerContenedoresGrafito() {
+    const lotes = await this.prisma.lotes_inventario.findMany({
+      include: {
+        producto: { select: { nombre_Producto: true } },
+        recepcion: {
+          select: { no_lote: true, estado_checklist: true },
+        },
+        lote_produccion: {
+          include: {
+            ordenes_produccion: { select: { linea_Produccion: true } },
+          },
+        },
+        movimientos: { include: { reversion: true } },
+      },
+      orderBy: { creado_en: 'asc' },
+    });
+    const candidatos = lotes.flatMap((lote) => {
+      if (!this.esLoteGrafito(lote)) return [];
+      return this.detallesContenedoresLote(lote)
+        .map((contenedor) => ({ ...contenedor, placeholder: /^(S\/R|SIN NUMERO|SIN IDENTIFICAR|C[- ]?\d+|CONTENEDOR[- ]?\d+)$/i.test(contenedor.codigo) }));
+    });
+    // Si un contenedor serializado reaparece en otro lote, conserva la instancia más reciente.
+    const porIdentidad = new Map<string, (typeof candidatos)[number]>();
+    for (const item of candidatos) {
+      const claveCodigo = item.codigo.trim().toUpperCase();
+      const clave = item.placeholder
+        ? `${item.lote_inventario_id}:${claveCodigo}`
+        : claveCodigo;
+      const anterior = porIdentidad.get(clave);
+      if (!anterior || item.actividad_en >= anterior.actividad_en)
+        porIdentidad.set(clave, item);
+    }
+    const result = [...porIdentidad.values()]
+      .filter((item) => item.estado !== 'FUERA_DE_PLANTA')
+      .map(({ actividad_en: _actividad, placeholder: _placeholder, ...item }) => item)
+      .sort((a, b) => a.folio.localeCompare(b.folio) || a.codigo.localeCompare(b.codigo));
+    const resumen = {
+      LLENO: result.filter((c) => c.estado === 'LLENO').length,
+      PARCIAL: result.filter((c) => c.estado === 'PARCIAL').length,
+      PENDIENTE_CHECKLIST: result.filter((c) => c.pendiente_checklist_inicial).length,
+      VACIO_SUCIOS: result.filter((c) => c.estado === 'VACIO_SUCIO').length,
+      VACIO_LIMPIOS: result.filter((c) => c.estado === 'VACIO_LIMPIO').length,
+      LISTO_PARA_RELLENAR: result.filter((c) => c.estado === 'LISTO_PARA_RELLENAR').length,
+    };
+    return { success: true, result, resumen };
+  }
+
+  private async actualizarContenedorGrafito(
+    id: number,
+    codigoEntrada: unknown,
+    actorEntrada: unknown,
+    accion: string,
+    transformar: (contenedor: Record<string, any>, estadoActual: string, datosEstado: any) => Record<string, any>,
+  ) {
+    const codigo = String(codigoEntrada ?? '').trim();
+    const actor = String(actorEntrada ?? '').trim() || 'Usuario de Calidad';
+    if (!codigo) throw new BadRequestException('Identifica el contenedor');
+    const actualizado = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM lotes_inventario WHERE id = ${id} FOR UPDATE`;
+      const lote = await tx.lotes_inventario.findUnique({
+        where: { id },
+        include: {
+          producto: { select: { nombre_Producto: true } },
+          recepcion: { select: { no_lote: true, estado_checklist: true } },
+          lote_produccion: {
+            include: {
+              ordenes_produccion: { select: { linea_Produccion: true } },
+            },
+          },
+          movimientos: { include: { reversion: true } },
+        },
+      });
+      if (!lote) throw new NotFoundException('Lote de inventario no encontrado');
+      if (!this.esLoteGrafito(lote))
+        throw new BadRequestException('El lote no pertenece a grafito');
+      const estados = this.detallesContenedoresLote(lote);
+      const estadoContenedor = estados.find((item) => item.codigo === codigo);
+      if (!estadoContenedor)
+        throw new NotFoundException('Contenedor no encontrado en el lote');
+      const especificaciones = lote.especificaciones as unknown as Record<string, any> | null;
+      const lista = Array.isArray(especificaciones?.contenedores)
+        ? [...especificaciones!.contenedores]
+        : [];
+      const indice = lista.findIndex((item: any) => String(item?.codigo ?? '') === codigo);
+      if (indice < 0) throw new NotFoundException('Contenedor no encontrado');
+      const previo = lista[indice] as Record<string, any>;
+      const fecha = new Date().toISOString();
+      const siguiente = transformar({ ...previo }, estadoContenedor.estado, estadoContenedor);
+      const entradaHistorial = {
+        accion,
+        estado_anterior: estadoContenedor.estado,
+        estado_nuevo:
+          siguiente.estado_limpieza === 'LIMPIO'
+            ? siguiente.revision_relleno?.resultado === 'APROBADO'
+              ? 'LISTO_PARA_RELLENAR'
+              : 'VACIO_LIMPIO'
+            : 'VACIO_SUCIO',
+        realizado_por: actor,
+        fecha,
+        detalle: siguiente.revision_relleno ?? siguiente.limpieza ?? null,
+      };
+      siguiente.actualizado_en = fecha;
+      siguiente.historial_estado = [
+        ...(Array.isArray(previo.historial_estado) ? previo.historial_estado : []),
+        entradaHistorial,
+      ].slice(-50);
+      lista[indice] = siguiente;
+      await tx.lotes_inventario.update({
+        where: { id },
+        data: {
+          especificaciones: {
+            ...(especificaciones ?? {}),
+            contenedores: lista,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'INVENTARIO',
+          entidad_id: id,
+          ciclo: 1,
+          fecha: new Date(),
+          accion,
+          detalle: JSON.stringify({ codigo, realizado_por: actor }),
+        },
+      });
+      return { lote_inventario_id: id, folio: lote.folio, codigo, estado: entradaHistorial.estado_nuevo };
+    });
+    this.eventos.notificar('INVENTARIO_CONTENEDORES_ACTUALIZADO', {
+      lote_inventario_id: id,
+    });
+    return actualizado;
+  }
+
+  async marcarContenedorGrafitoLimpio(
+    id: number,
+    body: Record<string, unknown>,
+    usuario: unknown,
+  ) {
+    const result = await this.actualizarContenedorGrafito(
+      id,
+      body.codigo,
+      usuario,
+      'CONTENEDOR_LIMPIEZA_COMPLETADA',
+      (contenedor, estado, datosEstado) => {
+        if (estado !== 'VACIO_SUCIO')
+          throw new BadRequestException('Solo puedes registrar limpieza en un contenedor vacío y sucio');
+        if (datosEstado.pendiente_checklist_inicial)
+          throw new BadRequestException('Completa primero el checklist inicial de recepción');
+        return {
+          ...contenedor,
+          estado_limpieza: 'LIMPIO',
+          limpieza: { realizado_por: String(usuario ?? 'Usuario de Calidad'), fecha: new Date().toISOString() },
+          revision_relleno: { resultado: 'PENDIENTE' },
+        };
+      },
+    );
+    return { success: true, result };
+  }
+
+  async revisarContenedorGrafito(
+    id: number,
+    body: Record<string, unknown>,
+    usuario: unknown,
+  ) {
+    const codigo = String(body.codigo ?? '').trim();
+    const campos = ['tapa_valvula', 'rejilla_danada', 'base_danada', 'derrame'] as const;
+    if (!codigo || campos.some((campo) => typeof body[campo] !== 'boolean'))
+      throw new BadRequestException('Captura el resultado completo de la inspección');
+    const observaciones = String(body.observaciones ?? '').trim().slice(0, 2000);
+    const defectos = campos.some((campo) => body[campo] === true);
+    const result = await this.actualizarContenedorGrafito(
+      id,
+      codigo,
+      usuario,
+      'CONTENEDOR_INSPECCION_RELLENO',
+      (contenedor, estado) => {
+        if (estado !== 'VACIO_LIMPIO')
+          throw new BadRequestException('El contenedor debe estar limpio y vacío antes de inspeccionarlo');
+        const revision = {
+          resultado: defectos ? 'RECHAZADO' : 'APROBADO',
+          tapa_valvula: body.tapa_valvula,
+          rejilla_danada: body.rejilla_danada,
+          base_danada: body.base_danada,
+          derrame: body.derrame,
+          observaciones,
+          revisado_por: String(usuario ?? ''),
+          fecha: new Date().toISOString(),
+        };
+        return {
+          ...contenedor,
+          estado_limpieza: defectos ? 'SUCIO' : 'LIMPIO',
+          revision_relleno: revision,
+        };
+      },
+    );
+    return { success: true, result };
+  }
+
   async obtenerOrdenesPendientesDeLlegada(fechaFiltro?: Date | string) {
     try {
       // Si envían fecha la tomamos, si no, usamos la fecha/hora actual
