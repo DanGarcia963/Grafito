@@ -167,6 +167,40 @@ export class CalidadController {
     return await this.calidadService.crearLoteConChecklist(body);
   }
 
+  @Areas('calidad')
+  @Get('contenedores-grafito')
+  obtenerContenedoresGrafito() {
+    return this.calidadService.obtenerContenedoresGrafito();
+  }
+
+  @Areas('calidad')
+  @Post('contenedores-grafito/:loteId/limpieza')
+  marcarContenedorGrafitoLimpio(
+    @Param('loteId', ParseIntPipe) loteId: number,
+    @Body() body: Record<string, unknown>,
+    @Req() request: any,
+  ) {
+    return this.calidadService.marcarContenedorGrafitoLimpio(
+      loteId,
+      body,
+      request.usuario,
+    );
+  }
+
+  @Areas('calidad')
+  @Post('contenedores-grafito/:loteId/inspeccion')
+  revisarContenedorGrafito(
+    @Param('loteId', ParseIntPipe) loteId: number,
+    @Body() body: Record<string, unknown>,
+    @Req() request: any,
+  ) {
+    return this.calidadService.revisarContenedorGrafito(
+      loteId,
+      body,
+      request.usuario,
+    );
+  }
+
   @Areas('calidad') @Post('finalizarAnalisis')
   finalizar(@Body() body: any) { return this.calidadService.finalizarAnalisis(body); }
   @Areas('calidad') @Post(':id/recibir')
