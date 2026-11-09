@@ -338,7 +338,9 @@ const cargarContenedoresGrafito = useCallback(async () => {
       if (vistaActiva === 'CONTENEDORES') void cargarContenedoresGrafito();
     };
     socket.on('INVENTARIO_CONTENEDORES_ACTUALIZADO', actualizarContenedores);
-    return () => socket.off('INVENTARIO_CONTENEDORES_ACTUALIZADO', actualizarContenedores);
+    return () => {
+      socket.off('INVENTARIO_CONTENEDORES_ACTUALIZADO', actualizarContenedores);
+    };
   }, [socket, vistaActiva, cargarContenedoresGrafito]);
 
 // ============================================================
