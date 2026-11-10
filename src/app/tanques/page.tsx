@@ -207,6 +207,9 @@ export default function TanquesPage() {
       id: number;
     } | null>(null),
     [plan, setPlan] = useState(false);
+  const [etapaTanqueSeleccionada, setEtapaTanqueSeleccionada] = useState("");
+  const [categoriaMuestraNueva, setCategoriaMuestraNueva] = useState("MUESTRA_INICIAL");
+
   const cargar = useCallback(async () => {
     const usuarioActual = sesionActual();
     const [o, t, m, c, maybeLotes, maybeOrdenesVenta, maybeAsignaciones, maybePedidos] = await Promise.all([
@@ -296,6 +299,25 @@ export default function TanquesPage() {
       t.estatus_proceso === "VACIO" &&
       !lotes.some((l) => l.tanque_id === t.id_Equipos_Tanques),
   );
+  const gruposMuestrasProduccion = [
+    {
+      key: "MUESTRA_POR_AJUSTE",
+      titulo: "Muestras por ajuste",
+      items: muestras.filter((m) => m.categoria_Muestra === "MUESTRA_POR_AJUSTE"),
+    },
+    {
+      key: "MUESTRA_AJUSTADO",
+      titulo: "Muestras ajustadas",
+      items: muestras.filter((m) => m.categoria_Muestra === "MUESTRA_AJUSTADO"),
+    },
+    {
+      key: "OTRAS",
+      titulo: "Otras muestras",
+      items: muestras.filter(
+        (m) => !["MUESTRA_POR_AJUSTE", "MUESTRA_AJUSTADO"].includes(m.categoria_Muestra),
+      ),
+    },
+  ];
   const resumenContenedores = resumirContenedores(stock);
   const ordenesOrdenadas = [...ordenes].sort((a, b) => {
     const prioridad = prioridadEstadoOP(a) - prioridadEstadoOP(b);
@@ -464,9 +486,11 @@ export default function TanquesPage() {
                             <button
                               className={boton}
                               disabled={busy}
-                              onClick={() =>
-                                setForm({ tipo: "estado", dato: t })
-                              }
+                              onClick={() => {
+                                setEtapaTanqueSeleccionada(t.estatus_proceso);
+                                setCategoriaMuestraNueva("MUESTRA_INICIAL");
+                                setForm({ tipo: "estado", dato: t });
+                              }}
                             >
                               Cambiar proceso
                             </button>
@@ -792,7 +816,10 @@ export default function TanquesPage() {
                   : <>La recepción, los análisis y el dictamen se registran en{" "}
                     <Link href="/calidad" className="underline text-cyan-300">Calidad</Link>.</>}
               </p>
-              {muestras.map((m) => (
+              {gruposMuestrasProduccion.map((grupo) => (
+                <section key={grupo.key} className="space-y-3">
+                  <h2 className="text-base font-semibold text-cyan-200">{grupo.titulo}</h2>
+                  {grupo.items.map((m) => (
                 <article
                   key={m.id_Muestra}
                   className="border border-slate-700 rounded-xl p-4 bg-slate-900"
@@ -810,6 +837,39 @@ export default function TanquesPage() {
                     {m.categoria_Muestra}
                   </p>
                   <p>{m.observaciones}</p>
+                  {m.categoria_Muestra === "MUESTRA_POR_AJUSTE" && (
+                    <div className="mt-3 rounded-lg border border-amber-800/70 bg-amber-950/20 p-3">
+                      <h3 className="text-sm font-semibold text-amber-200">Aditivos indicados para el ajuste</h3>
+                      {Array.isArray(m.aditivos_ajuste) && m.aditivos_ajuste.length ? (
+                        <ul className="mt-2 space-y-1 text-sm text-slate-200">
+                          {m.aditivos_ajuste.map((item: any, index: number) => (
+                            <li key={index}>
+                              {item.nombre}: {item.cantidad} {item.unidad}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-400">No se registraron aditivos; consulta las observaciones.</p>
+                      )}
+                    </div>
+                  )}
+                  {Array.isArray(m.resultado_analisis) && m.resultado_analisis.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+                      <h3 className="text-sm font-semibold text-slate-200">Resultados de Calidad</h3>
+                      <ul className="mt-2 space-y-1 text-sm text-slate-300">
+                        {m.resultado_analisis.map((resultado: any) => (
+                          <li key={resultado.id_Resultado_Analisis}>
+                            {resultado.parametros_laboratorio?.nombre_Parametro ?? `Parámetro ${resultado.parametro_id}`}:{" "}
+                            {resultado.valor_Obtenido_Num ?? resultado.valor_Obtenido_Texto ?? "—"}
+                            {resultado.parametros_laboratorio?.unidad_Medida ? ` ${resultado.parametros_laboratorio.unidad_Medida}` : ""}
+                            <span className="ml-2 text-xs text-slate-500">
+                              {resultado.cumple_Especificacion === true ? "Cumple" : resultado.cumple_Especificacion === false ? "No cumple" : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <button
                     className={`${boton} mt-2`}
                     onClick={() =>
@@ -855,6 +915,13 @@ export default function TanquesPage() {
                       </>
                     )}
                 </article>
+                  ))}
+                  {!grupo.items.length && (
+                    <p className="rounded-lg border border-slate-800 p-3 text-sm text-slate-400">
+                      No hay registros en esta sección.
+                    </p>
+                  )}
+                </section>
               ))}
               {!muestras.length && (
                 <p>Sin muestras asociadas a lotes de Grafito.</p>
@@ -983,6 +1050,11 @@ export default function TanquesPage() {
                           <p>
                             {s.producto} · {s.condicion}
                           </p>
+                          {s.origen === "RECEPCION" && s.estado_calidad_recepcion === "CUARENTENA" && (
+                            <p className="mt-1 inline-flex rounded-full border border-amber-700 bg-amber-950/40 px-2 py-1 text-xs text-amber-200">
+                              Cuarentena · pendiente de aprobación del checklist de llegada
+                            </p>
+                          )}
                           <p>
                             {Object.entries(s.especificaciones?.atributos ?? {})
                               .map(([k, v]) => `${k}: ${v}`)
@@ -1156,6 +1228,8 @@ export default function TanquesPage() {
                       {
                         tanqueId: d.id_Equipos_Tanques,
                         estatus_proceso: b.estado,
+                        categoria_Muestra:
+                          b.estado === "MUESTREO" ? b.categoria_Muestra : undefined,
                       },
                       "PUT",
                     );
@@ -1530,19 +1604,39 @@ export default function TanquesPage() {
                   </label>
                 )}
                 {form.tipo === "estado" && (
-                  <label>
-                    Etapa
-                    <select
-                      required
-                      name="estado"
-                      className={input}
-                      defaultValue={form.dato.estatus_proceso}
-                    >
-                      {estados.map((e) => (
-                        <option key={e}>{e}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <label>
+                      Etapa
+                      <select
+                        required
+                        name="estado"
+                        className={input}
+                        value={etapaTanqueSeleccionada}
+                        onChange={(e) => setEtapaTanqueSeleccionada(e.target.value)}
+                      >
+                        {estados.map((e) => (
+                          <option key={e}>{e}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {etapaTanqueSeleccionada === "MUESTREO" && (
+                      <label>
+                        Tipo de muestra que se envía a Calidad
+                        <select
+                          required
+                          name="categoria_Muestra"
+                          className={input}
+                          value={categoriaMuestraNueva}
+                          onChange={(e) => setCategoriaMuestraNueva(e.target.value)}
+                        >
+                          <option value="MUESTRA_INICIAL">Muestra inicial</option>
+                          <option value="MUESTRA_EVAPOR_DESMETAL">Muestra evaporación y desmetalización</option>
+                          <option value="MUESTRA_POR_AJUSTE">Muestra por ajuste</option>
+                          <option value="MUESTRA_AJUSTADO">Muestra ajustado</option>
+                        </select>
+                      </label>
+                    )}
+                  </>
                 )}
                 {["iniciar", "mover"].includes(form.tipo) && (
                   <label>
