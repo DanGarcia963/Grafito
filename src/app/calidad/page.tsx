@@ -1980,7 +1980,7 @@ return (
                         Tipo de Muestra
                       </label>
                       <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm font-medium text-slate-200">
-                        {tipoMuestra.replaceAll('_', ' ')}
+                        {tipoMuestra.replace(/_/g, ' ')}
                       </div>
                     </div>
 
