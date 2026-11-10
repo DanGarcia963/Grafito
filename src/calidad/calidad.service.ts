@@ -24,7 +24,7 @@ export interface ContenedorInput {
   rejilla_danada: boolean;
   base_danada: boolean;
   derrame: boolean;
-  observaciones?: string;
+  observaciones?: string | null;
 }
 
 export interface CrearLoteInput {
@@ -1675,15 +1675,17 @@ export class CalidadService {
     const id = this.tiempos.id(payload.recepcion_id);
     if (!payload.reviso_nombre?.trim() || !Array.isArray(payload.contenedores) || !payload.contenedores.length)
       throw new BadRequestException('Captura responsable y contenedores');
-    const contenedores = payload.contenedores.map((c: ContenedorInput) => ({
-      no_consecutivo: this.tiempos.id(c.no_consecutivo),
-      numero_contenedor: String(c.numero_contenedor ?? 'S/R').trim() || 'S/R',
-      tapa_valvula: booleanInput(c.tapa_valvula),
-      rejilla_danada: booleanInput(c.rejilla_danada),
-      base_danada: booleanInput(c.base_danada),
-      derrame: booleanInput(c.derrame),
-      observaciones: String(c.observaciones ?? '').trim() || null,
-    }));
+    const contenedores: ContenedorInput[] = payload.contenedores.map(
+      (c: ContenedorInput): ContenedorInput => ({
+        no_consecutivo: this.tiempos.id(c.no_consecutivo),
+        numero_contenedor: String(c.numero_contenedor ?? 'S/R').trim() || 'S/R',
+        tapa_valvula: booleanInput(c.tapa_valvula),
+        rejilla_danada: booleanInput(c.rejilla_danada),
+        base_danada: booleanInput(c.base_danada),
+        derrame: booleanInput(c.derrame),
+        observaciones: String(c.observaciones ?? '').trim() || null,
+      }),
+    );
     if (new Set(contenedores.map((c) => c.no_consecutivo)).size !== contenedores.length)
       throw new BadRequestException('Hay consecutivos de contenedor duplicados.');
     const result = await this.prisma.$transaction(async (tx) => {
