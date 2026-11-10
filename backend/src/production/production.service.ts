@@ -1181,7 +1181,12 @@ export class ProductionService {
           id: { in: consumos.map((c) => c.id) },
         },
         include: {
-          lote: { include: { lote_produccion: true } },
+          lote: {
+            include: {
+              lote_produccion: true,
+              recepcion: { select: { estado_checklist: true } },
+            },
+          },
           movimientos: { include: { reversion: true } },
         },
       });
@@ -1197,7 +1202,12 @@ export class ProductionService {
           id: { in: consumos.map((c) => c.id) },
         },
         include: {
-          lote: { include: { lote_produccion: true } },
+          lote: {
+            include: {
+              lote_produccion: true,
+              recepcion: { select: { estado_checklist: true } },
+            },
+          },
           movimientos: { include: { reversion: true } },
         },
       });
