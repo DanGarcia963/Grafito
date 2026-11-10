@@ -146,6 +146,7 @@ export function aptitudMaterial(l: {
   condicion: string;
   fecha_caducidad: Date | null;
   estado_calidad_recepcion: string | null;
+  recepcion?: { estado_checklist: string } | null;
   lote_produccion?: { estado_Calida: string } | null;
 }) {
   const calidad =
@@ -153,18 +154,22 @@ export function aptitudMaterial(l: {
       ? l.lote_produccion?.estado_Calida
       : l.estado_calidad_recepcion;
   const vigente = !l.fecha_caducidad || l.fecha_caducidad >= new Date();
+  const checklistRecepcionAprobado =
+    l.origen !== 'RECEPCION' || l.recepcion?.estado_checklist === 'COMPLETADO';
   const liberado =
+    checklistRecepcionAprobado &&
     calidad === 'LIBERADO' &&
     !['SUCIO', 'FUERA_DE_ESPECIFICACION', 'RESIDUO'].includes(l.condicion);
   const rechazado = ['RECHAZADO', 'BLOQUEADO'].includes(calidad ?? '');
-  const materiaPorRegenerar = l.condicion === 'SUCIO' && !rechazado;
+  const materiaPorRegenerar =
+    l.condicion === 'SUCIO' && !rechazado && checklistRecepcionAprobado;
   const fueraDeEspecificacion =
     l.condicion === 'FUERA_DE_ESPECIFICACION' &&
-    ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(calidad ?? '');
-  // El dictamen de recepción no equivale a la liberación del producto terminado.
-  // El material SUCIO puede entrar a una OP de reproceso mientras no esté bloqueado,
-  // rechazado ni vencido; nunca queda disponible para venta por esta regla.
+    ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(calidad ?? '') &&
+    checklistRecepcionAprobado;
+  // Recepciones pendientes o con incidencias no se pueden reservar, consumir ni entregar.
   const reprocesable =
-    vigente && (liberado || materiaPorRegenerar || fueraDeEspecificacion);
+    vigente && checklistRecepcionAprobado &&
+    (liberado || materiaPorRegenerar || fueraDeEspecificacion);
   return { liberado, venta: vigente && liberado, reprocesable };
 }

@@ -29,6 +29,7 @@ import {
   lotes_produccion_estado_Calida,
   muestras_estado_Muestra,
   muestras_etapa_Muestra,
+  muestras_categoria_Muestra,
 } from '@prisma/client'; // <-- 1. Importar el Enum de Prisma
 
 const condicionesProductoTerminado = ['REGENERADO', 'TERMINADO'] as const;
@@ -666,9 +667,11 @@ export class ProductionService {
   async actualizarEstatusTanque({
     tanqueId,
     estatus_proceso,
+    categoria_Muestra,
   }: {
     tanqueId: number;
     estatus_proceso: string;
+    categoria_Muestra?: string;
     idVentaOrigen?: number;
   }) {
     const id = this.tiempos.id(tanqueId);
@@ -682,6 +685,17 @@ export class ProductionService {
       )
     )
       throw new BadRequestException('Etapa de tanque inválida');
+    const categoriaMuestra = String(categoria_Muestra ?? 'MUESTRA_INICIAL')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '_');
+    if (
+      estado === 'MUESTREO' &&
+      !Object.values(muestras_categoria_Muestra).includes(
+        categoriaMuestra as muestras_categoria_Muestra,
+      )
+    )
+      throw new BadRequestException('Categoría de muestra inválida');
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id_Equipos_Tanques" FROM equipos_tanques WHERE "id_Equipos_Tanques" = ${id} FOR UPDATE`;
       const tanque = await tx.equipos_tanques.findUnique({
@@ -742,6 +756,8 @@ export class ProductionService {
             estado_Muestra: { notIn: ['APROBADO', 'RECHAZADO'] },
           },
         });
+        if (pendiente && pendiente.categoria_Muestra !== (categoriaMuestra as muestras_categoria_Muestra))
+          throw new ConflictException('Ya existe una muestra pendiente de otra categoría para este tanque/lote.');
         if (!pendiente) {
           // La muestra siempre necesita un producto real. Si el LP aún no tiene OP,
           // se toma del material de inventario que fue consumido para cargarlo.
@@ -812,6 +828,7 @@ export class ProductionService {
             lote_id: lote.id_Lote_Produccion,
             producto_id: productoId,
             cliente_id: clienteId,
+            categoria_Muestra: categoriaMuestra as muestras_categoria_Muestra,
           };
           const muestra = await tx.muestras.create({
             data: muestraData,
