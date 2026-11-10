@@ -46,6 +46,8 @@ interface ParametroLaboratorio {
   }
 
   // Interface opcional para TypeScript
+type AditivoAjuste = { nombre: string; cantidad: string; unidad: string };
+
 interface ContenedorState {
   no_consecutivo: number;
   numero_contenedor: string;
@@ -231,6 +233,7 @@ const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
   const [mediciones, setMediciones] = useState<{ [paramId: number]: string }>({});
   const [entradasCalculo, setEntradasCalculo] = useState<Record<number, Record<string, string>>>({});
+  const [aditivosAjuste, setAditivosAjuste] = useState<AditivoAjuste[]>([]);
   const [observaciones, setObservaciones] = useState('');
   const [dictamen, setDictamen] = useState<'APROBADO' | 'RECHAZADO'>('APROBADO');
 
@@ -348,16 +351,27 @@ const cargarContenedoresGrafito = useCallback(async () => {
   // ============================================================
   const abrirModalChecklist = (orden: any) => {
     setLoteSeleccionado(orden);
-    setRevisoNombre('');
-
-    // El detalle pertenece a la recepción, no al texto libre de la venta.
+    setRevisoNombre(orden.reviso_nombre ?? '');
+    const anteriores: ContenedorState[] = orden.checklist_contenedor ?? [];
     const detalle = (orden.materiales ?? []).flatMap((m: any) =>
-      (m.especificaciones?.contenedores ?? []).map((c: any) => ({...c, prensa: m.especificaciones?.atributos?.tipo_prensa ?? ''})));
-    const contenedoresGenerados: ContenedorState[] = detalle.map((c: any, index: number) => ({
-      no_consecutivo: index + 1, numero_contenedor: c.codigo,
-      observaciones: c.prensa ? `Prensa: ${c.prensa}` : '', tapa_valvula: false, rejilla_danada: false,
-      base_danada: false, derrame: false,
-    }));
+      (m.especificaciones?.contenedores ?? []).map((c: any) => ({
+        ...c, prensa: m.especificaciones?.atributos?.tipo_prensa ?? '',
+      })),
+    );
+    const filasBase = detalle.length ? detalle : anteriores.length ? anteriores : [{ codigo: 'S/R' }];
+    const contenedoresGenerados: ContenedorState[] = filasBase.map((c: any, index: number) => {
+      const consecutivo = Number(c.no_consecutivo ?? index + 1);
+      const previo = anteriores.find((item: any) => Number(item.no_consecutivo) === consecutivo);
+      return {
+        no_consecutivo: consecutivo,
+        numero_contenedor: previo?.numero_contenedor ?? c.codigo ?? 'S/R',
+        observaciones: previo?.observaciones ?? (c.prensa ? 'Prensa: ' + c.prensa : ''),
+        tapa_valvula: Boolean(previo?.tapa_valvula),
+        rejilla_danada: Boolean(previo?.rejilla_danada),
+        base_danada: Boolean(previo?.base_danada),
+        derrame: Boolean(previo?.derrame),
+      };
+    });
     setContenedores(contenedoresGenerados);
   };
 
@@ -478,9 +492,14 @@ const handleGuardarChecklist = async () => {
         throw new Error(res.error || 'Error al guardar el checklist');
       }
 
-      alert('¡Checklist guardado correctamente!');
+      const checklistAprobado = res.result?.estado_checklist === 'COMPLETADO';
+      alert(
+        checklistAprobado
+          ? 'Checklist de llegada aprobado. Los lotes rechazados por otro dictamen siguen bloqueados.'
+          : 'Se guardaron incidencias. El material permanece en cuarentena; puedes corregirlo y registrar una reinspección.',
+      );
       setLoteSeleccionado(null);
-      setContenedores([]); // Limpiar la lista al cerrar
+      setContenedores([]);
       cargarLotesLlegada();
     } catch (error: any) {
       console.error('Error al guardar checklist:', error);
@@ -733,6 +752,22 @@ const muestraData = getMuestraData(muestra);
 
   setMuestraSeleccionada(muestra);
   setTipoMuestra(muestraData.tipoMuestra);
+  const aditivosExistentes = Array.isArray(muestra?.aditivos_ajuste)
+    ? muestra.aditivos_ajuste
+        .filter((item: any) => item && typeof item === 'object')
+        .map((item: any) => ({
+          nombre: String(item.nombre ?? ''),
+          cantidad: String(item.cantidad ?? ''),
+          unidad: String(item.unidad ?? ''),
+        }))
+    : [];
+  setAditivosAjuste(
+    muestraData.tipoMuestra === 'MUESTRA_POR_AJUSTE'
+      ? aditivosExistentes.length
+        ? aditivosExistentes
+        : [{ nombre: '', cantidad: '', unidad: '' }]
+      : [],
+  );
   const dictamenActual = (muestraData.estado || '').toUpperCase().trim();
   const esFinalizada = dictamenActual === 'APROBADO' || dictamenActual === 'RECHAZADO' || dictamenActual === 'APROBADA' || dictamenActual === 'RECHAZADA';
 
@@ -802,6 +837,7 @@ const cerrarModal = () => {
   setEsModoLectura(false);
   setEspecificacionesGuardadas([]);
   setMediciones({});
+  setAditivosAjuste([]);
   setObservaciones('');
   setAnalistaNombre('');
 };
@@ -819,6 +855,22 @@ const cerrarModal = () => {
       [paramId]: { ...(prev[paramId] ?? {}), [campo]: valor },
     }));
   };
+
+  const handleAditivoAjusteChange = (
+    index: number,
+    campo: keyof AditivoAjuste,
+    valor: string,
+  ) => {
+    setAditivosAjuste((prev) =>
+      prev.map((aditivo, i) => (i === index ? { ...aditivo, [campo]: valor } : aditivo)),
+    );
+  };
+
+  const agregarAditivoAjuste = () =>
+    setAditivosAjuste((prev) => [...prev, { nombre: '', cantidad: '', unidad: '' }]);
+
+  const eliminarAditivoAjuste = (index: number) =>
+    setAditivosAjuste((prev) => prev.filter((_, i) => i !== index));
 
 const guardarResultados = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -841,10 +893,23 @@ const guardarResultados = async (e: React.FormEvent) => {
       };
     });
 
+    const aditivosPayload =
+      tipoMuestra === 'MUESTRA_POR_AJUSTE'
+        ? aditivosAjuste.filter((item) =>
+            [item.nombre, item.cantidad, item.unidad].some((value) => value.trim()),
+          )
+        : null;
+
     const respuesta = await fetch(`${API_URL}/api/calidad/finalizarAnalisis`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idMuestra: Number(idMuestra), mediciones: listaMediciones,
-        dictamen, observaciones, analistaNombre: analistaNombre.trim() }),
+      body: JSON.stringify({
+        idMuestra: Number(idMuestra),
+        mediciones: listaMediciones,
+        dictamen,
+        observaciones,
+        analistaNombre: analistaNombre.trim(),
+        aditivos_ajuste: aditivosPayload?.length ? aditivosPayload : null,
+      }),
     });
     const resultado = await respuesta.json();
     if (!respuesta.ok || !resultado.success) throw new Error(resultado.message || resultado.error || 'No se pudo finalizar');
@@ -1910,22 +1975,52 @@ return (
                       )}
                     </div>
 
-                    {/* El tipo está definido al crear la muestra; Calidad no puede cambiarlo al dictaminar. */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                         Tipo de Muestra
                       </label>
-                      <select
-                        value={tipoMuestra}
-                        onChange={(e) => setTipoMuestra(e.target.value)}
-                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-cyan-500/50 transition-all"
-                      >
-                        <option value="MUESTRA_INICIAL">MUESTRA INICIAL</option>
-                        <option value="MUESTRA_EVAPOR_DESMETAL">MUESTRA EVAPOR DESMETAL</option>
-                        <option value="MUESTRA_POR_AJUSTE">MUESTRA POR AJUSTE</option>
-                        <option value="MUESTRA_AJUSTADO">MUESTRA AJUSTADO</option>
-                      </select>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm font-medium text-slate-200">
+                        {tipoMuestra.replaceAll('_', ' ')}
                       </div>
+                    </div>
+
+                    {tipoMuestra === 'MUESTRA_POR_AJUSTE' && (
+                      <section className="space-y-3 rounded-xl border border-amber-700/60 bg-amber-950/20 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-sm font-semibold text-amber-200">Aditivos e indicaciones para Producción</h3>
+                            <p className="mt-1 text-xs text-slate-300">
+                              Captura cada material que debe agregarse al ajuste. Si no se requiere ninguno, deja la lista vacía.
+                            </p>
+                          </div>
+                          <button type="button" onClick={agregarAditivoAjuste} className="inline-flex items-center gap-1 rounded-lg border border-amber-700 px-3 py-2 text-xs text-amber-100 hover:bg-amber-900/40">
+                            <Plus className="h-4 w-4" /> Agregar aditivo
+                          </button>
+                        </div>
+                        {aditivosAjuste.map((aditivo, index) => (
+                          <div key={index} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-3 sm:grid-cols-[minmax(0,1fr)_9rem_9rem_auto]">
+                            <label className="text-xs text-slate-400">
+                              Aditivo
+                              <input value={aditivo.nombre} onChange={(e) => handleAditivoAjusteChange(index, 'nombre', e.target.value)} maxLength={150} placeholder="Nombre del aditivo" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+                            </label>
+                            <label className="text-xs text-slate-400">
+                              Cantidad
+                              <input type="number" min="0.000001" step="any" value={aditivo.cantidad} onChange={(e) => handleAditivoAjusteChange(index, 'cantidad', e.target.value)} placeholder="0" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+                            </label>
+                            <label className="text-xs text-slate-400">
+                              Unidad
+                              <input value={aditivo.unidad} onChange={(e) => handleAditivoAjusteChange(index, 'unidad', e.target.value)} maxLength={30} placeholder="kg, L, g..." className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+                            </label>
+                            <button type="button" onClick={() => eliminarAditivoAjuste(index)} aria-label={'Quitar aditivo ' + (index + 1)} className="self-end rounded-lg border border-rose-900 px-3 py-2 text-rose-300 hover:bg-rose-950">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                        {!aditivosAjuste.length && (
+                          <p className="rounded-lg border border-dashed border-slate-700 p-3 text-xs text-slate-400">No se registraron aditivos para este ajuste.</p>
+                        )}
+                      </section>
+                    )}
 
                     {/* Buscador / Creador de Analista */}
                     <div className="relative">

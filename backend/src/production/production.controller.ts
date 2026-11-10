@@ -143,6 +143,7 @@ export class ProductionController {
     body: {
       tanqueId: number;
       estatus_proceso: string;
+      categoria_Muestra?: string;
       idVentaOrigen?: number;
     },
   ) {

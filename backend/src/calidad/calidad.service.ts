@@ -55,6 +55,65 @@ export class CalidadService {
       .toUpperCase();
   }
 
+  private normalizarAditivosAjuste(
+    entrada: unknown,
+    categoria: muestras_categoria_Muestra,
+  ): Prisma.InputJsonValue | null {
+    if (entrada == null) return null;
+    if (!Array.isArray(entrada))
+      throw new BadRequestException('Los aditivos deben enviarse como una lista.');
+    if (categoria !== 'MUESTRA_POR_AJUSTE' && entrada.length > 0)
+      throw new BadRequestException('Los aditivos solo aplican a muestras Por ajuste.');
+    if (entrada.length > 30)
+      throw new BadRequestException('No se permiten más de 30 aditivos por muestra.');
+    const aditivos = entrada.map((item: any, index: number) => {
+      const nombre = String(item?.nombre ?? '').trim();
+      const unidad = String(item?.unidad ?? '').trim();
+      if (!nombre || nombre.length > 150 || !unidad || unidad.length > 30)
+        throw new BadRequestException('Completa nombre y unidad del aditivo #' + (index + 1) + '.');
+      let cantidad: Prisma.Decimal;
+      try {
+        cantidad = new Prisma.Decimal(String(item?.cantidad ?? ''));
+      } catch {
+        throw new BadRequestException('Cantidad inválida para el aditivo #' + (index + 1) + '.');
+      }
+      if (!cantidad.isFinite() || !cantidad.gt(0))
+        throw new BadRequestException('La cantidad del aditivo #' + (index + 1) + ' debe ser mayor a cero.');
+      return { nombre, cantidad: cantidad.toString(), unidad };
+    });
+    return aditivos.length ? (aditivos as Prisma.InputJsonValue) : null;
+  }
+
+  private async actualizarInventarioPorDictamen(
+    tx: Prisma.TransactionClient,
+    loteInventarioId: number,
+    dictamen: string,
+    responsable?: string,
+  ) {
+    const lote = await tx.lotes_inventario.findUnique({
+      where: { id: loteInventarioId },
+      select: {
+        origen: true,
+        recepcion: { select: { estado_checklist: true } },
+      },
+    });
+    if (!lote) throw new NotFoundException('Lote de inventario no encontrado.');
+    const checklistAprobado =
+      lote.origen !== 'RECEPCION' ||
+      lote.recepcion?.estado_checklist === 'COMPLETADO';
+    const liberar = dictamen === 'APROBADO' && checklistAprobado;
+    const estado =
+      dictamen === 'RECHAZADO' ? 'RECHAZADO' : liberar ? 'LIBERADO' : 'CUARENTENA';
+    await tx.lotes_inventario.update({
+      where: { id: loteInventarioId },
+      data: {
+        estado_calidad_recepcion: estado,
+        liberado_en: liberar ? new Date() : null,
+        liberado_por: liberar ? responsable || 'Calidad' : null,
+      },
+    });
+  }
+
   private esMuestraGrafito(muestra: any): boolean {
     const producto = this.normalizarTexto(
       muestra?.productos_materiales?.nombre_Producto,
@@ -158,7 +217,13 @@ export class CalidadService {
             },
           },
 
-          resultado_analisis: true,
+          resultado_analisis: {
+            include: {
+              parametros_laboratorio: {
+                select: { nombre_Parametro: true, unidad_Medida: true },
+              },
+            },
+          },
         },
 
         orderBy: {
@@ -1151,19 +1216,18 @@ export class CalidadService {
             where: { id_Lote_Produccion: muestra.lote_id },
             data: { estado_Calida: payload.dictamen },
           });
+        const aditivosAjuste = this.normalizarAditivosAjuste(
+          payload.aditivos_ajuste,
+          muestra.categoria_Muestra,
+        );
+        await tx.muestras.update({
+          where: { id_Muestra: id },
+          data: { aditivos_ajuste: aditivosAjuste ?? Prisma.DbNull },
+        });
         if (muestra.lote_inventario_id)
-          await tx.lotes_inventario.update({
-            where: { id: muestra.lote_inventario_id },
-            data: {
-              estado_calidad_recepcion:
-                payload.dictamen === 'APROBADO' ? 'LIBERADO' : 'RECHAZADO',
-              liberado_en: payload.dictamen === 'APROBADO' ? new Date() : null,
-              liberado_por:
-                payload.dictamen === 'APROBADO'
-                  ? payload.analistaNombre || 'Calidad'
-                  : null,
-            },
-          });
+          await this.actualizarInventarioPorDictamen(
+            tx, muestra.lote_inventario_id, payload.dictamen, payload.analistaNombre,
+          );
         await this.tiempos.transicion(tx, ctx, null);
         await this.tiempos.evento(tx, ctx, tramo.ciclo, 'FIN_ANALISIS', {
           dictamen: payload.dictamen,
@@ -1222,14 +1286,9 @@ export class CalidadService {
         { anterior: muestra.estado_Muestra, nuevo: estado },
       );
       if (muestra.lote_inventario_id)
-        await tx.lotes_inventario.update({
-          where: { id: muestra.lote_inventario_id },
-          data: {
-            estado_calidad_recepcion: 'LIBERADO',
-            liberado_en: new Date(),
-            liberado_por: 'Calidad: liberación manual',
-          },
-        });
+        await this.actualizarInventarioPorDictamen(
+          tx, muestra.lote_inventario_id, 'APROBADO', 'Calidad: liberación manual',
+        );
       return tx.muestras.update({
         where: { id_Muestra: id },
         data: { estado_Muestra: 'APROBADO' },
@@ -1587,11 +1646,12 @@ export class CalidadService {
         where: {
           fecha_llegada: { lte: fechaLimite },
           estado_recepcion: { not: 'CANCELADA' },
-          estado_checklist: { in: ['PENDIENTE', 'EN_REVISION'] },
+          estado_checklist: { in: ['PENDIENTE', 'EN_REVISION', 'CON_INCIDENCIAS'] },
         },
         include: {
           remitente: { select: { nombre: true } },
           materiales: { include: { producto: true } },
+          checklist_contenedor: true,
         },
         orderBy: { fecha_llegada: 'asc' },
       });
@@ -1613,44 +1673,70 @@ export class CalidadService {
   // 2. Método para registrar el lote de llegada y su checklist directamente desde los datos enviados por el frontend
   async crearLoteConChecklist(payload: any) {
     const id = this.tiempos.id(payload.recepcion_id);
-    if (
-      !payload.reviso_nombre?.trim() ||
-      !Array.isArray(payload.contenedores) ||
-      !payload.contenedores.length
-    )
+    if (!payload.reviso_nombre?.trim() || !Array.isArray(payload.contenedores) || !payload.contenedores.length)
       throw new BadRequestException('Captura responsable y contenedores');
-    if (!['COMPLETADO', 'CON_INCIDENCIAS'].includes(payload.estado_checklist))
-      throw new BadRequestException('Estado de checklist inválido');
+    const contenedores = payload.contenedores.map((c: ContenedorInput) => ({
+      no_consecutivo: this.tiempos.id(c.no_consecutivo),
+      numero_contenedor: String(c.numero_contenedor ?? 'S/R').trim() || 'S/R',
+      tapa_valvula: booleanInput(c.tapa_valvula),
+      rejilla_danada: booleanInput(c.rejilla_danada),
+      base_danada: booleanInput(c.base_danada),
+      derrame: booleanInput(c.derrame),
+      observaciones: String(c.observaciones ?? '').trim() || null,
+    }));
+    if (new Set(contenedores.map((c) => c.no_consecutivo)).size !== contenedores.length)
+      throw new BadRequestException('Hay consecutivos de contenedor duplicados.');
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM lotes_llegada WHERE id=${id} FOR UPDATE`;
-      const recepcion = await tx.lotes_llegada.findUnique({ where: { id } });
+      const recepcion = await tx.lotes_llegada.findUnique({
+        where: { id }, include: { materiales: { select: { especificaciones: true } } },
+      });
       if (!recepcion || recepcion.estado_recepcion === 'CANCELADA')
         throw new BadRequestException('Recepción no disponible');
-      if (
-        ['COMPLETADO', 'CON_INCIDENCIAS'].includes(recepcion.estado_checklist)
-      )
-        throw new BadRequestException('La recepción ya fue revisada');
-      await tx.checklist_contenedor.createMany({
-        data: payload.contenedores.map((c: ContenedorInput) => ({
-          lote_llegada_id: id,
-          no_consecutivo: this.tiempos.id(c.no_consecutivo),
-          numero_contenedor: c.numero_contenedor,
-          tapa_valvula: booleanInput(c.tapa_valvula),
-          rejilla_danada: booleanInput(c.rejilla_danada),
-          base_danada: booleanInput(c.base_danada),
-          derrame: booleanInput(c.derrame),
-          observaciones: c.observaciones || null,
-        })),
+      if (recepcion.estado_checklist === 'COMPLETADO')
+        throw new BadRequestException('La recepción ya tiene el checklist aprobado.');
+      const esperados = recepcion.materiales.reduce((total, material) => {
+        const especificaciones = material.especificaciones as any;
+        return total + (Array.isArray(especificaciones?.contenedores) ? especificaciones.contenedores.length : 0);
+      }, 0);
+      if (esperados > 0 && contenedores.length !== esperados)
+        throw new BadRequestException('Debes revisar los ' + esperados + ' contenedores registrados en la recepción.');
+      for (const contenedor of contenedores) {
+        const { no_consecutivo, ...datos } = contenedor;
+        await tx.checklist_contenedor.upsert({
+          where: { lote_llegada_id_no_consecutivo: { lote_llegada_id: id, no_consecutivo } },
+          create: { lote_llegada_id: id, no_consecutivo, ...datos },
+          update: datos,
+        });
+      }
+      await tx.checklist_contenedor.deleteMany({
+        where: { lote_llegada_id: id, no_consecutivo: { notIn: contenedores.map((c) => c.no_consecutivo) } },
       });
+      const tieneIncidencias = contenedores.some((c) =>
+        c.tapa_valvula || c.rejilla_danada || c.base_danada || c.derrame,
+      );
+      const estadoChecklist = tieneIncidencias ? 'CON_INCIDENCIAS' : 'COMPLETADO';
+      if (tieneIncidencias) {
+        await tx.lotes_inventario.updateMany({
+          where: { recepcion_id: id, origen: 'RECEPCION', estado_calidad_recepcion: { in: ['CUARENTENA', 'LIBERADO'] } },
+          data: { estado_calidad_recepcion: 'CUARENTENA', liberado_en: null, liberado_por: null },
+        });
+      } else {
+        await tx.lotes_inventario.updateMany({
+          where: { recepcion_id: id, origen: 'RECEPCION', estado_calidad_recepcion: 'CUARENTENA' },
+          data: {
+            estado_calidad_recepcion: 'LIBERADO',
+            liberado_en: new Date(),
+            liberado_por: payload.reviso_nombre.trim(),
+          },
+        });
+      }
       return tx.lotes_llegada.update({
         where: { id },
-        data: {
-          reviso_nombre: payload.reviso_nombre.trim(),
-          fecha_Revision: new Date(),
-          estado_checklist: payload.estado_checklist,
-        },
+        data: { reviso_nombre: payload.reviso_nombre.trim(), fecha_Revision: new Date(), estado_checklist: estadoChecklist },
       });
     });
+    this.eventos.notificar('MUESTRA_ACTUALIZADA', { recepcionId: id, estado_checklist: result.estado_checklist });
     return { success: true, result };
   }
 }

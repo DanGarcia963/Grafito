@@ -36,6 +36,7 @@ export async function existencias(
     orderBy: { id: 'asc' },
     include: {
       producto: true,
+      recepcion: { select: { estado_checklist: true } },
       lote_produccion: {
         include: {
           ordenes_produccion: {
@@ -138,6 +139,8 @@ export async function existencias(
           propiedad: l.propiedad,
           propietario_id: l.propietario_id,
           condicion: l.condicion,
+          origen: l.origen,
+          estado_calidad_recepcion: l.estado_calidad_recepcion,
           especificaciones: l.especificaciones,
           contenedores_restantes,
           orden_venta_id: l.orden_venta_id,

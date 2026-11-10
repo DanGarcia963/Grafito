@@ -255,6 +255,8 @@ model muestras {
   estado_Muestra                           muestras_estado_Muestra    @default(PENDIENTE)
   categoria_Muestra                        muestras_categoria_Muestra @default(MUESTRA_INICIAL)
   observaciones                            String?                    @db.Text
+  /// Ingredientes y cantidades sugeridas para muestras MUESTRA_POR_AJUSTE; null para otras categorías.
+  aditivos_ajuste                          Json?                      @db.JsonB
   area_Muestra                             String                     @default("CALIDAD") @db.VarChar(24)
   vendedor_id                              Int?
   caracterizacion                          String?                    @db.VarChar(20)
