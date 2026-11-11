@@ -10,7 +10,7 @@ import { useSocket } from '@/context/SocketContext';
 import { EstadoMuestra } from '@/types/muestras';
 import { 
 
-  ClipboardCheck, Truck, PackageCheck, AlertTriangle
+  ClipboardCheck, Truck, PackageCheck, AlertTriangle, ClipboardList, Download
 } from 'lucide-react';
 type IconProps = React.SVGProps<SVGSVGElement>;
 
@@ -73,6 +73,21 @@ const normalizarCalidad = (valor: unknown) =>
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toUpperCase();
+
+const etiquetaCategoriaMuestra = (categoria: string) => {
+  const etiquetas: Record<string, string> = {
+    MUESTRA_INICIAL: 'Muestra inicial',
+    MUESTRA_EVAPOR_DESMETAL: 'Evaporación y desmetalización',
+    MUESTRA_POR_AJUSTE: 'Por ajuste',
+    MUESTRA_AJUSTADO: 'Ajustado',
+  };
+  return etiquetas[categoria] ?? categoria.replaceAll('_', ' ').toLowerCase();
+};
+
+const campoCsv = (valor: unknown) => {
+  const texto = valor == null ? '' : String(valor);
+  return `"${texto.replaceAll('"', '""')}"`;
+};
 
 function resolverFormulaGrafito(
   nombre: string,
@@ -198,6 +213,8 @@ const CalidadMuestrasScreen: React.FC = () => {
   const [errorCertificado, setErrorCertificado] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<string>('TODOS'); // Cambiado a TODOS por defecto
+  const [filtroCategoriaBitacora, setFiltroCategoriaBitacora] = useState('PREPROCESO');
+  const [busquedaBitacora, setBusquedaBitacora] = useState('');
   const [tipoMuestra, setTipoMuestra] = useState<string>('MUESTRA_INICIAL');
 
 // Estado para controlar el modo del modal (captura vs lectura)
@@ -233,7 +250,7 @@ const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
   });
 
 // Pestañas de muestras, certificados y checklist de recepción.
-  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CERTIFICADOS' | 'CHECKLIST' | 'CONTENEDORES'>('MUESTRAS');
+  const [vistaActiva, setVistaActiva] = useState<'MUESTRAS' | 'CERTIFICADOS' | 'CHECKLIST' | 'CONTENEDORES' | 'BITACORA'>('MUESTRAS');
 
   // Estado del Modal de Captura
   const [muestraSeleccionada, setMuestraSeleccionada] = useState<any | null>(null);
@@ -953,6 +970,102 @@ const guardarResultados = async (e: React.FormEvent) => {
     return coincideBusqueda && coincideEstado;
   });
 
+  const categoriasBitacora = Array.from(new Set(
+    muestras
+      .filter((m) => Array.isArray(m.resultado_analisis) && m.resultado_analisis.length > 0)
+      .map((m) => getMuestraData(m).tipoMuestra),
+  )).sort((a, b) => a.localeCompare(b, 'es'));
+
+  const filasBitacora = muestras.flatMap((muestra) => {
+    const datos = getMuestraData(muestra);
+    const resultados = Array.isArray(muestra.resultado_analisis) ? muestra.resultado_analisis : [];
+    const analista = typeof datos.nombreAnalista === 'string'
+      ? datos.nombreAnalista
+      : datos.nombreAnalista?.nombre ?? '';
+    return resultados.map((resultado: any) => {
+      const fechaResultado = resultado.fecha_Resultado ?? datos.fecha ?? '';
+      const calculo = resultado.calculo_aplicado;
+      const valor = resultado.valor_Obtenido_Num !== null && resultado.valor_Obtenido_Num !== undefined
+        ? String(resultado.valor_Obtenido_Num)
+        : resultado.valor_Obtenido_Texto ?? '';
+      return {
+        fecha: fechaResultado ? String(fechaResultado).slice(0, 10) : '',
+        codigo: String(datos.codigo ?? ''),
+        categoria: datos.tipoMuestra,
+        estado: String(datos.estado ?? ''),
+        producto: String(datos.nombreProducto ?? ''),
+        lote: String(datos.noLote ?? ''),
+        tanque: String(datos.nombreTanque ?? ''),
+        analista,
+        ciclo: resultado.ciclo_analisis ?? '',
+        parametro: String(resultado.parametros_laboratorio?.nombre_Parametro ?? ''),
+        valor,
+        unidad: String(
+          resultado.parametros_laboratorio?.unidad_Medida ??
+          resultado.parametros_laboratorio?.UM ?? '',
+        ),
+        cumple: resultado.cumple_Especificacion === true
+          ? 'Cumple'
+          : resultado.cumple_Especificacion === false
+            ? 'No cumple'
+            : 'Sin evaluar',
+        formula: String(calculo?.formula ?? ''),
+        entradas: calculo?.entradas ? JSON.stringify(calculo.entradas) : '',
+        observaciones: String(muestra.observaciones ?? ''),
+      };
+    });
+  });
+
+  const textoBusquedaBitacora = busquedaBitacora.trim().toLocaleLowerCase('es');
+  const etapasPrevias = ['MUESTRA_INICIAL', 'MUESTRA_POR_AJUSTE'];
+  const filasBitacoraFiltradas = filasBitacora.filter((fila) => {
+    const coincideCategoria = filtroCategoriaBitacora === 'TODAS'
+      || (filtroCategoriaBitacora === 'PREPROCESO'
+        ? etapasPrevias.includes(fila.categoria)
+        : fila.categoria === filtroCategoriaBitacora);
+    const busqueda = [
+      fila.codigo, fila.producto, fila.lote, fila.tanque, fila.analista,
+      fila.parametro, fila.valor, fila.observaciones,
+    ].join(' ').toLocaleLowerCase('es');
+    return coincideCategoria && (!textoBusquedaBitacora || busqueda.includes(textoBusquedaBitacora));
+  });
+
+  const descargarBitacoraCsv = () => {
+    const columnas: Array<[string, keyof (typeof filasBitacora)[number]]> = [
+      ['Fecha resultado', 'fecha'],
+      ['Muestra', 'codigo'],
+      ['Tipo de muestra', 'categoria'],
+      ['Estado de muestra', 'estado'],
+      ['Producto', 'producto'],
+      ['Lote de producción', 'lote'],
+      ['Tanque', 'tanque'],
+      ['Analista', 'analista'],
+      ['Ciclo de análisis', 'ciclo'],
+      ['Parámetro', 'parametro'],
+      ['Resultado', 'valor'],
+      ['Unidad', 'unidad'],
+      ['Especificación', 'cumple'],
+      ['Fórmula aplicada', 'formula'],
+      ['Lecturas de cálculo (JSON)', 'entradas'],
+      ['Observaciones', 'observaciones'],
+    ];
+    const filas = [
+      columnas.map(([titulo]) => campoCsv(titulo)).join(';'),
+      ...filasBitacoraFiltradas.map((fila) =>
+        columnas.map(([, campo]) => campoCsv(fila[campo])).join(';'),
+      ),
+    ];
+    const archivo = new Blob([`\uFEFF${filas.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(archivo);
+    const enlace = document.createElement('a');
+    enlace.href = url;
+    enlace.download = `bitacora-resultados-calidad-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    URL.revokeObjectURL(url);
+  };
+
 const buscarAnalistas = async (query: string) => {
   setAnalistaNombre(query);
   if (query.trim().length < 2) {
@@ -1048,6 +1161,16 @@ return (
               }`}
             >
               <FlaskConical className="w-4 h-4" /> Muestras Calidad
+            </button>
+            <button
+              onClick={() => setVistaActiva('BITACORA')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                vistaActiva === 'BITACORA'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <ClipboardList className="w-4 h-4" /> Bitácora de resultados
             </button>
             <button
               onClick={() => setVistaActiva('CHECKLIST')}
@@ -1296,6 +1419,122 @@ return (
           </div>
         )}
     </>
+    )}
+    {vistaActiva === 'BITACORA' && (
+      <section className="space-y-5">
+        <div className="flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-white">
+              <ClipboardList className="h-5 w-5 text-cyan-400" /> Bitácora de resultados de Calidad
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-slate-400">
+              Consulta cada resultado guardado por muestra y ciclo. Inicia con las muestras iniciales y por ajuste, que describen el material antes de procesarlo; puedes cambiar a cualquier tipo o ver todas.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={descargarBitacoraCsv}
+            disabled={filasBitacoraFiltradas.length === 0}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-700 bg-cyan-900/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Download className="h-4 w-4" /> Descargar CSV
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/40 p-3 md:flex-row md:items-center">
+          <label className="flex flex-1 items-center gap-2 text-sm text-slate-400">
+            <Search className="h-4 w-4 shrink-0" />
+            <input
+              type="search"
+              value={busquedaBitacora}
+              onChange={(event) => setBusquedaBitacora(event.target.value)}
+              placeholder="Buscar muestra, lote, producto, parámetro o analista..."
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-400">
+            <Filter className="h-4 w-4 shrink-0" />
+            <select
+              value={filtroCategoriaBitacora}
+              onChange={(event) => setFiltroCategoriaBitacora(event.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 md:w-auto"
+            >
+              <option value="PREPROCESO">Iniciales y por ajuste</option>
+              <option value="TODAS">Todos los tipos de muestra</option>
+              {categoriasBitacora.map((categoria) => (
+                <option key={categoria} value={categoria}>{etiquetaCategoriaMuestra(categoria)}</option>
+              ))}
+            </select>
+          </label>
+          <span className="whitespace-nowrap text-xs text-slate-500">
+            {filasBitacoraFiltradas.length} resultados
+          </span>
+        </div>
+
+        {loadingMuestras ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center text-slate-400">
+            <RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin text-cyan-500" />
+            Cargando historial de resultados…
+          </div>
+        ) : filasBitacoraFiltradas.length === 0 ? (
+          <p className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">
+            No hay resultados que coincidan con esos filtros.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="min-w-[1150px] w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950 text-[11px] uppercase text-slate-400">
+                <tr>
+                  <th className="p-3">Fecha</th>
+                  <th className="p-3">Muestra / lote</th>
+                  <th className="p-3">Tipo</th>
+                  <th className="p-3">Parámetro</th>
+                  <th className="p-3">Resultado</th>
+                  <th className="p-3">Evaluación</th>
+                  <th className="p-3">Ciclo</th>
+                  <th className="p-3">Fórmula y lecturas</th>
+                  <th className="p-3">Analista</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800 bg-slate-900/60">
+                {filasBitacoraFiltradas.map((fila, index) => (
+                  <tr key={`${fila.codigo}-${fila.ciclo}-${fila.parametro}-${index}`} className="align-top hover:bg-slate-800/30">
+                    <td className="whitespace-nowrap p-3">{fila.fecha || '—'}</td>
+                    <td className="p-3">
+                      <div className="font-medium text-white">{fila.codigo || 'Sin folio'}</div>
+                      <div className="mt-1 text-slate-500">{fila.lote || 'Sin lote'} · {fila.tanque || 'Sin tanque'}</div>
+                      <div className="text-slate-500">{fila.producto}</div>
+                    </td>
+                    <td className="p-3">{etiquetaCategoriaMuestra(fila.categoria)}</td>
+                    <td className="p-3 font-medium text-slate-100">{fila.parametro || '—'}</td>
+                    <td className="whitespace-nowrap p-3 text-white">{fila.valor || '—'} {fila.unidad}</td>
+                    <td className="p-3">
+                      <span className={`rounded-full border px-2 py-1 ${
+                        fila.cumple === 'Cumple'
+                          ? 'border-emerald-700 bg-emerald-950/50 text-emerald-300'
+                          : fila.cumple === 'No cumple'
+                            ? 'border-rose-700 bg-rose-950/50 text-rose-300'
+                            : 'border-slate-700 bg-slate-800 text-slate-400'
+                      }`}>{fila.cumple}</span>
+                    </td>
+                    <td className="p-3">{fila.ciclo || '—'}</td>
+                    <td className="max-w-sm p-3">
+                      {fila.formula || fila.entradas ? (
+                        <details>
+                          <summary className="cursor-pointer text-cyan-300">Ver detalle</summary>
+                          {fila.formula && <p className="mt-2 text-slate-200">{fila.formula}</p>}
+                          {fila.entradas && <pre className="mt-1 whitespace-pre-wrap break-all text-[11px] text-slate-400">{fila.entradas}</pre>}
+                        </details>
+                      ) : <span className="text-slate-500">Captura directa</span>}
+                    </td>
+                    <td className="p-3">{fila.analista || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     )}
     {vistaActiva === 'CERTIFICADOS' && (
       <section className="space-y-5">
