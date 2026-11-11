@@ -985,11 +985,23 @@ const guardarResultados = async (e: React.FormEvent) => {
     return coincideBusqueda && coincideEstado;
   });
 
-  const categoriasBitacora = Array.from(new Set(
+  const categoriasBaseBitacora = [
+    'MUESTRA_INICIAL',
+    'MUESTRA_POR_AJUSTE',
+    'MUESTRA_EVAPOR_DESMETAL',
+    'MUESTRA_AJUSTADO',
+  ];
+  const categoriasEncontradasBitacora = Array.from(new Set(
     muestras
       .filter((m) => Array.isArray(m.resultado_analisis) && m.resultado_analisis.length > 0)
       .map((m) => getMuestraData(m).tipoMuestra),
-  )).sort((a, b) => a.localeCompare(b, 'es'));
+  ));
+  const categoriasBitacora = [
+    ...categoriasBaseBitacora,
+    ...categoriasEncontradasBitacora
+      .filter((categoria) => !categoriasBaseBitacora.includes(categoria))
+      .sort((a, b) => a.localeCompare(b, 'es')),
+  ];
 
   const filasBitacora: BitacoraResultadoCalidad[] = muestras.flatMap((muestra) => {
     const datos = getMuestraData(muestra);
@@ -1032,11 +1044,10 @@ const guardarResultados = async (e: React.FormEvent) => {
   });
 
   const textoBusquedaBitacora = busquedaBitacora.trim().toLocaleLowerCase('es');
-  const etapasPrevias = ['MUESTRA_INICIAL', 'MUESTRA_POR_AJUSTE'];
   const filasBitacoraFiltradas = filasBitacora.filter((fila) => {
     const coincideCategoria = filtroCategoriaBitacora === 'TODAS'
       || (filtroCategoriaBitacora === 'PREPROCESO'
-        ? etapasPrevias.includes(fila.categoria)
+        ? ['MUESTRA_INICIAL', 'MUESTRA_POR_AJUSTE'].includes(fila.categoria)
         : fila.categoria === filtroCategoriaBitacora);
     const busqueda = [
       fila.codigo, fila.producto, fila.lote, fila.tanque, fila.analista,
@@ -1078,77 +1089,99 @@ const guardarResultados = async (e: React.FormEvent) => {
         { titulo: 'Lecturas de cálculo', campo: 'entradas', ancho: 42 },
         { titulo: 'Observaciones', campo: 'observaciones', ancho: 42 },
       ];
-      const hoja = workbook.addWorksheet('Bitácora Calidad', {
-        pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
-      });
-      hoja.columns = columnas.map(({ campo, ancho }) => ({ key: campo, width: ancho }));
-      hoja.views = [{ state: 'frozen', ySplit: 5, showGridLines: false }];
-      hoja.properties.defaultRowHeight = 24;
-
-      const ultimaColumna = columnas.length;
-      hoja.mergeCells(1, 1, 1, ultimaColumna);
-      const titulo = hoja.getCell(1, 1);
-      titulo.value = 'BITÁCORA DE RESULTADOS DE CALIDAD';
-      titulo.font = { name: 'Aptos Display', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-      titulo.alignment = { vertical: 'middle', horizontal: 'left' };
-      titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3D56' } };
-      hoja.getRow(1).height = 34;
-
-      hoja.mergeCells(2, 1, 2, ultimaColumna);
-      const resumen = hoja.getCell(2, 1);
-      const filtroActivo = filtroCategoriaBitacora === 'PREPROCESO'
-        ? 'Muestras iniciales y por ajuste'
-        : filtroCategoriaBitacora === 'TODAS'
-          ? 'Todos los tipos de muestra'
-          : etiquetaCategoriaMuestra(filtroCategoriaBitacora);
-      resumen.value = `Filtro: ${filtroActivo}  |  Registros: ${filasBitacoraFiltradas.length}  |  Generado: ${new Date().toLocaleString('es-MX')}`;
-      resumen.font = { name: 'Aptos', size: 10, color: { argb: 'FF334155' } };
-      resumen.alignment = { vertical: 'middle', horizontal: 'left' };
-      resumen.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-      hoja.getRow(2).height = 24;
-
-      hoja.addRow([]);
-      hoja.addRow([]);
-      const filaEncabezados = hoja.addRow(columnas.map(({ titulo: texto }) => texto));
-      filaEncabezados.height = 30;
-      filaEncabezados.eachCell((celda) => {
-        celda.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
-        celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF087E8B' } };
-        celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        celda.border = { bottom: { style: 'medium', color: { argb: 'FF075985' } } };
-      });
-
-      for (const [indice, fila] of filasBitacoraFiltradas.entries()) {
-        const valores = columnas.map(({ campo }) => {
-          const valor = fila[campo];
-          if (campo === 'categoria') return etiquetaCategoriaMuestra(String(valor));
-          if (campo === 'valor' && valor !== '' && Number.isFinite(Number(valor))) return Number(valor);
-          if (campo === 'ciclo' && valor !== '' && Number.isFinite(Number(valor))) return Number(valor);
-          return valor ?? '';
+      const prioridadCategorias = [
+        'MUESTRA_INICIAL',
+        'MUESTRA_POR_AJUSTE',
+        'MUESTRA_EVAPOR_DESMETAL',
+        'MUESTRA_AJUSTADO',
+      ];
+      const categoriasExportadas = Array.from(new Set(filasBitacoraFiltradas.map((fila) => fila.categoria)))
+        .sort((a, b) => {
+          const indiceA = prioridadCategorias.indexOf(a);
+          const indiceB = prioridadCategorias.indexOf(b);
+          if (indiceA >= 0 || indiceB >= 0)
+            return (indiceA < 0 ? Number.MAX_SAFE_INTEGER : indiceA) -
+              (indiceB < 0 ? Number.MAX_SAFE_INTEGER : indiceB);
+          return a.localeCompare(b, 'es');
         });
-        const filaExcel = hoja.addRow(valores);
-        filaExcel.height = 32;
-        filaExcel.eachCell((celda) => {
-          celda.font = { name: 'Aptos', size: 10, color: { argb: 'FF1E293B' } };
-          celda.alignment = { vertical: 'top', wrapText: true };
-          celda.border = { bottom: { style: 'hair', color: { argb: 'FFCBD5E1' } } };
-          if (indice % 2 === 1)
-            celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-        });
-        filaExcel.getCell(11).numFmt = '#,##0.0000';
-        const evaluacion = filaExcel.getCell(13);
-        if (fila.cumple === 'Cumple') {
-          evaluacion.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FF166534' } };
-          evaluacion.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
-        } else if (fila.cumple === 'No cumple') {
-          evaluacion.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FF9F1239' } };
-          evaluacion.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } };
-        }
-      }
-      hoja.autoFilter = {
-        from: { row: 5, column: 1 },
-        to: { row: Math.max(5, hoja.rowCount), column: ultimaColumna },
+      const nombresHojas: Record<string, string> = {
+        MUESTRA_INICIAL: 'Muestras iniciales',
+        MUESTRA_POR_AJUSTE: 'Muestras por ajuste',
+        MUESTRA_EVAPOR_DESMETAL: 'Evap. y desmetalización',
+        MUESTRA_AJUSTADO: 'Ajustado',
       };
+      const ultimaColumna = columnas.length;
+
+      for (const categoria of categoriasExportadas) {
+        const filasHoja = filasBitacoraFiltradas.filter((fila) => fila.categoria === categoria);
+        const nombreHoja = (nombresHojas[categoria] ?? etiquetaCategoriaMuestra(categoria)
+          .replace(/[^\p{L}\p{N} ._-]/gu, ' ')).slice(0, 31);
+        const hoja = workbook.addWorksheet(nombreHoja, {
+          pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+        });
+        hoja.columns = columnas.map(({ campo, ancho }) => ({ key: campo, width: ancho }));
+        hoja.views = [{ state: 'frozen', ySplit: 5, showGridLines: false }];
+        hoja.properties.defaultRowHeight = 24;
+
+        hoja.mergeCells(1, 1, 1, ultimaColumna);
+        const titulo = hoja.getCell(1, 1);
+        titulo.value = `BITÁCORA DE CALIDAD · ${etiquetaCategoriaMuestra(categoria).toUpperCase()}`;
+        titulo.font = { name: 'Aptos Display', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+        titulo.alignment = { vertical: 'middle', horizontal: 'left' };
+        titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3D56' } };
+        hoja.getRow(1).height = 34;
+
+        hoja.mergeCells(2, 1, 2, ultimaColumna);
+        const resumen = hoja.getCell(2, 1);
+        resumen.value = `Tipo de muestra: ${etiquetaCategoriaMuestra(categoria)}  |  Registros: ${filasHoja.length}  |  Generado: ${new Date().toLocaleString('es-MX')}`;
+        resumen.font = { name: 'Aptos', size: 10, color: { argb: 'FF334155' } };
+        resumen.alignment = { vertical: 'middle', horizontal: 'left' };
+        resumen.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        hoja.getRow(2).height = 24;
+
+        hoja.addRow([]);
+        hoja.addRow([]);
+        const filaEncabezados = hoja.addRow(columnas.map(({ titulo: texto }) => texto));
+        filaEncabezados.height = 30;
+        filaEncabezados.eachCell((celda) => {
+          celda.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+          celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF087E8B' } };
+          celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          celda.border = { bottom: { style: 'medium', color: { argb: 'FF075985' } } };
+        });
+
+        for (const [indice, fila] of filasHoja.entries()) {
+          const valores = columnas.map(({ campo }) => {
+            const valor = fila[campo];
+            if (campo === 'categoria') return etiquetaCategoriaMuestra(String(valor));
+            if (campo === 'valor' && valor !== '' && Number.isFinite(Number(valor))) return Number(valor);
+            if (campo === 'ciclo' && valor !== '' && Number.isFinite(Number(valor))) return Number(valor);
+            return valor ?? '';
+          });
+          const filaExcel = hoja.addRow(valores);
+          filaExcel.height = 32;
+          filaExcel.eachCell((celda) => {
+            celda.font = { name: 'Aptos', size: 10, color: { argb: 'FF1E293B' } };
+            celda.alignment = { vertical: 'top', wrapText: true };
+            celda.border = { bottom: { style: 'hair', color: { argb: 'FFCBD5E1' } } };
+            if (indice % 2 === 1)
+              celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+          });
+          filaExcel.getCell(11).numFmt = '#,##0.0000';
+          const evaluacion = filaExcel.getCell(13);
+          if (fila.cumple === 'Cumple') {
+            evaluacion.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FF166534' } };
+            evaluacion.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+          } else if (fila.cumple === 'No cumple') {
+            evaluacion.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FF9F1239' } };
+            evaluacion.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } };
+          }
+        }
+        hoja.autoFilter = {
+          from: { row: 5, column: 1 },
+          to: { row: Math.max(5, hoja.rowCount), column: ultimaColumna },
+        };
+      }
 
       const contenido = await workbook.xlsx.writeBuffer();
       const archivo = new Blob([contenido as BlobPart], {
@@ -1532,7 +1565,7 @@ return (
               <ClipboardList className="h-5 w-5 text-cyan-400" /> Bitácora de resultados de Calidad
             </h2>
             <p className="mt-1 max-w-3xl text-sm text-slate-400">
-              Consulta cada resultado guardado por muestra y ciclo. Inicia con las muestras iniciales y por ajuste, que describen el material antes de procesarlo; puedes cambiar a cualquier tipo o ver todas.
+              Consulta cada resultado guardado por muestra y ciclo. Puedes filtrar por separado las muestras iniciales y las muestras por ajuste; al descargar todas, cada tipo se guarda en su propia hoja de Excel.
             </p>
           </div>
           <button
@@ -1564,8 +1597,12 @@ return (
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 md:w-auto"
             >
               <option value="PREPROCESO">Iniciales y por ajuste</option>
+              <option value="MUESTRA_INICIAL">Muestra inicial</option>
+              <option value="MUESTRA_POR_AJUSTE">Por ajuste</option>
               <option value="TODAS">Todos los tipos de muestra</option>
-              {categoriasBitacora.map((categoria) => (
+              {categoriasBitacora
+                .filter((categoria) => !categoriasBaseBitacora.includes(categoria))
+                .map((categoria) => (
                 <option key={categoria} value={categoria}>{etiquetaCategoriaMuestra(categoria)}</option>
               ))}
             </select>
