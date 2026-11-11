@@ -220,7 +220,7 @@ export class CalidadService {
           resultado_analisis: {
             include: {
               parametros_laboratorio: {
-                select: { nombre_Parametro: true, unidad_Medida: true },
+                select: { nombre_Parametro: true, UM: true },
               },
             },
           },
@@ -239,6 +239,12 @@ export class CalidadService {
             esGrafito: this.esMuestraGrafito(m),
             resultado_analisis: m.resultado_analisis.map((r) => ({
               ...r,
+              parametros_laboratorio: r.parametros_laboratorio
+                ? {
+                    ...r.parametros_laboratorio,
+                    unidad_Medida: r.parametros_laboratorio.UM,
+                  }
+                : r.parametros_laboratorio,
               valor_Obtenido_Num: r.valor_Obtenido_Num,
               valor_Obtenido_Texto: r.valor_Obtenido_Texto,
             })),
