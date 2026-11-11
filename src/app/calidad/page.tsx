@@ -255,6 +255,9 @@ const [mostrarSugerencias, setMostrarSugerencias] = useState<boolean>(false);
 
   const [contenedores, setContenedores] = useState<ContenedorState[]>([]);
   const [contenedoresGrafito, setContenedoresGrafito] = useState<any[]>([]);
+  const [busquedaContenedores, setBusquedaContenedores] = useState('');
+  const [filtroEstadoContenedores, setFiltroEstadoContenedores] = useState('TODOS');
+  const [filtroPrensaContenedores, setFiltroPrensaContenedores] = useState('TODAS');
   const [resumenContenedores, setResumenContenedores] = useState<Record<string, number>>({});
   const [cargandoContenedoresGrafito, setCargandoContenedoresGrafito] = useState(false);
   const [contenedorRevisionActivo, setContenedorRevisionActivo] = useState<any | null>(null);
@@ -1043,6 +1046,45 @@ const guardarResultados = async (e: React.FormEvent) => {
     });
   });
 
+  const textoBusquedaContenedores = busquedaContenedores.trim().toLocaleLowerCase('es');
+  const prensasContenedores = Array.from(new Set(
+    contenedoresGrafito
+      .map((item) => String(item.prensa ?? '').trim())
+      .filter(Boolean),
+  )).sort((a, b) => a.localeCompare(b, 'es'));
+  const hayContenedoresSinPrensa = contenedoresGrafito.some((item) => !String(item.prensa ?? '').trim());
+  const contenedoresGrafitoFiltrados = contenedoresGrafito.filter((item) => {
+    const estado = String(item.estado ?? '').toUpperCase();
+    const prensa = String(item.prensa ?? '').trim();
+    const coincideEstado =
+      filtroEstadoContenedores === 'TODOS' ||
+      (filtroEstadoContenedores === 'PENDIENTE_CHECKLIST' && Boolean(item.pendiente_checklist_inicial)) ||
+      (filtroEstadoContenedores === 'REVISION_RECHAZADA' && item.estado_revision === 'RECHAZADO') ||
+      estado === filtroEstadoContenedores;
+    const coincidePrensa =
+      filtroPrensaContenedores === 'TODAS' ||
+      (filtroPrensaContenedores === 'SIN_PRENSA' ? !prensa : prensa === filtroPrensaContenedores);
+    const campos = [
+      item.folio,
+      item.recepcion_folio,
+      item.codigo,
+      item.producto,
+      prensa,
+      estado.replaceAll('_', ' '),
+      item.estado_revision,
+      item.pendiente_checklist_inicial ? 'checklist inicial pendiente' : '',
+      item.estado_revision === 'RECHAZADO' ? 'requiere nueva limpieza' : '',
+    ].filter(Boolean).join(' ').toLocaleLowerCase('es');
+    const coincideBusqueda = !textoBusquedaContenedores || campos.includes(textoBusquedaContenedores);
+    return coincideEstado && coincidePrensa && coincideBusqueda;
+  });
+
+  const limpiarFiltrosContenedores = () => {
+    setBusquedaContenedores('');
+    setFiltroEstadoContenedores('TODOS');
+    setFiltroPrensaContenedores('TODAS');
+  };
+
   const textoBusquedaBitacora = busquedaBitacora.trim().toLocaleLowerCase('es');
   const filasBitacoraFiltradas = filasBitacora.filter((fila) => {
     const coincideCategoria = filtroCategoriaBitacora === 'TODAS'
@@ -1746,6 +1788,63 @@ return (
               </article>
             ))}
           </div>
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3 md:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_14rem_14rem_auto] xl:items-end">
+            <label className="block text-xs font-medium text-slate-400">
+              Buscar contenedor, lote, recepción, producto o prensa
+              <div className="relative mt-1.5">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="search"
+                  value={busquedaContenedores}
+                  onChange={(event) => setBusquedaContenedores(event.target.value)}
+                  placeholder="Ej. C-12, lote, Forgemaster…"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2 pl-9 pr-3 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+            </label>
+            <label className="block text-xs font-medium text-slate-400">
+              Estado
+              <select
+                value={filtroEstadoContenedores}
+                onChange={(event) => setFiltroEstadoContenedores(event.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
+              >
+                <option value="TODOS">Todos los estados</option>
+                <option value="PENDIENTE_CHECKLIST">Checklist inicial pendiente</option>
+                <option value="REVISION_RECHAZADA">Requiere nueva limpieza</option>
+                <option value="LLENO">Lleno</option>
+                <option value="PARCIAL">Parcial</option>
+                <option value="VACIO_SUCIO">Vacío sucio</option>
+                <option value="VACIO_LIMPIO">Vacío limpio</option>
+                <option value="LISTO_PARA_RELLENAR">Listo para rellenar</option>
+              </select>
+            </label>
+            <label className="block text-xs font-medium text-slate-400">
+              Prensa
+              <select
+                value={filtroPrensaContenedores}
+                onChange={(event) => setFiltroPrensaContenedores(event.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
+              >
+                <option value="TODAS">Todas las prensas</option>
+                {hayContenedoresSinPrensa && <option value="SIN_PRENSA">Sin prensa</option>}
+                {prensasContenedores.map((prensa) => <option key={prensa} value={prensa}>{prensa}</option>)}
+              </select>
+            </label>
+            <div className="flex items-center justify-between gap-3 xl:justify-end">
+              <span className="whitespace-nowrap text-xs text-slate-500">
+                {cargandoContenedoresGrafito ? 'Cargando…' : `Mostrando ${contenedoresGrafitoFiltrados.length} de ${contenedoresGrafito.length}`}
+              </span>
+              <button
+                type="button"
+                onClick={limpiarFiltrosContenedores}
+                disabled={!busquedaContenedores && filtroEstadoContenedores === 'TODOS' && filtroPrensaContenedores === 'TODAS'}
+                className="whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60">
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-950 text-xs uppercase text-slate-400">
@@ -1756,7 +1855,9 @@ return (
                   <tr><td colSpan={6} className="p-6 text-center text-slate-400">Cargando contenedores…</td></tr>
                 ) : contenedoresGrafito.length === 0 ? (
                   <tr><td colSpan={6} className="p-6 text-center text-slate-500">No hay contenedores de grafito con especificaciones registradas.</td></tr>
-                ) : contenedoresGrafito.map((item) => (
+                ) : contenedoresGrafitoFiltrados.length === 0 ? (
+                  <tr><td colSpan={6} className="p-6 text-center text-slate-500">Ningún contenedor coincide con los filtros de búsqueda.</td></tr>
+                ) : contenedoresGrafitoFiltrados.map((item) => (
                   <tr key={`${item.lote_inventario_id}-${item.codigo}`}>
                     <td className="p-3"><span className="block font-semibold text-white">{item.folio}</span><span className="text-xs text-slate-500">{item.recepcion_folio ? `Recepción ${item.recepcion_folio}` : 'Inventario de apertura o producción'}</span></td>
                     <td className="p-3 font-medium text-cyan-200">{item.codigo}</td>
