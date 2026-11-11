@@ -58,6 +58,25 @@ interface ContenedorState {
   observaciones: string;
 }
 
+interface BitacoraResultadoCalidad {
+  fecha: string;
+  codigo: string;
+  categoria: string;
+  estado: string;
+  producto: string;
+  lote: string;
+  tanque: string;
+  analista: string;
+  ciclo: number | string;
+  parametro: string;
+  valor: string;
+  unidad: string;
+  cumple: string;
+  formula: string;
+  entradas: string;
+  observaciones: string;
+}
+
 type FormulaGrafito =
   | 'HUMEDAD_INICIAL'
   | 'HUMEDAD_FINAL'
@@ -82,11 +101,6 @@ const etiquetaCategoriaMuestra = (categoria: string) => {
     MUESTRA_AJUSTADO: 'Ajustado',
   };
   return etiquetas[categoria] ?? categoria.replaceAll('_', ' ').toLowerCase();
-};
-
-const campoCsv = (valor: unknown) => {
-  const texto = valor == null ? '' : String(valor);
-  return `"${texto.replaceAll('"', '""')}"`;
 };
 
 function resolverFormulaGrafito(
@@ -215,6 +229,7 @@ const CalidadMuestrasScreen: React.FC = () => {
   const [filtroEstado, setFiltroEstado] = useState<string>('TODOS'); // Cambiado a TODOS por defecto
   const [filtroCategoriaBitacora, setFiltroCategoriaBitacora] = useState('PREPROCESO');
   const [busquedaBitacora, setBusquedaBitacora] = useState('');
+  const [exportandoBitacora, setExportandoBitacora] = useState(false);
   const [tipoMuestra, setTipoMuestra] = useState<string>('MUESTRA_INICIAL');
 
 // Estado para controlar el modo del modal (captura vs lectura)
@@ -976,7 +991,7 @@ const guardarResultados = async (e: React.FormEvent) => {
       .map((m) => getMuestraData(m).tipoMuestra),
   )).sort((a, b) => a.localeCompare(b, 'es'));
 
-  const filasBitacora = muestras.flatMap((muestra) => {
+  const filasBitacora: BitacoraResultadoCalidad[] = muestras.flatMap((muestra) => {
     const datos = getMuestraData(muestra);
     const resultados = Array.isArray(muestra.resultado_analisis) ? muestra.resultado_analisis : [];
     const analista = typeof datos.nombreAnalista === 'string'
@@ -1030,40 +1045,129 @@ const guardarResultados = async (e: React.FormEvent) => {
     return coincideCategoria && (!textoBusquedaBitacora || busqueda.includes(textoBusquedaBitacora));
   });
 
-  const descargarBitacoraCsv = () => {
-    const columnas: Array<[string, keyof (typeof filasBitacora)[number]]> = [
-      ['Fecha resultado', 'fecha'],
-      ['Muestra', 'codigo'],
-      ['Tipo de muestra', 'categoria'],
-      ['Estado de muestra', 'estado'],
-      ['Producto', 'producto'],
-      ['Lote de producción', 'lote'],
-      ['Tanque', 'tanque'],
-      ['Analista', 'analista'],
-      ['Ciclo de análisis', 'ciclo'],
-      ['Parámetro', 'parametro'],
-      ['Resultado', 'valor'],
-      ['Unidad', 'unidad'],
-      ['Especificación', 'cumple'],
-      ['Fórmula aplicada', 'formula'],
-      ['Lecturas de cálculo (JSON)', 'entradas'],
-      ['Observaciones', 'observaciones'],
-    ];
-    const filas = [
-      columnas.map(([titulo]) => campoCsv(titulo)).join(';'),
-      ...filasBitacoraFiltradas.map((fila) =>
-        columnas.map(([, campo]) => campoCsv(fila[campo])).join(';'),
-      ),
-    ];
-    const archivo = new Blob([`\uFEFF${filas.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(archivo);
-    const enlace = document.createElement('a');
-    enlace.href = url;
-    enlace.download = `bitacora-resultados-calidad-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(enlace);
-    enlace.click();
-    enlace.remove();
-    URL.revokeObjectURL(url);
+  const descargarBitacoraExcel = async () => {
+    if (!filasBitacoraFiltradas.length || exportandoBitacora) return;
+    setExportandoBitacora(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Grafito | Calidad';
+      workbook.created = new Date();
+      workbook.subject = 'Bitácora de resultados de análisis de muestras';
+      workbook.title = 'Bitácora de resultados de Calidad';
+
+      const columnas: Array<{
+        titulo: string;
+        campo: keyof BitacoraResultadoCalidad;
+        ancho: number;
+      }> = [
+        { titulo: 'Fecha de resultado', campo: 'fecha', ancho: 18 },
+        { titulo: 'Muestra', campo: 'codigo', ancho: 18 },
+        { titulo: 'Tipo de muestra', campo: 'categoria', ancho: 30 },
+        { titulo: 'Estado actual', campo: 'estado', ancho: 18 },
+        { titulo: 'Producto', campo: 'producto', ancho: 30 },
+        { titulo: 'Lote de producción', campo: 'lote', ancho: 22 },
+        { titulo: 'Tanque', campo: 'tanque', ancho: 18 },
+        { titulo: 'Analista', campo: 'analista', ancho: 24 },
+        { titulo: 'Ciclo', campo: 'ciclo', ancho: 12 },
+        { titulo: 'Parámetro', campo: 'parametro', ancho: 34 },
+        { titulo: 'Resultado', campo: 'valor', ancho: 18 },
+        { titulo: 'Unidad', campo: 'unidad', ancho: 14 },
+        { titulo: 'Evaluación', campo: 'cumple', ancho: 18 },
+        { titulo: 'Fórmula aplicada', campo: 'formula', ancho: 56 },
+        { titulo: 'Lecturas de cálculo', campo: 'entradas', ancho: 42 },
+        { titulo: 'Observaciones', campo: 'observaciones', ancho: 42 },
+      ];
+      const hoja = workbook.addWorksheet('Bitácora Calidad', {
+        pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+      });
+      hoja.columns = columnas.map(({ campo, ancho }) => ({ key: campo, width: ancho }));
+      hoja.views = [{ state: 'frozen', ySplit: 5, showGridLines: false }];
+      hoja.properties.defaultRowHeight = 24;
+
+      const ultimaColumna = columnas.length;
+      hoja.mergeCells(1, 1, 1, ultimaColumna);
+      const titulo = hoja.getCell(1, 1);
+      titulo.value = 'BITÁCORA DE RESULTADOS DE CALIDAD';
+      titulo.font = { name: 'Aptos Display', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+      titulo.alignment = { vertical: 'middle', horizontal: 'left' };
+      titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3D56' } };
+      hoja.getRow(1).height = 34;
+
+      hoja.mergeCells(2, 1, 2, ultimaColumna);
+      const resumen = hoja.getCell(2, 1);
+      const filtroActivo = filtroCategoriaBitacora === 'PREPROCESO'
+        ? 'Muestras iniciales y por ajuste'
+        : filtroCategoriaBitacora === 'TODAS'
+          ? 'Todos los tipos de muestra'
+          : etiquetaCategoriaMuestra(filtroCategoriaBitacora);
+      resumen.value = `Filtro: ${filtroActivo}  |  Registros: ${filasBitacoraFiltradas.length}  |  Generado: ${new Date().toLocaleString('es-MX')}`;
+      resumen.font = { name: 'Aptos', size: 10, color: { argb: 'FF334155' } };
+      resumen.alignment = { vertical: 'middle', horizontal: 'left' };
+      resumen.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+      hoja.getRow(2).height = 24;
+
+      hoja.addRow([]);
+      hoja.addRow([]);
+      const filaEncabezados = hoja.addRow(columnas.map(({ titulo: texto }) => texto));
+      filaEncabezados.height = 30;
+      filaEncabezados.eachCell((celda) => {
+        celda.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+        celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF087E8B' } };
+        celda.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        celda.border = { bottom: { style: 'medium', color: { argb: 'FF075985' } } };
+      });
+
+      for (const [indice, fila] of filasBitacoraFiltradas.entries()) {
+        const valores = columnas.map(({ campo }) => {
+          const valor = fila[campo];
+          if (campo === 'categoria') return etiquetaCategoriaMuestra(String(valor));
+          if (campo === 'valor' && valor !== '' && Number.isFinite(Number(valor))) return Number(valor);
+          if (campo === 'ciclo' && valor !== '' && Number.isFinite(Number(valor))) return Number(valor);
+          return valor ?? '';
+        });
+        const filaExcel = hoja.addRow(valores);
+        filaExcel.height = 32;
+        filaExcel.eachCell((celda) => {
+          celda.font = { name: 'Aptos', size: 10, color: { argb: 'FF1E293B' } };
+          celda.alignment = { vertical: 'top', wrapText: true };
+          celda.border = { bottom: { style: 'hair', color: { argb: 'FFCBD5E1' } } };
+          if (indice % 2 === 1)
+            celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        });
+        filaExcel.getCell(11).numFmt = '#,##0.0000';
+        const evaluacion = filaExcel.getCell(13);
+        if (fila.cumple === 'Cumple') {
+          evaluacion.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FF166534' } };
+          evaluacion.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+        } else if (fila.cumple === 'No cumple') {
+          evaluacion.font = { name: 'Aptos', size: 10, bold: true, color: { argb: 'FF9F1239' } };
+          evaluacion.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } };
+        }
+      }
+      hoja.autoFilter = {
+        from: { row: 5, column: 1 },
+        to: { row: Math.max(5, hoja.rowCount), column: ultimaColumna },
+      };
+
+      const contenido = await workbook.xlsx.writeBuffer();
+      const archivo = new Blob([contenido as BlobPart], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(archivo);
+      const enlace = document.createElement('a');
+      enlace.href = url;
+      enlace.download = `bitacora-resultados-calidad-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error('Error al generar Excel de la bitácora:', error);
+      alert('No se pudo generar el archivo de Excel. Intenta actualizar la pantalla y descargarlo de nuevo.');
+    } finally {
+      setExportandoBitacora(false);
+    }
   };
 
 const buscarAnalistas = async (query: string) => {
@@ -1433,11 +1537,11 @@ return (
           </div>
           <button
             type="button"
-            onClick={descargarBitacoraCsv}
-            disabled={filasBitacoraFiltradas.length === 0}
+            onClick={() => void descargarBitacoraExcel()}
+            disabled={filasBitacoraFiltradas.length === 0 || exportandoBitacora}
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-700 bg-cyan-900/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/70 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <Download className="h-4 w-4" /> Descargar CSV
+            <Download className="h-4 w-4" /> {exportandoBitacora ? 'Generando Excel…' : 'Descargar Excel'}
           </button>
         </div>
 
