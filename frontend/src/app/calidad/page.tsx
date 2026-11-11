@@ -64,6 +64,7 @@ type FormulaGrafito =
   | 'BROOKFIELD_INICIAL'
   | 'GRAFITO_INICIAL'
   | 'BROOKFIELD_FINAL'
+  | 'GRAFITO_FINAL'
   | 'GRAVEDAD_ESPECIFICA';
 
 const normalizarCalidad = (valor: unknown) =>
@@ -91,6 +92,8 @@ function resolverFormulaGrafito(
     return 'BROOKFIELD_FINAL';
   if (parametro.includes('GRAFITO') && categoria === 'MUESTRA_POR_AJUSTE')
     return 'GRAFITO_INICIAL';
+  if (parametro.includes('GRAFITO') && categoria === 'MUESTRA_AJUSTADO')
+    return 'GRAFITO_FINAL';
   return null;
 }
 
@@ -100,6 +103,11 @@ const camposFormulaGrafito: Record<FormulaGrafito, Array<{ key: string; label: s
   BROOKFIELD_INICIAL: [{ key: 'medicion', label: 'Lectura del viscosímetro' }],
   BROOKFIELD_FINAL: [{ key: 'medicion', label: 'Lectura del viscosímetro' }],
   GRAFITO_INICIAL: [
+    { key: 'pesoFinal', label: 'Peso final' },
+    { key: 'pesoPapel', label: 'Peso del papel' },
+    { key: 'pesoMuestra', label: 'Peso de la muestra' },
+  ],
+  GRAFITO_FINAL: [
     { key: 'pesoFinal', label: 'Peso final' },
     { key: 'pesoPapel', label: 'Peso del papel' },
     { key: 'pesoMuestra', label: 'Peso de la muestra' },
@@ -116,6 +124,7 @@ const descripcionFormulaGrafito: Record<FormulaGrafito, string> = {
   BROOKFIELD_INICIAL: 'Viscosidad inicial = lectura Brookfield × 99',
   BROOKFIELD_FINAL: 'Viscosidad final = lectura Brookfield × 99',
   GRAFITO_INICIAL: '% grafito = ((peso final − peso papel) / peso muestra) × 100',
+  GRAFITO_FINAL: '% grafito final = ((peso final − peso papel) / peso muestra) × 100',
   GRAVEDAD_ESPECIFICA:
     'G.E. = (picnómetro lleno − picnómetro vacío) / 97.4729; lleno = muestra + picnómetro vacío',
 };
@@ -140,7 +149,7 @@ function previsualizarFormulaGrafito(
   } else if (formula === 'BROOKFIELD_INICIAL' || formula === 'BROOKFIELD_FINAL') {
     const lectura = numero('medicion');
     if (lectura !== null) resultado = lectura * 99;
-  } else if (formula === 'GRAFITO_INICIAL') {
+  } else if (formula === 'GRAFITO_INICIAL' || formula === 'GRAFITO_FINAL') {
     const final = numero('pesoFinal');
     const papel = numero('pesoPapel');
     const muestra = numero('pesoMuestra');
