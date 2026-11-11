@@ -724,7 +724,7 @@ export class CalidadService {
             } else if (
               esGrafito &&
               nombreParametro.includes('GRAFITO') &&
-              etapa === 'MUESTRA_POR_AJUSTE'
+              (etapa === 'MUESTRA_POR_AJUSTE' || etapa === 'MUESTRA_AJUSTADO')
             ) {
               const pesoFinal = this.leerDecimalCalculo(entradas.pesoFinal, 'Peso final');
               const pesoPapel = this.leerDecimalCalculo(entradas.pesoPapel, 'Peso del papel');
@@ -737,7 +737,10 @@ export class CalidadService {
                   .div(pesoMuestra.valor)
                   .times(100)
                   .toDecimalPlaces(4),
-                formula: '((peso final - peso papel) / peso muestra) × 100 = % grafito inicial',
+                formula:
+                  etapa === 'MUESTRA_POR_AJUSTE'
+                    ? '((peso final - peso papel) / peso muestra) × 100 = % grafito inicial'
+                    : '((peso final - peso papel) / peso muestra) × 100 = % grafito final',
                 entradas: {
                   pesoFinal: pesoFinal.texto,
                   pesoPapel: pesoPapel.texto,
