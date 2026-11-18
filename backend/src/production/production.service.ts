@@ -1525,14 +1525,82 @@ export class ProductionService {
         }))
       )
         throw new BadRequestException('Ubicación inválida');
-      const especificaciones = especificacionesValidas(
-        b.especificaciones,
-        producto.configuracion_operativa,
-        producto.UM,
-        cantidad,
-      );
       if (b.condicion && !['SUCIO', 'INSUMO', 'REZAGADO'].includes(b.condicion))
         throw new BadRequestException('Condición de recepción inválida');
+
+      const config = producto.configuracion_operativa as any;
+      const esGrafitoPorPrensa =
+        producto.UM === 'Kilogramos' &&
+        Array.isArray(config?.campos) &&
+        config.campos.some((campo: any) => campo.clave === 'tipo_prensa');
+
+      type GrupoRecepcion = {
+        especificaciones: Prisma.InputJsonObject;
+        cantidad: Prisma.Decimal;
+      };
+      const grupos: GrupoRecepcion[] = [];
+      if (esGrafitoPorPrensa) {
+        if (!Array.isArray(b.grupos_grafito) || !b.grupos_grafito.length ||
+            b.grupos_grafito.length > 50)
+          throw new BadRequestException(
+            'Registra entre 1 y 50 grupos de prensa y número de vuelta para el grafito',
+          );
+        const combinaciones = new Set<string>();
+        const codigos = new Set<string>();
+        let contenedoresTotales = 0;
+        for (const item of b.grupos_grafito) {
+          if (!item || typeof item !== 'object' || Array.isArray(item))
+            throw new BadRequestException('Grupo de recepción inválido');
+          const prensa = String(item.tipo_prensa ?? '').trim();
+          const vuelta = Number(item.numero_vuelta);
+          if (!Number.isSafeInteger(vuelta) || vuelta < 1 || vuelta > 99 ||
+              String(item.numero_vuelta).trim() === '')
+            throw new BadRequestException('Número de vuelta: utiliza un entero entre 1 y 99');
+          const clave = `${prensa.toUpperCase()}:${vuelta}`;
+          if (combinaciones.has(clave))
+            throw new BadRequestException('Agrupa en un solo renglón la misma prensa y vuelta');
+          combinaciones.add(clave);
+          if (!Array.isArray(item.contenedores) || !item.contenedores.length)
+            throw new BadRequestException('Cada grupo debe tener al menos un contenedor');
+          contenedoresTotales += item.contenedores.length;
+          if (contenedoresTotales > 500)
+            throw new BadRequestException('Una recepción admite máximo 500 contenedores');
+          const totalGrupo = item.contenedores.reduce(
+            (total: Prisma.Decimal, envase: any) => {
+              const codigo = String(envase?.codigo ?? '').trim().toUpperCase();
+              if (!codigo || codigos.has(codigo))
+                throw new BadRequestException('Cada contenedor debe tener un código único en toda la recepción');
+              codigos.add(codigo);
+              return total.add(decimalCrm(envase.peso_kg, 4));
+            },
+            new Prisma.Decimal(0),
+          );
+          const especificacion = especificacionesValidas({
+            version: 1,
+            atributos: { tipo_prensa: prensa },
+            contenedores: item.contenedores,
+          }, producto.configuracion_operativa, producto.UM, totalGrupo);
+          if (!especificacion)
+            throw new BadRequestException('Especificaciones de grupo inválidas');
+          grupos.push({
+            cantidad: totalGrupo,
+            especificaciones: {
+              ...especificacion,
+              atributos: { tipo_prensa: prensa, numero_vuelta: vuelta },
+            },
+          });
+        }
+        const suma = grupos.reduce((acc, g) => acc.add(g.cantidad), new Prisma.Decimal(0));
+        if (!suma.eq(cantidad))
+          throw new BadRequestException('La suma de los grupos no coincide con la cantidad total recibida');
+      } else {
+        if (b.grupos_grafito != null)
+          throw new BadRequestException('Los grupos por prensa solo están disponibles para grafito');
+        const especificaciones = especificacionesValidas(
+          b.especificaciones, producto.configuracion_operativa, producto.UM, cantidad,
+        );
+        grupos.push({ cantidad, especificaciones: especificaciones ?? { version: 1, atributos: {}, contenedores: [] } });
+      }
       const recepcion = await tx.lotes_llegada.create({
         data: {
           no_lote: folio,
@@ -1543,49 +1611,58 @@ export class ProductionService {
           estado_recepcion: 'CONFIRMADA',
         },
       });
-      const lote = await tx.lotes_inventario.create({
-        data: {
-          folio: `MP-${folio}`,
-          producto_id: producto.id_Produc_Mater,
-          unidad: producto.UM,
-          propiedad: b.propiedad,
-          propietario_id: b.propiedad === 'DE_CLIENTE' ? remitente : null,
-          condicion:
-            b.condicion || (b.propiedad === 'DE_CLIENTE' ? 'SUCIO' : 'INSUMO'),
-          especificaciones,
-          origen: 'RECEPCION',
-          recepcion_id: recepcion.id,
-          orden_venta_id: ov?.id,
-          estado_calidad_recepcion: 'CUARENTENA',
-        },
-      });
-      await tx.movimientos_inventario.create({
-        data: {
-          folio_Movi: `REC-${randomUUID()}`,
-          clave_evento: `recepcion:${recepcion.id}`,
-          tipo: 'ENTRADA_RECEPCION',
-          cantidad,
-          lote_inventario_id: lote.id,
-          ubicacion_destino_id: ubicacion,
-          realizado_por: u.usuario,
-        },
-      });
-      const muestra = await tx.muestras.create({
-        data: {
-          no_Muestra: `MP-${folio}`,
-          fecha_Toma: new Date(),
-          Hora_Toma: new Date(),
-          area_Muestra: 'CALIDAD',
-          lote_inventario_id: lote.id,
-          producto_id: producto.id_Produc_Mater,
-          cliente_id: b.propiedad === 'DE_CLIENTE' ? remitente : null,
-        },
-      });
-      await this.tiempos.transicion(
-        tx,
-        { entidad: 'MUESTRA', entidad_id: muestra.id_Muestra },
-        'TRASLADO',
-      );
+      for (const [indice, grupo] of grupos.entries()) {
+        const sufijo = esGrafitoPorPrensa ? `-G${indice + 1}` : '';
+        const folioInventario = `MP-${folio}${sufijo}`;
+        if (folioInventario.length > 100)
+          throw new BadRequestException('Folio demasiado largo para los grupos de inventario');
+        const lote = await tx.lotes_inventario.create({
+          data: {
+            folio: folioInventario,
+            producto_id: producto.id_Produc_Mater,
+            unidad: producto.UM,
+            propiedad: b.propiedad,
+            propietario_id: b.propiedad === 'DE_CLIENTE' ? remitente : null,
+            condicion: b.condicion || (b.propiedad === 'DE_CLIENTE' ? 'SUCIO' : 'INSUMO'),
+            especificaciones: grupo.especificaciones,
+            origen: 'RECEPCION',
+            recepcion_id: recepcion.id,
+            orden_venta_id: ov?.id,
+            estado_calidad_recepcion: 'CUARENTENA',
+          },
+        });
+        await tx.movimientos_inventario.create({
+          data: {
+            folio_Movi: `REC-${randomUUID()}`,
+            clave_evento: esGrafitoPorPrensa
+              ? `recepcion:${recepcion.id}:grupo:${indice + 1}`
+              : `recepcion:${recepcion.id}`,
+            tipo: 'ENTRADA_RECEPCION',
+            cantidad: grupo.cantidad,
+            lote_inventario_id: lote.id,
+            ubicacion_destino_id: ubicacion,
+            realizado_por: u.usuario,
+          },
+        });
+        const muestra = await tx.muestras.create({
+          data: {
+            no_Muestra: esGrafitoPorPrensa
+              ? `MP-${recepcion.id}-G${indice + 1}`
+              : `MP-${folio}`,
+            fecha_Toma: new Date(),
+            Hora_Toma: new Date(),
+            area_Muestra: 'CALIDAD',
+            lote_inventario_id: lote.id,
+            producto_id: producto.id_Produc_Mater,
+            cliente_id: b.propiedad === 'DE_CLIENTE' ? remitente : null,
+          },
+        });
+        await this.tiempos.transicion(
+          tx,
+          { entidad: 'MUESTRA', entidad_id: muestra.id_Muestra },
+          'TRASLADO',
+        );
+      }
       return recepcion;
     });
     this.eventos.notificar('MUESTRA_CREADA', {});
