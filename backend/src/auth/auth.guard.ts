@@ -9,6 +9,9 @@ export class AuthGuard implements CanActivate {
   const req=ctx.switchToHttp().getRequest();
   req.usuario=this.auth.verificar(String(req.headers.authorization||'').replace(/^Bearer /,''));
   const areas=this.reflector.getAllAndOverride<Area[]>('areas_ust',[ctx.getHandler(),ctx.getClass()]);
+  // Los usuarios externos solo pueden invocar endpoints que los autoricen de manera explícita.
+  // Evita que un endpoint interno protegido pero sin @Areas exponga datos al portal.
+  if(req.usuario.area==='cliente' && (!areas || !areas.includes('cliente')))throw new ForbiddenException('Acceso exclusivo para personal interno.');
   if(areas&&!areas.includes(req.usuario.area))throw new ForbiddenException('Tu área no tiene acceso a esta operación.');
   return true;
  }
