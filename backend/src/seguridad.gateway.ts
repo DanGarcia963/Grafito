@@ -33,18 +33,18 @@ export class SeguridadGateway {
     
     this.verificarSeguridad(client);
     // 2. Emitir a TODOS los usuarios conectados (incluyendo el creador)
-    this.server.emit('TRAMITE_CREADO', data);
+    this.server.to('seguridad').emit('TRAMITE_CREADO', data);
   }
 
   @SubscribeMessage('actualizar_tramite')
   handleActualizarTramite(@MessageBody() data: TramiteLegal, @ConnectedSocket() client: Socket) {
     this.verificarSeguridad(client);
-    this.server.emit('TRAMITE_ACTUALIZADO', data);
+    this.server.to('seguridad').emit('TRAMITE_ACTUALIZADO', data);
   }
 
   @SubscribeMessage('eliminar_tramite')
   handleEliminarTramite(@MessageBody() id: string, @ConnectedSocket() client: Socket) {
     this.verificarSeguridad(client);
-    this.server.emit('TRAMITE_ELIMINADO', id);
+    this.server.to('seguridad').emit('TRAMITE_ELIMINADO', id);
   }
 }
