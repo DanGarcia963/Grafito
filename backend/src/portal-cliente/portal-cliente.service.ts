@@ -314,6 +314,51 @@ export class PortalClienteService {
         saldo: redondear(p.saldo), liberado: redondear(p.liberado),
       })).sort((a, b) => a.prensa.localeCompare(b.prensa));
     }
+    // Fotografía del inventario actual del cliente, sin mezclarla con la cohorte de recepciones.
+    // Las aperturas históricas sí cuentan en la fotografía física; no se consideran entradas nuevas.
+    const existenciasCliente = await this.prisma.lotes_inventario.findMany({
+      where: {
+        propiedad: 'DE_CLIENTE',
+        propietario_id: cliente.id,
+        producto: { nombre_Producto: { contains: 'ORSA VFG', mode: 'insensitive' } },
+      },
+      select: { id: true, folio: true, unidad: true, condicion: true, especificaciones: true },
+    });
+    const movimientosExistencias = existenciasCliente.length
+      ? await this.prisma.movimientos_inventario.findMany({
+          where: { lote_inventario_id: { in: existenciasCliente.map(l => l.id) } },
+          select: {
+            id_Movi_Invent: true, lote_inventario_id: true, lote_produccion_id: true,
+            tipo: true, cantidad: true, ubicacion_origen_id: true,
+            ubicacion_destino_id: true, reversa_de_id: true,
+          },
+        }) as Movimiento[]
+      : [];
+    const detallePorLote = new Map<number, Movimiento[]>();
+    for (const m of movimientosExistencias) {
+      const actual = detallePorLote.get(m.lote_inventario_id) ?? [];
+      actual.push(m);
+      detallePorLote.set(m.lote_inventario_id, actual);
+    }
+    const gruposActuales = new Map<string, {
+      condicion: string; prensa: Prensa; unidad: string; saldo: number; lotes: number;
+    }>();
+    for (const l of existenciasCliente) {
+      const saldo = saldoActual(detallePorLote.get(l.id) ?? []);
+      if (saldo <= 0) continue;
+      const prensa = prensaDe(l.especificaciones);
+      const clave = [l.unidad, l.condicion, prensa].join('|');
+      const actual = gruposActuales.get(clave) ?? {
+        unidad: String(l.unidad), condicion: String(l.condicion),
+        prensa, saldo: 0, lotes: 0,
+      };
+      actual.saldo += saldo;
+      actual.lotes++;
+      gruposActuales.set(clave, actual);
+    }
+    const inventarioActual = [...gruposActuales.values()].map(x => ({
+      ...x, saldo: redondear(x.saldo),
+    })).sort((a, b) => a.condicion.localeCompare(b.condicion) || a.prensa.localeCompare(b.prensa));
     const [manifiestos, resguardados] = await Promise.all([
       this.prisma.manifiestos.count({ where: { cliente_id: cliente.id } }),
       this.prisma.manifiestos.count({ where: { cliente_id: cliente.id, resguardado_en: { not: null } } }),
@@ -322,6 +367,7 @@ export class PortalClienteService {
       success: true, cliente, periodo: { desde: params.desde || null, hasta: params.hasta || null,
         descripcion: 'Cohorte de recepciones confirmadas con checklist completo. Procesamiento acumulado de esos mismos lotes.' },
       unidades: [...unidades.values()],
+      inventarioActual,
       documentos: { manifiestos, resguardados },
       trazabilidad: {
         recepcionesConfirmadas: recepciones.length,
