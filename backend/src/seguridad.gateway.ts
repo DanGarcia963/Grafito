@@ -15,7 +15,7 @@ import type { TramiteLegal } from './types/tramites';
 export class SeguridadGateway {
   constructor(private readonly auth: AuthService) {}
   handleConnection(client: Socket) {
-    try { this.verificarSeguridad(client); } catch { client.disconnect(true); }
+    try { this.auth.verificar(client.handshake.auth?.token); } catch { client.disconnect(true); }
   }
   private verificarSeguridad(client: Socket) {
     const usuario = this.auth.verificar(client.handshake.auth?.token);
