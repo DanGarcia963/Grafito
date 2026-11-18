@@ -1,10 +1,16 @@
-import { Global, Module, Controller, Post, Body, Req, UseGuards, Get } from '@nestjs/common';
+import { Global, Module, Controller, Post, Body, Req, UseGuards, Get, ForbiddenException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
 @Controller('api/auth')
 class AuthController {
  constructor(private auth:AuthService){}
- @Post('login') login(@Body() body:any,@Req() req:any){return this.auth.login(body,req.ip||'local');}
+ @Post('login') login(@Body() body:any,@Req() req:any){
+  if(body?.area==='cliente') throw new ForbiddenException('Utiliza el acceso exclusivo para clientes.');
+  return this.auth.login(body,req.ip||'local');
+ }
+ @Post('cliente/login') loginCliente(@Body() body:any,@Req() req:any){
+  return this.auth.login({...body,area:'cliente'},req.ip||'local');
+ }
  @UseGuards(AuthGuard) @Get('sesion') sesion(@Req() req:any){return req.usuario;}
  @UseGuards(AuthGuard) @Post('salir') salir(@Req() req:any){return this.auth.salir(String(req.headers.authorization).replace(/^Bearer /,''));}
 }
