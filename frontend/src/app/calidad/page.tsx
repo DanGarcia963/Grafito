@@ -399,7 +399,9 @@ const cargarContenedoresGrafito = useCallback(async () => {
     const anteriores: ContenedorState[] = orden.checklist_contenedor ?? [];
     const detalle = (orden.materiales ?? []).flatMap((m: any) =>
       (m.especificaciones?.contenedores ?? []).map((c: any) => ({
-        ...c, prensa: m.especificaciones?.atributos?.tipo_prensa ?? '',
+        ...c,
+        prensa: m.especificaciones?.atributos?.tipo_prensa ?? '',
+        vuelta: m.especificaciones?.atributos?.numero_vuelta ?? null,
       })),
     );
     const filasBase = detalle.length ? detalle : anteriores.length ? anteriores : [{ codigo: 'S/R' }];
@@ -409,7 +411,10 @@ const cargarContenedoresGrafito = useCallback(async () => {
       return {
         no_consecutivo: consecutivo,
         numero_contenedor: previo?.numero_contenedor ?? c.codigo ?? 'S/R',
-        observaciones: previo?.observaciones ?? (c.prensa ? 'Prensa: ' + c.prensa : ''),
+        observaciones: previo?.observaciones ?? [
+          c.prensa ? 'Prensa: ' + c.prensa : '',
+          c.vuelta != null && c.vuelta !== '' ? 'Vuelta: ' + c.vuelta : '',
+        ].filter(Boolean).join(' · '),
         tapa_valvula: Boolean(previo?.tapa_valvula),
         rejilla_danada: Boolean(previo?.rejilla_danada),
         base_danada: Boolean(previo?.base_danada),

@@ -8,7 +8,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import { pedir, sesionActual } from '@/utils/api';
 
 type Lote = {
-  recepcion: string; lote: string; fecha: string; prensa: string;
+  recepcion: string; lote: string; fecha: string; prensa: string; vuelta: string | null;
   recibido: number; procesado: number; saldo: number; humedad: number | null;
   muestra: string | null; origenHumedad: string | null; masaConHumedad: number | null; lotesProduccion: number[]; unidad: string;
 };
@@ -20,7 +20,7 @@ type Unidad = {
   rendimiento: number | null; prensas: Prensa[]; lotes: Lote[];
 };
 type Reporte = {
-  inventarioActual: Array<{ unidad: string; condicion: string; prensa: string; saldo: number; lotes: number }>;
+  inventarioActual: Array<{ unidad: string; condicion: string; prensa: string; vuelta: string | null; saldo: number; lotes: number }>;
   cliente: { id: number; nombre: string };
   periodo: { descripcion: string };
   unidades: Unidad[];
@@ -172,12 +172,13 @@ export default function PortalClientePage() {
             <div className="mt-5 overflow-x-auto">
               <table className="w-full min-w-[600px] text-left text-xs">
                 <thead className="bg-[#f1f7f3] text-slate-600">
-                  <tr>{['Condición', 'Prensa', 'Existencia', 'Unidad', 'Lotes'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
+                  <tr>{['Condición', 'Prensa', 'Vuelta', 'Existencia', 'Unidad', 'Lotes'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y divide-[#e8eee9]">
                   {reporte.inventarioActual.map((stock, i) => <tr key={i}>
                     <td className="px-4 py-3 font-medium">{stock.condicion === 'REGENERADO' ? 'Procesado / regenerado' : stock.condicion === 'SUCIO' ? 'Pendiente de regenerar' : stock.condicion.replaceAll('_', ' ')}</td>
                     <td className="px-4 py-3">{stock.prensa}</td>
+                    <td className="px-4 py-3">{stock.vuelta ?? 'Sin registrar'}</td>
                     <td className="px-4 py-3 font-semibold tabular-nums">{fmt(stock.saldo, 2)}</td>
                     <td className="px-4 py-3">{stock.unidad}</td>
                     <td className="px-4 py-3">{stock.lotes}</td>
@@ -243,12 +244,12 @@ export default function PortalClientePage() {
             <div className="p-5"><h3 className="font-semibold">Evidencia por lote de recepción</h3><p className="mt-1 text-xs text-slate-500">Cantidades trazadas, saldo de inventario y resultado del laboratorio inicial.</p></div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-xs">
-                <thead className="bg-[#f1f7f3] text-slate-600"><tr>{['Fecha','Recepción','Lote inventario','Prensa','Recibido','Procesado','Saldo','Humedad medida','Origen del análisis'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead>
+                <thead className="bg-[#f1f7f3] text-slate-600"><tr>{['Fecha','Recepción','Lote inventario','Prensa','Vuelta','Recibido','Procesado','Saldo','Humedad medida','Origen del análisis'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-[#e8eee9]">
                   {actual.lotes.map(l => <tr key={l.lote}>
                     <td className="px-4 py-3">{bonita(l.fecha)}</td>
                     <td className="px-4 py-3 font-medium">{l.recepcion}</td>
-                    <td className="px-4 py-3">{l.lote}</td><td className="px-4 py-3">{l.prensa}</td>
+                    <td className="px-4 py-3">{l.lote}</td><td className="px-4 py-3">{l.prensa}</td><td className="px-4 py-3">{l.vuelta ?? 'Sin registrar'}</td>
                     <td className="px-4 py-3">{fmt(l.recibido, 2)}</td><td className="px-4 py-3">{fmt(l.procesado, 2)}</td>
                     <td className="px-4 py-3">{fmt(l.saldo, 2)}</td>
                     <td className="px-4 py-3">{l.humedad == null ? <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-900">Sin análisis</span> : <span title={'Muestra ' + l.muestra} className="font-semibold text-[#13735c]">{pct(l.humedad)}</span>}</td>
@@ -256,7 +257,7 @@ export default function PortalClientePage() {
                       <span title={'LP: ' + l.lotesProduccion.join(', ') + ' · Muestra(s): ' + l.muestra}>Producción · {fmt(l.masaConHumedad)} {l.unidad} muestreados</span> :
                       l.origenHumedad === 'DIRECTA_RECEPCION' ? <span>Recepción · muestra directa</span> : '—'}</td>
                   </tr>)}
-                  {!actual.lotes.length && <tr><td colSpan={9} className="p-8 text-center text-slate-500">No hay lotes de recepción acreditados.</td></tr>}
+                  {!actual.lotes.length && <tr><td colSpan={10} className="p-8 text-center text-slate-500">No hay lotes de recepción acreditados.</td></tr>}
                 </tbody>
               </table>
             </div>
