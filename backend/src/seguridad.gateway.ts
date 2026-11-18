@@ -1,5 +1,6 @@
 import { corsOptions } from './config/runtime';
 import { AuthService } from './auth/auth.service';
+import { WsException } from '@nestjs/websockets';
 import {
   WebSocketGateway,
   SubscribeMessage,
@@ -14,8 +15,13 @@ import type { TramiteLegal } from './types/tramites';
 export class SeguridadGateway {
   constructor(private readonly auth: AuthService) {}
   handleConnection(client: Socket) {
-    try { this.auth.verificar(client.handshake.auth?.token); } catch { client.disconnect(true); }
+    try { this.verificarSeguridad(client); } catch { client.disconnect(true); }
   }
+  private verificarSeguridad(client: Socket) {
+    const usuario = this.auth.verificar(client.handshake.auth?.token);
+    if (usuario.area !== 'seguridad') throw new WsException('Acceso restringido a Seguridad.');
+  }
+
   @WebSocketServer()
   server!: Server;
 
@@ -25,20 +31,20 @@ export class SeguridadGateway {
     @ConnectedSocket() client: Socket
   ) {
     
-    this.auth.verificar(client.handshake.auth?.token);
+    this.verificarSeguridad(client);
     // 2. Emitir a TODOS los usuarios conectados (incluyendo el creador)
     this.server.emit('TRAMITE_CREADO', data);
   }
 
   @SubscribeMessage('actualizar_tramite')
   handleActualizarTramite(@MessageBody() data: TramiteLegal, @ConnectedSocket() client: Socket) {
-    this.auth.verificar(client.handshake.auth?.token);
+    this.verificarSeguridad(client);
     this.server.emit('TRAMITE_ACTUALIZADO', data);
   }
 
   @SubscribeMessage('eliminar_tramite')
   handleEliminarTramite(@MessageBody() id: string, @ConnectedSocket() client: Socket) {
-    this.auth.verificar(client.handshake.auth?.token);
+    this.verificarSeguridad(client);
     this.server.emit('TRAMITE_ELIMINADO', id);
   }
 }
