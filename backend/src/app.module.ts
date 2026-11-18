@@ -1,3 +1,4 @@
+import { PortalClienteModule } from './portal-cliente/portal-cliente.module';
 import { CostosModule } from './costos/costos.module';
 import { SeguridadModule } from './seguridad/seguridad.module';
 import { KpisModule } from './kpis/kpis.module';
@@ -18,7 +19,7 @@ import { redisConnection } from './config/runtime';
 
 const queueEnabled = process.env.REDIS_ENABLED === 'true';
 @Module({
-  imports: [SeguridadModule, KpisModule, PrismaModule, AuthModule, CostosModule, TrazabilidadModule, InvestigacionModule,
+  imports: [PortalClienteModule, SeguridadModule, KpisModule, PrismaModule, AuthModule, CostosModule, TrazabilidadModule, InvestigacionModule,
     VentasModule, ProductionModule, CalidadModule, ManifiestosModule,
     ...(queueEnabled ? [BullModule.forRoot({ connection: redisConnection() }),
       BullModule.registerQueue({ name: 'cola-lotes' })] : []),
