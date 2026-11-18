@@ -385,6 +385,9 @@ export default function TanquesPage() {
           <Link className={boton} href="/">
             Inicio
           </Link>
+          <Link className={boton} href="/portal-cliente">
+            Dashboard de cliente
+          </Link>
           {!produccion && (
             <Link className={boton} href="/calidad">
               Calidad

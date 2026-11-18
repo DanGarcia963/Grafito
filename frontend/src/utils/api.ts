@@ -13,8 +13,8 @@ export async function apiFetch(input:RequestInfo|URL,init:RequestInit={}){
     const errorBody = await res.clone().json().catch(() => null);
     console.error(' Error devuelto por el servidor (NestJS):', errorBody);
   }
- if(res.status===401&&typeof window!=='undefined'&&!url.endsWith('/auth/login')){
-  localStorage.removeItem('sesion');window.dispatchEvent(new Event('sesion-cambiada'));window.location.assign('/');
+ if(res.status===401&&typeof window!=='undefined'&&!url.endsWith('/auth/login')&&!url.endsWith('/cliente/login')){
+  localStorage.removeItem('sesion');window.dispatchEvent(new Event('sesion-cambiada'));window.location.assign(window.location.pathname.startsWith('/portal-cliente') ? '/acceso-cliente' : '/');
  }
  return res;
 }

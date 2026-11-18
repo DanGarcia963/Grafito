@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-export type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'crm_admin' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria';
+export type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'crm_admin' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria' | 'cliente';
 export type Usuario = { usuario: string; area: Area; personaId: number; expira: number };
 @Injectable()
 export class AuthService {
@@ -18,11 +18,13 @@ export class AuthService {
   if(intento.n>=10)throw new UnauthorizedException('Demasiados intentos. Espera un minuto.');
   intento.n++;this.intentos.set(clave,intento);
   const cuenta=cuentas.find(c=>c.usuario===String(body?.usuario??'').trim() && Array.isArray(c.areas) && c.areas.includes(body?.area));
-  if(!cuenta || typeof body?.password!=='string' || body.password.length>256 || !['calidad','id','ventas','crm_admin','produccion','seguridad','costos','logistica','almacen','contaduria'].includes(body?.area))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
+  if(!cuenta || typeof body?.password!=='string' || body.password.length>256 || !['calidad','id','ventas','crm_admin','produccion','seguridad','costos','logistica','almacen','contaduria','cliente'].includes(body?.area))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
   const esperado=Buffer.from(String(cuenta.hash),'hex');
   const actual=scryptSync(body.password,String(cuenta.salt),64);
   if(esperado.length!==actual.length || !timingSafeEqual(actual,esperado))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
   if(!Number.isSafeInteger(cuenta.personaId)||cuenta.personaId<=0)throw new ServiceUnavailableException('La cuenta no tiene una persona asignada.');
+  // El área de cliente se asocia exclusivamente con su personaId de CLIENTE.
+  // Nunca aceptar el cliente desde el navegador como límite de autorización.
   const sesion:Usuario={usuario:cuenta.usuario,area:body.area,personaId:cuenta.personaId,expira:ahora+8*60*60*1000};
   const token=randomBytes(32).toString('hex');this.sesiones.set(token,sesion);this.intentos.delete(clave);
   return {success:true,token,...sesion};
