@@ -30,6 +30,12 @@ function prensaDe(especificaciones: unknown): Prensa {
   if (p.includes('fagor')) return 'Fagor';
   return 'Sin identificar';
 }
+function vueltaDe(especificaciones: unknown): string | null {
+  const raw = (especificaciones as { atributos?: { numero_vuelta?: unknown } } | null)?.atributos?.numero_vuelta;
+  const valor = String(raw ?? '').trim();
+  return valor && /^([1-9]\d{0,1}|[1-9]\d?\s*(?:RA|DA|TA|VA|MA))$/i.test(valor)
+    ? valor : null;
+}
 function fechaLocalISO(valor: unknown, campo: string): Date | null {
   if (valor == null || valor === '') return null;
   const texto = String(valor);
@@ -63,7 +69,7 @@ const sinDatos = (unidad: string) => ({
   rendimiento: null as number | null,
   prensas: [] as Array<{ prensa: Prensa; recibido: number; procesado: number; saldo: number; liberado: number }>,
   lotes: [] as Array<{
-    recepcion: string; lote: string; fecha: string; prensa: Prensa;
+    recepcion: string; lote: string; fecha: string; prensa: Prensa; vuelta: string | null;
     recibido: number; procesado: number; saldo: number; humedad: number | null;
     muestra: string | null; origenHumedad: string | null;
     masaConHumedad: number | null; lotesProduccion: number[]; unidad: string;
@@ -317,7 +323,7 @@ export class PortalClienteService {
         recepcion: llegada?.no_lote ?? 'Sin referencia',
         lote: lote.folio,
         fecha: llegada?.fecha_llegada.toISOString().slice(0, 10) ?? '',
-        prensa: p, recibido: redondear(recibido), procesado: redondear(procesado),
+        prensa: p, vuelta: vueltaDe(lote.especificaciones), recibido: redondear(recibido), procesado: redondear(procesado),
         saldo: redondear(saldo), humedad: h?.humedad ?? null,
         muestra: h?.muestra ?? null, origenHumedad: h?.origen ?? null,
         masaConHumedad: h?.masaMedida ?? null, lotesProduccion: h?.lotesProduccion ?? [], unidad,
@@ -437,16 +443,17 @@ export class PortalClienteService {
       detallePorLote.set(m.lote_inventario_id, actual);
     }
     const gruposActuales = new Map<string, {
-      condicion: string; prensa: Prensa; unidad: string; saldo: number; lotes: number;
+      condicion: string; prensa: Prensa; vuelta: string | null; unidad: string; saldo: number; lotes: number;
     }>();
     for (const l of existenciasCliente) {
       const saldo = saldoActual(detallePorLote.get(l.id) ?? []);
       if (saldo <= 0) continue;
       const prensa = prensaDe(l.especificaciones);
-      const clave = [l.unidad, l.condicion, prensa].join('|');
+      const vuelta = vueltaDe(l.especificaciones);
+      const clave = [l.unidad, l.condicion, prensa, vuelta ?? 'SIN_VUELTA'].join('|');
       const actual = gruposActuales.get(clave) ?? {
         unidad: String(l.unidad), condicion: String(l.condicion),
-        prensa, saldo: 0, lotes: 0,
+        prensa, vuelta, saldo: 0, lotes: 0,
       };
       actual.saldo += saldo;
       actual.lotes++;
