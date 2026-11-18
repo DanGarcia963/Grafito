@@ -59,6 +59,7 @@ const sinDatos = (unidad: string) => ({
   unidad, recibido: 0, procesado: 0, liberado: 0, liberadoSinVinculo: 0,
   entregado: 0, saldoRecepciones: 0, humedadPonderada: null as number | null,
   aguaEstimadaKg: null as number | null, lotesMuestreados: 0, lotesRecibidos: 0,
+  masaConHumedad: 0,
   rendimiento: null as number | null,
   prensas: [] as Array<{ prensa: Prensa; recibido: number; procesado: number; saldo: number; liberado: number }>,
   lotes: [] as Array<{
