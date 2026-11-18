@@ -1535,7 +1535,7 @@ export class ProductionService {
         config.campos.some((campo: any) => campo.clave === 'tipo_prensa');
 
       type GrupoRecepcion = {
-        especificaciones: Prisma.InputJsonObject;
+        especificaciones: Prisma.InputJsonObject | undefined;
         cantidad: Prisma.Decimal;
       };
       const grupos: GrupoRecepcion[] = [];
@@ -1599,7 +1599,7 @@ export class ProductionService {
         const especificaciones = especificacionesValidas(
           b.especificaciones, producto.configuracion_operativa, producto.UM, cantidad,
         );
-        grupos.push({ cantidad, especificaciones: especificaciones ?? { version: 1, atributos: {}, contenedores: [] } });
+        grupos.push({ cantidad, especificaciones });
       }
       const recepcion = await tx.lotes_llegada.create({
         data: {
