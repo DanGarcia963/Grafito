@@ -64,7 +64,8 @@ const sinDatos = (unidad: string) => ({
   lotes: [] as Array<{
     recepcion: string; lote: string; fecha: string; prensa: Prensa;
     recibido: number; procesado: number; saldo: number; humedad: number | null;
-    muestra: string | null; unidad: string;
+    muestra: string | null; origenHumedad: string | null;
+    masaConHumedad: number | null; lotesProduccion: number[]; unidad: string;
   }>,
 });
 
@@ -150,11 +151,52 @@ export class PortalClienteService {
       arr.push(m);
       movsPorLote.set(m.lote_inventario_id, arr);
     }
-    // Solo una muestra inicial asociada explícitamente al lote de inventario;
-    // no atribuir muestras de tanques o de otros clientes a una recepción.
+    // Dos tipos de humedad: directa del lote de inventario, o muestra inicial
+    // tomada en un LP que consumió material del lote. Nunca asumir que una
+    // muestra de mezcla representa la humedad original de cada entrada.
+    const consumosCohorte = movimientos.filter(m => m.tipo === 'SALIDA_CONSUMO' && m.lote_produccion_id != null);
+    const produccionIds = [...new Set(consumosCohorte.map(m => m.lote_produccion_id!))];
+    const [todosLosConsumos, reversasDeConsumo] = await Promise.all([
+      produccionIds.length ? this.prisma.movimientos_inventario.findMany({
+        where: { lote_produccion_id: { in: produccionIds }, tipo: 'SALIDA_CONSUMO' },
+        select: {
+          id_Movi_Invent: true, lote_inventario_id: true, lote_produccion_id: true,
+          tipo: true, cantidad: true, ubicacion_origen_id: true,
+          ubicacion_destino_id: true, reversa_de_id: true,
+        },
+      }) as Promise<Movimiento[]> : Promise.resolve([]),
+      produccionIds.length ? this.prisma.movimientos_inventario.findMany({
+        where: { reversa_de_id: { in: consumosCohorte.map(m => m.id_Movi_Invent) } },
+        select: { reversa_de_id: true },
+      }) : Promise.resolve([]),
+    ]);
+    const reversasOtros = todosLosConsumos.length
+      ? await this.prisma.movimientos_inventario.findMany({
+          where: { reversa_de_id: { in: todosLosConsumos.map(m => m.id_Movi_Invent) } },
+          select: { reversa_de_id: true },
+        })
+      : [];
+    const revertidosConsumo = new Set(
+      [...reversasDeConsumo, ...reversasOtros].map(r => r.reversa_de_id).filter((id): id is number => id != null),
+    );
+    const fuentesPorProduccion = new Map<number, Movimiento[]>();
+    for (const m of todosLosConsumos) {
+      if (m.lote_produccion_id == null || revertidosConsumo.has(m.id_Movi_Invent)) continue;
+      const lista = fuentesPorProduccion.get(m.lote_produccion_id) ?? [];
+      lista.push(m);
+      fuentesPorProduccion.set(m.lote_produccion_id, lista);
+    }
     const muestras = ids.length ? await this.prisma.muestras.findMany({
-      where: { lote_inventario_id: { in: ids }, categoria_Muestra: 'MUESTRA_INICIAL' },
-      select: { id_Muestra: true, no_Muestra: true, lote_inventario_id: true },
+      where: {
+        categoria_Muestra: 'MUESTRA_INICIAL',
+        area_Muestra: 'CALIDAD',
+        estado_Muestra: 'APROBADO',
+        OR: [
+          { lote_inventario_id: { in: ids } },
+          ...(produccionIds.length ? [{ lote_id: { in: produccionIds } }] : []),
+        ],
+      },
+      select: { id_Muestra: true, no_Muestra: true, lote_inventario_id: true, lote_id: true, cliente_id: true },
       orderBy: { id_Muestra: 'desc' },
     }) : [];
     const resultados = muestras.length ? await this.prisma.resultado_analisis.findMany({
@@ -173,11 +215,60 @@ export class PortalClienteService {
         resultadosPorMuestra.set(r.muestra_id, valor);
       }
     }
-    const humedadPorLote = new Map<number, { humedad: number; muestra: string }>();
+    const humedadPorLote = new Map<number, {
+      humedad: number; muestra: string; origen: 'DIRECTA_RECEPCION' | 'INFERIDA_PRODUCCION';
+      masaMedida: number; lotesProduccion: number[];
+    }>();
+    // Si existe resultado directo, es el dato representativo de recepción.
     for (const m of muestras) {
       const valor = resultadosPorMuestra.get(m.id_Muestra);
-      if (m.lote_inventario_id != null && valor != null && !humedadPorLote.has(m.lote_inventario_id)) {
-        humedadPorLote.set(m.lote_inventario_id, { humedad: valor, muestra: m.no_Muestra ?? String(m.id_Muestra) });
+      if (m.lote_inventario_id != null && ids.includes(m.lote_inventario_id) &&
+          (m.cliente_id == null || m.cliente_id === cliente.id) &&
+          valor != null && !humedadPorLote.has(m.lote_inventario_id)) {
+        const movs = movsPorLote.get(m.lote_inventario_id) ?? [];
+        const recibido = agruparCantidad(movs, 'ENTRADA_RECEPCION', reversiones(movs));
+        humedadPorLote.set(m.lote_inventario_id, {
+          humedad: valor, muestra: m.no_Muestra ?? String(m.id_Muestra),
+          origen: 'DIRECTA_RECEPCION', masaMedida: recibido, lotesProduccion: [],
+        });
+      }
+    }
+    // Consolidar muestras de producción únicamente si un LP consumió
+    // exclusivamente UN lote origen, sin mezclas ni consumos de otro cliente.
+    // La misma recepción puede alimentar varios LP, cada cual con su medida.
+    const medidasLP = new Map<number, { valor: number; muestra: string }>();
+    for (const m of muestras) {
+      const valor = resultadosPorMuestra.get(m.id_Muestra);
+      if (m.lote_id == null || valor == null || medidasLP.has(m.lote_id) ||
+          (m.cliente_id != null && m.cliente_id !== cliente.id)) continue;
+      medidasLP.set(m.lote_id, { valor, muestra: m.no_Muestra ?? String(m.id_Muestra) });
+    }
+    const medicionesInferidas = new Map<number, {
+      total: number; ponderado: number; muestras: string[]; produccionIds: number[];
+    }>();
+    for (const [lpId, medida] of medidasLP) {
+      const fuentes = fuentesPorProduccion.get(lpId) ?? [];
+      const origenIds = [...new Set(fuentes.map(f => f.lote_inventario_id))];
+      if (origenIds.length !== 1 || !ids.includes(origenIds[0])) continue;
+      const loteId = origenIds[0];
+      if (humedadPorLote.get(loteId)?.origen === 'DIRECTA_RECEPCION') continue;
+      const cantidad = fuentes.reduce((sum, f) => sum + numero(f.cantidad), 0);
+      if (cantidad <= 0) continue;
+      const acumulado = medicionesInferidas.get(loteId) ?? {
+        total: 0, ponderado: 0, muestras: [], produccionIds: [],
+      };
+      acumulado.total += cantidad;
+      acumulado.ponderado += medida.valor * cantidad;
+      acumulado.muestras.push(medida.muestra);
+      acumulado.produccionIds.push(lpId);
+      medicionesInferidas.set(loteId, acumulado);
+    }
+    for (const [loteId, m] of medicionesInferidas) {
+      if (m.total > 0) {
+        humedadPorLote.set(loteId, {
+          humedad: redondear(m.ponderado / m.total), muestra: m.muestras.join(', '),
+          origen: 'INFERIDA_PRODUCCION', masaMedida: m.total, lotesProduccion: m.produccionIds,
+        });
       }
     }
     const unidades = new Map<string, ReturnType<typeof sinDatos>>();
@@ -214,8 +305,10 @@ export class PortalClienteService {
       if (h && recibido > 0) {
         registro.lotesMuestreados++;
         const ponderacion = pesoHumedad.get(unidad) ?? { peso: 0, suma: 0, agua: 0 };
-        ponderacion.peso += recibido; ponderacion.suma += recibido * h.humedad;
-        if (unidad === 'Kilogramos') ponderacion.agua += recibido * h.humedad / 100;
+        const masaPonderada = h.origen === 'DIRECTA_RECEPCION' ? recibido : Math.min(recibido, h.masaMedida);
+        ponderacion.peso += masaPonderada; ponderacion.suma += masaPonderada * h.humedad;
+        if (unidad === 'Kilogramos') ponderacion.agua += masaPonderada * h.humedad / 100;
+        registro.masaConHumedad += masaPonderada;
         pesoHumedad.set(unidad, ponderacion);
       }
       const llegada = recepcionPorId.get(lote.recepcion_id!);
@@ -225,7 +318,8 @@ export class PortalClienteService {
         fecha: llegada?.fecha_llegada.toISOString().slice(0, 10) ?? '',
         prensa: p, recibido: redondear(recibido), procesado: redondear(procesado),
         saldo: redondear(saldo), humedad: h?.humedad ?? null,
-        muestra: h?.muestra ?? null, unidad,
+        muestra: h?.muestra ?? null, origenHumedad: h?.origen ?? null,
+        masaConHumedad: h?.masaMedida ?? null, lotesProduccion: h?.lotesProduccion ?? [], unidad,
       });
     }
     // Producto liberado solo se atribuye a la cohorte cuando TODOS los consumos
@@ -309,6 +403,7 @@ export class PortalClienteService {
       registro.liberadoSinVinculo = redondear(registro.liberadoSinVinculo);
       registro.entregado = redondear(registro.entregado);
       registro.saldoRecepciones = redondear(registro.saldoRecepciones);
+      registro.masaConHumedad = redondear(registro.masaConHumedad);
       registro.prensas = [...matriz.get(unidad)!.values()].map(p => ({
         ...p, recibido: redondear(p.recibido), procesado: redondear(p.procesado),
         saldo: redondear(p.saldo), liberado: redondear(p.liberado),
