@@ -20,6 +20,7 @@ type Unidad = {
   rendimiento: number | null; prensas: Prensa[]; lotes: Lote[];
 };
 type Reporte = {
+  inventarioActual: Array<{ unidad: string; condicion: string; prensa: string; saldo: number; lotes: number }>;
   cliente: { id: number; nombre: string };
   periodo: { descripcion: string };
   unidades: Unidad[];
@@ -156,6 +157,36 @@ export default function PortalClientePage() {
               className={'rounded-full px-4 py-2 text-xs font-semibold ' + (actual?.unidad === u.unidad ? 'bg-[#173e35] text-white' : 'border border-slate-200 bg-white text-slate-600')}>{u.unidad}</button>)}
           </div>
         </div>
+        <section className="rounded-2xl border border-[#e0e8e0] bg-white p-5 shadow-sm md:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-lg font-semibold">Existencias actuales del cliente</h3>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+                Inventario físico registrado, incluidas aperturas históricas. Es distinto al balance de recepciones del período
+                y no demuestra por sí mismo qué volumen se procesó o entregó.
+              </p>
+            </div>
+            <span className="rounded-full bg-[#e8f5ed] px-3 py-1.5 text-xs font-semibold text-[#176f5b]">Fotografía actual</span>
+          </div>
+          {(reporte.inventarioActual || []).length ? (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full min-w-[600px] text-left text-xs">
+                <thead className="bg-[#f1f7f3] text-slate-600">
+                  <tr>{['Condición', 'Prensa', 'Existencia', 'Unidad', 'Lotes'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-[#e8eee9]">
+                  {reporte.inventarioActual.map((stock, i) => <tr key={i}>
+                    <td className="px-4 py-3 font-medium">{stock.condicion === 'REGENERADO' ? 'Procesado / regenerado' : stock.condicion === 'SUCIO' ? 'Pendiente de regenerar' : stock.condicion.replaceAll('_', ' ')}</td>
+                    <td className="px-4 py-3">{stock.prensa}</td>
+                    <td className="px-4 py-3 font-semibold tabular-nums">{fmt(stock.saldo, 2)}</td>
+                    <td className="px-4 py-3">{stock.unidad}</td>
+                    <td className="px-4 py-3">{stock.lotes}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="mt-5 text-sm text-slate-500">No hay existencias positivas de grafito registradas para este cliente.</p>}
+        </section>
         {!actual && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
           No hay lotes de recepción con entradas acreditadas para esta selección. No se contabilizan inventarios de apertura histórica como nuevas recepciones.
         </div>}
