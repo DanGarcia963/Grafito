@@ -2,9 +2,9 @@
 
 ## Alcance
 
-Dashboard en /portal-cliente para un usuario externo con área cliente. La misma pantalla es accesible desde Producción, donde se puede seleccionar un cliente. El backend se encuentra en GET /api/portal-cliente/resumen y el catálogo de clientes, solo para Producción, en GET /api/portal-cliente/clientes.
+Pantalla de acceso externo en **/acceso-cliente**, que utiliza exclusivamente POST /api/auth/cliente/login. Dashboard en **/portal-cliente** para un usuario externo con área cliente. La misma pantalla es accesible desde Producción, donde se puede seleccionar un cliente. El acceso interno `/` no permite iniciar sesión en el área cliente. El backend se encuentra en GET /api/portal-cliente/resumen y el catálogo de clientes, solo para Producción, en GET /api/portal-cliente/clientes.
 
-No se crea ninguna tabla ni se altera el inventario o el historial operativo; este módulo es de **consulta**.
+No se crea ninguna tabla ni se altera el inventario o el historial operativo; este módulo es de **consulta**. El API incluye `inventarioActual`: fotografía del saldo vigente del cliente por condición/prensa/unidad, **incluidas las aperturas históricas**, sin atribuir esas existencias como recepciones nuevas.
 
 ## Origen de datos y criterios
 
