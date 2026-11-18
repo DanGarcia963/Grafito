@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { pedir } from '@/utils/api';
 
-type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'crm_admin' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria' | 'cliente';
+type Area = 'produccion' | 'calidad' | 'id' | 'ventas' | 'crm_admin' | 'seguridad' | 'costos' | 'logistica' | 'almacen' | 'contaduria';
 
 export default function LoginPage() {
 const [area, setArea] = useState<Area>('produccion');
@@ -25,7 +25,7 @@ try {
   throw new Error('El servidor no devolvió un token de sesión. Revisa la respuesta de /api/auth/login.');
  }
  localStorage.setItem('sesion',JSON.stringify(sesion));window.dispatchEvent(new Event('sesion-cambiada'));
- router.push(area === 'cliente' ? '/portal-cliente' : area === 'seguridad' || area === 'contaduria' ? '/matriz' : area === 'calidad' ? '/calidad' : area === 'produccion' ? '/tanques' : area === 'ventas' || area === 'crm_admin' ? '/ventas-muestras' : area === 'costos' ? '/costos' : area === 'logistica' || area === 'almacen' ? '/manifiestos' : '/investigacion');
+ router.push(area === 'seguridad' || area === 'contaduria' ? '/matriz' : area === 'calidad' ? '/calidad' : area === 'produccion' ? '/tanques' : area === 'ventas' || area === 'crm_admin' ? '/ventas-muestras' : area === 'costos' ? '/costos' : area === 'logistica' || area === 'almacen' ? '/manifiestos' : '/investigacion');
 } catch(e){setError(e instanceof Error?e.message:'No se pudo iniciar sesión');}
 
 };
@@ -49,7 +49,6 @@ US Technologies </h1>
       className="w-full border rounded-lg p-2.5 mb-4"
     >
       <option value="produccion">Producción</option>
-      <option value="cliente">Cliente · Economía circular</option>
       <option value="calidad">Muestras · Calidad</option>
       <option value="id">I+D · Análisis de muestras</option>
       <option value="ventas">Ventas · CRM de muestras I+D</option>
@@ -99,6 +98,7 @@ US Technologies </h1>
     >
       Entrar al Sistema
     </button>
+    <a href="/acceso-cliente" className="mt-6 block text-center text-sm font-medium text-emerald-800 hover:underline">Acceso exclusivo para clientes</a>
   </form>
 </main>
 
