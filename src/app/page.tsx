@@ -98,6 +98,7 @@ US Technologies </h1>
     >
       Entrar al Sistema
     </button>
+    <a href="/acceso-cliente" className="mt-6 block text-center text-sm font-medium text-emerald-800 hover:underline">Acceso exclusivo para clientes</a>
   </form>
 </main>
 
