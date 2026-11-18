@@ -1,5 +1,6 @@
 "use client";
 import EspecificacionesMaterial from "@/components/EspecificacionesMaterial";
+import GruposRecepcionGrafito from "@/components/GruposRecepcionGrafito";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { pedir, sesionActual } from "@/utils/api";
@@ -209,6 +210,15 @@ export default function TanquesPage() {
     [plan, setPlan] = useState(false);
   const [etapaTanqueSeleccionada, setEtapaTanqueSeleccionada] = useState("");
   const [categoriaMuestraNueva, setCategoriaMuestraNueva] = useState("MUESTRA_INICIAL");
+  const productoSeleccionado = cat.productos?.find(
+    (p: any) => String(p.id_Produc_Mater) === productoEspec,
+  );
+  const recepcionGrafitoPorGrupos =
+    productoSeleccionado?.UM === "Kilogramos" &&
+    productoSeleccionado?.configuracion_operativa?.campos?.some(
+      (campo: any) => campo.clave === "tipo_prensa",
+    );
+
 
   const cargar = useCallback(async () => {
     const usuarioActual = sesionActual();
@@ -1185,6 +1195,8 @@ export default function TanquesPage() {
                 );
                 if (b.especificaciones)
                   b.especificaciones = JSON.parse(b.especificaciones);
+                if (b.grupos_grafito)
+                  b.grupos_grafito = JSON.parse(b.grupos_grafito);
                 if (
                   form.tipo === "descargar" &&
                   form.dato.orden.linea_Produccion?.toUpperCase() === "GRAFITO" &&
@@ -1471,7 +1483,7 @@ export default function TanquesPage() {
                         ))}
                       </select>
                     </label>
-                    <label>
+                    {!recepcionGrafitoPorGrupos && <label>
                       Cantidad (en la unidad del producto)
                       <input
                         required
@@ -1481,7 +1493,7 @@ export default function TanquesPage() {
                         step="0.0001"
                         className={input}
                       />
-                    </label>
+                    </label>}
                     <label>
                       Propiedad
                       <select name="propiedad" className={input}>
@@ -1525,21 +1537,19 @@ export default function TanquesPage() {
                         </option>
                       </select>
                     </label>
-                    <EspecificacionesMaterial
-                      key={productoEspec}
-                      config={
-                        cat.productos.find(
-                          (p: any) =>
-                            String(p.id_Produc_Mater) === productoEspec,
-                        )?.configuracion_operativa
-                      }
-                      unidad={
-                        cat.productos.find(
-                          (p: any) =>
-                            String(p.id_Produc_Mater) === productoEspec,
-                        )?.UM
-                      }
-                    />
+                    {recepcionGrafitoPorGrupos ? (
+                      <GruposRecepcionGrafito
+                        key={productoEspec}
+                        pesoMin={productoSeleccionado?.configuracion_operativa?.peso_min_kg ?? 850}
+                        pesoMax={productoSeleccionado?.configuracion_operativa?.peso_max_kg ?? 1000}
+                      />
+                    ) : (
+                      <EspecificacionesMaterial
+                        key={productoEspec}
+                        config={productoSeleccionado?.configuracion_operativa}
+                        unidad={productoSeleccionado?.UM}
+                      />
+                    )}
                   </>
                 )}
                 {form.tipo === "vincular" && (
