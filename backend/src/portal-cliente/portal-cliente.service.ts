@@ -33,7 +33,7 @@ function prensaDe(especificaciones: unknown): Prensa {
 function vueltaDe(especificaciones: unknown): string | null {
   const raw = (especificaciones as { atributos?: { numero_vuelta?: unknown } } | null)?.atributos?.numero_vuelta;
   const valor = String(raw ?? '').trim();
-  return valor && /^([1-9]\\d{0,1}|[1-9]\\d?\\s*(?:RA|DA|TA|VA|MA))$/i.test(valor)
+  return valor && /^([1-9]\d{0,1}|[1-9]\d?\s*(?:RA|DA|TA|VA|MA))$/i.test(valor)
     ? valor : null;
 }
 function fechaLocalISO(valor: unknown, campo: string): Date | null {
