@@ -8,7 +8,7 @@ type UsuarioConfig = {
 };
 
 // Para cuentas externas NO reimprimir ni modificar las cuentas internas.
-// Uso: UST_CLIENTE_PASSWORD=<contraseña privada> npx ts-node generar-usuario.ts --cliente-haas
+// Uso: asigna UST_CLIENTE_PASSWORD temporalmente en PowerShell y ejecuta npx ts-node generar-usuario.ts --cliente-haas
 // Salida: un único UST_CLIENTES_JSON que se configura por separado en Railway.
 if (process.argv.includes('--cliente-haas')) {
   const password = process.env.UST_CLIENTE_PASSWORD ?? '';
@@ -125,11 +125,8 @@ const cuentas = usuarios.map(({ usuario, password, areas, personaId }) => {
 
 console.log('\n=== USUARIOS ===\n');
 
-for (const usuario of usuarios) {
-  console.log(
-    `${usuario.usuario} -> contraseña: ${usuario.password}`
-  );
-}
+// No imprimir contraseñas de usuarios existentes en la terminal.
+console.log('Las contraseñas existentes no se muestran por seguridad.');
 
 console.log('\n=== UST_USUARIOS_JSON ===\n');
 
