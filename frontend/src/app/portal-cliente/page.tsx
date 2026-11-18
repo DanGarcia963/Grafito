@@ -10,13 +10,13 @@ import { pedir, sesionActual } from '@/utils/api';
 type Lote = {
   recepcion: string; lote: string; fecha: string; prensa: string;
   recibido: number; procesado: number; saldo: number; humedad: number | null;
-  muestra: string | null; unidad: string;
+  muestra: string | null; origenHumedad: string | null; masaConHumedad: number | null; lotesProduccion: number[]; unidad: string;
 };
 type Prensa = { prensa: string; recibido: number; procesado: number; saldo: number; liberado: number };
 type Unidad = {
   unidad: string; recibido: number; procesado: number; liberado: number; liberadoSinVinculo: number;
   entregado: number; saldoRecepciones: number; humedadPonderada: number | null;
-  aguaEstimadaKg: number | null; lotesMuestreados: number; lotesRecibidos: number;
+  aguaEstimadaKg: number | null; lotesMuestreados: number; lotesRecibidos: number; masaConHumedad: number;
   rendimiento: number | null; prensas: Prensa[]; lotes: Lote[];
 };
 type Reporte = {
@@ -193,7 +193,7 @@ export default function PortalClientePage() {
         {actual && <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Tarjeta titulo="Material recibido" valor={valor(actual.recibido)} detalle={String(actual.lotesRecibidos) + ' lote(s) con entrada documentada'} icono={<PackageCheck size={20}/>} color="#3176bb"/>
-            <Tarjeta titulo="Humedad inicial" valor={pct(actual.humedadPonderada)} detalle={String(actual.lotesMuestreados) + ' de ' + String(actual.lotesRecibidos) + ' lotes analizados'} icono={<Droplets size={20}/>} color="#348eaa"/>
+            <Tarjeta titulo="Humedad inicial registrada" valor={pct(actual.humedadPonderada)} detalle={String(actual.lotesMuestreados) + ' de ' + String(actual.lotesRecibidos) + ' lotes con medición; ' + fmt(actual.masaConHumedad, 2) + ' ' + actual.unidad + ' con respaldo (recepción o producción)'} icono={<Droplets size={20}/>} color="#348eaa"/>
             <Tarjeta titulo="Material procesado" valor={valor(actual.procesado)} detalle="Consumo de los mismos lotes recibidos" icono={<Factory size={20}/>} color="#c88e37"/>
             <Tarjeta titulo="Producto liberado vinculado" valor={valor(actual.liberado)} detalle="Solo producción liberada con origen documentado" icono={<CheckCircle2 size={20}/>} color="#12836e"/>
           </section>
@@ -229,7 +229,7 @@ export default function PortalClientePage() {
                   <div className="rounded-xl bg-[#f6f9f6] p-3"><p className="text-xs text-slate-500">Liberado entregado</p><p className="mt-2 text-lg font-bold">{valor(actual.entregado)}</p></div>
                 </div>
                 {actual.aguaEstimadaKg != null && <p className="rounded-lg bg-sky-50 p-3 text-xs leading-5 text-sky-900">
-                  Agua estimada en lotes con muestra inicial: <strong>{fmt(actual.aguaEstimadaKg, 2)} kg</strong>. No equivale al agua efectivamente evaporada.
+                  Agua estimada únicamente en masa con muestra inicial: <strong>{fmt(actual.aguaEstimadaKg, 2)} kg</strong>. No equivale al agua efectivamente evaporada.
                 </p>}
               </div>
             </article>
@@ -243,7 +243,7 @@ export default function PortalClientePage() {
             <div className="p-5"><h3 className="font-semibold">Evidencia por lote de recepción</h3><p className="mt-1 text-xs text-slate-500">Cantidades trazadas, saldo de inventario y resultado del laboratorio inicial.</p></div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-xs">
-                <thead className="bg-[#f1f7f3] text-slate-600"><tr>{['Fecha','Recepción','Lote inventario','Prensa','Recibido','Procesado','Saldo','Humedad inicial'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead>
+                <thead className="bg-[#f1f7f3] text-slate-600"><tr>{['Fecha','Recepción','Lote inventario','Prensa','Recibido','Procesado','Saldo','Humedad medida','Origen del análisis'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-[#e8eee9]">
                   {actual.lotes.map(l => <tr key={l.lote}>
                     <td className="px-4 py-3">{bonita(l.fecha)}</td>
@@ -252,8 +252,11 @@ export default function PortalClientePage() {
                     <td className="px-4 py-3">{fmt(l.recibido, 2)}</td><td className="px-4 py-3">{fmt(l.procesado, 2)}</td>
                     <td className="px-4 py-3">{fmt(l.saldo, 2)}</td>
                     <td className="px-4 py-3">{l.humedad == null ? <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-900">Sin análisis</span> : <span title={'Muestra ' + l.muestra} className="font-semibold text-[#13735c]">{pct(l.humedad)}</span>}</td>
+                    <td className="px-4 py-3">{l.origenHumedad === 'INFERIDA_PRODUCCION' ?
+                      <span title={'LP: ' + l.lotesProduccion.join(', ') + ' · Muestra(s): ' + l.muestra}>Producción · {fmt(l.masaConHumedad)} {l.unidad} muestreados</span> :
+                      l.origenHumedad === 'DIRECTA_RECEPCION' ? <span>Recepción · muestra directa</span> : '—'}</td>
                   </tr>)}
-                  {!actual.lotes.length && <tr><td colSpan={8} className="p-8 text-center text-slate-500">No hay lotes de recepción acreditados.</td></tr>}
+                  {!actual.lotes.length && <tr><td colSpan={9} className="p-8 text-center text-slate-500">No hay lotes de recepción acreditados.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -268,7 +271,7 @@ export default function PortalClientePage() {
         </>}
         <footer className="flex items-start gap-2 rounded-xl border border-[#dce7de] bg-white p-5 text-xs leading-6 text-slate-600">
           <Info className="mt-0.5 shrink-0 text-[#13735c]" size={17}/>
-          <p><strong>Criterio de cálculo.</strong> {reporte.periodo.descripcion} La humedad es un promedio ponderado por cantidad recibida únicamente entre lotes que cuentan con resultado inicial asociado. Las aperturas históricas y los procesos sin vínculo no se suman al rendimiento. La planificación del Excel GKN se toma como referencia de diseño, no como registros transaccionales.</p>
+          <p><strong>Criterio de cálculo.</strong> {reporte.periodo.descripcion} La humedad es un promedio ponderado sobre la masa respaldada por análisis. Si la muestra inicial se tomó en producción, se atribuye únicamente al material consumido por ese LP cuando existe un solo lote origen, y no se presenta como humedad medida al llegar. Las aperturas históricas y los procesos sin vínculo no se suman al rendimiento. La planificación del Excel GKN se toma como referencia de diseño, no como registros transaccionales.</p>
         </footer>
       </>}
     </div>
