@@ -1,4 +1,5 @@
 name: Validar portal de cliente
+# Incluye correcciones de trazabilidad de humedad inicial
 on:
   pull_request:
     branches: [main]
