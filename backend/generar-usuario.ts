@@ -7,6 +7,29 @@ type UsuarioConfig = {
   personaId: number;
 };
 
+// Para cuentas externas NO reimprimir ni modificar las cuentas internas.
+// Uso: asigna UST_CLIENTE_PASSWORD temporalmente en PowerShell y ejecuta npx ts-node generar-usuario.ts --cliente-haas
+// Salida: un único UST_CLIENTES_JSON que se configura por separado en Railway.
+if (process.argv.includes('--cliente-haas')) {
+  const password = process.env.UST_CLIENTE_PASSWORD ?? '';
+  if (password.length < 14 || password.length > 256) {
+    console.error('Define UST_CLIENTE_PASSWORD (entre 14 y 256 caracteres) únicamente en el entorno local antes de ejecutar.');
+    process.exitCode = 1;
+  } else {
+    const salt = randomBytes(16).toString('hex');
+    const hash = scryptSync(password, salt, 64).toString('hex');
+    const cliente = {
+      usuario: 'haas_cliente',
+      areas: ['cliente'],
+      personaId: 12, // Haas TCM de México en personas.id_Persona
+      salt,
+      hash,
+    };
+    console.log('UST_CLIENTES_JSON=' + JSON.stringify([cliente]));
+  }
+  delete process.env.UST_CLIENTE_PASSWORD;
+} else {
+
 const usuarios: UsuarioConfig[] = [
   {
     usuario: 'Brenda_R',
@@ -102,12 +125,10 @@ const cuentas = usuarios.map(({ usuario, password, areas, personaId }) => {
 
 console.log('\n=== USUARIOS ===\n');
 
-for (const usuario of usuarios) {
-  console.log(
-    `${usuario.usuario} -> contraseña: ${usuario.password}`
-  );
-}
+// No imprimir contraseñas de usuarios existentes en la terminal.
+console.log('Las contraseñas existentes no se muestran por seguridad.');
 
 console.log('\n=== UST_USUARIOS_JSON ===\n');
 
 console.log(`UST_USUARIOS_JSON=${JSON.stringify(cuentas)}`);
+}

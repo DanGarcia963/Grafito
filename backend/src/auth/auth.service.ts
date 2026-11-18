@@ -8,7 +8,9 @@ export class AuthService {
  private readonly intentos = new Map<string, { n: number; hasta: number }>();
  login(body: any, origen: string) {
   let cuentas: any[];
-  try { cuentas = JSON.parse(process.env.UST_USUARIOS_JSON || '[]'); if (!Array.isArray(cuentas) || !cuentas.length) throw new Error(); }
+  // Aislar cuentas externas: nunca leerlas desde UST_USUARIOS_JSON.
+  const variable = body?.area === 'cliente' ? 'UST_CLIENTES_JSON' : 'UST_USUARIOS_JSON';
+  try { cuentas = JSON.parse(process.env[variable] || '[]'); if (!Array.isArray(cuentas) || !cuentas.length) throw new Error(); }
   catch { throw new ServiceUnavailableException('Configura las cuentas del servidor antes de iniciar sesión.'); }
   const ahora=Date.now();
   for (const [k,v] of this.sesiones) if(v.expira<=ahora)this.sesiones.delete(k);
@@ -17,7 +19,8 @@ export class AuthService {
   const intento=this.intentos.get(clave) || {n:0,hasta:ahora+60000};
   if(intento.n>=10)throw new UnauthorizedException('Demasiados intentos. Espera un minuto.');
   intento.n++;this.intentos.set(clave,intento);
-  const cuenta=cuentas.find(c=>c.usuario===String(body?.usuario??'').trim() && Array.isArray(c.areas) && c.areas.includes(body?.area));
+  const cuenta=cuentas.find(c=>c.usuario===String(body?.usuario??'').trim() && Array.isArray(c.areas) && c.areas.includes(body?.area) &&
+    (body?.area !== 'cliente' || (c.areas.length === 1 && c.areas[0] === 'cliente')));
   if(!cuenta || typeof body?.password!=='string' || body.password.length>256 || !['calidad','id','ventas','crm_admin','produccion','seguridad','costos','logistica','almacen','contaduria','cliente'].includes(body?.area))throw new UnauthorizedException('Usuario, área o contraseña incorrectos.');
   const esperado=Buffer.from(String(cuenta.hash),'hex');
   const actual=scryptSync(body.password,String(cuenta.salt),64);
