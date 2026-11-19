@@ -44,6 +44,10 @@ export type AnilloVuelta = {
 export type GraficasGrafito = {
   unidad: 'Kilogramos';
   estadoActual: Array<{ clave: EtapaGrafito; etiqueta: string; kg: number }>;
+  estadoActualPorPrensa: Array<{
+    clave: EtapaGrafito; etiqueta: string; Fagor: number;
+    Forgemaster: number; Polymaster: number; sinIdentificar: number; total: number;
+  }>;
   acumulados: Array<{ clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; kg: number }>;
   anillosVueltas: AnilloVuelta[];
   sinPrensaKg: Record<EtapaGrafito, number>;
@@ -114,6 +118,11 @@ export function calcularGraficasGrafito(
   }
 
   const estadoKg: Record<EtapaGrafito, number> = { SUCIO: 0, PROCESANDO: 0, LIBERADO: 0 };
+  const estadoPorPrensa: Record<EtapaGrafito, Record<PrensaGrafito, number>> = {
+    SUCIO: { Fagor: 0, Forgemaster: 0, Polymaster: 0 },
+    PROCESANDO: { Fagor: 0, Forgemaster: 0, Polymaster: 0 },
+    LIBERADO: { Fagor: 0, Forgemaster: 0, Polymaster: 0 },
+  };
   const sinPrensaKg: Record<EtapaGrafito, number> = { SUCIO: 0, PROCESANDO: 0, LIBERADO: 0 };
   const sinVueltaKg: Record<EtapaGrafito, number> = { SUCIO: 0, PROCESANDO: 0, LIBERADO: 0 };
   const anillos = new Map<string, AnilloVuelta>();
@@ -138,6 +147,7 @@ export function calcularGraficasGrafito(
       sinPrensaKg[etapa] += kg;
       return;
     }
+    estadoPorPrensa[etapa][prensa] += kg;
     const key = etapa + ':' + prensa;
     const anillo = anillos.get(key)!;
     anillo.kg += kg;
@@ -201,6 +211,18 @@ export function calcularGraficasGrafito(
       { clave: 'PROCESANDO', etiqueta: 'En proceso', kg: redondear(estadoKg.PROCESANDO) },
       { clave: 'LIBERADO', etiqueta: 'Liberado en inventario', kg: redondear(estadoKg.LIBERADO) },
     ],
+    estadoActualPorPrensa: ([
+      { clave: 'SUCIO', etiqueta: 'Inventario sucio' },
+      { clave: 'PROCESANDO', etiqueta: 'En proceso' },
+      { clave: 'LIBERADO', etiqueta: 'Liberado en inventario' },
+    ] as Array<{ clave: EtapaGrafito; etiqueta: string }>).map(x => ({
+      ...x,
+      Fagor: redondear(estadoPorPrensa[x.clave as EtapaGrafito].Fagor),
+      Forgemaster: redondear(estadoPorPrensa[x.clave as EtapaGrafito].Forgemaster),
+      Polymaster: redondear(estadoPorPrensa[x.clave as EtapaGrafito].Polymaster),
+      sinIdentificar: redondear(sinPrensaKg[x.clave as EtapaGrafito]),
+      total: redondear(estadoKg[x.clave as EtapaGrafito]),
+    })),
     acumulados: [
       { clave: 'ENTRADAS', etiqueta: 'Entradas acumuladas', kg: redondear(entradas) },
       { clave: 'LIBERADO', etiqueta: 'Liberado acumulado', kg: redondear(liberadoAcumulado) },
