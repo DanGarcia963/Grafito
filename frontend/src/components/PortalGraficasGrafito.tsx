@@ -27,6 +27,10 @@ export type GraficasGrafito = {
     Polymaster: number; sinIdentificar: number; total: number;
   }>;
   acumulados: Array<{ clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; kg: number }>;
+  acumuladosPorPrensa: Array<{
+    clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; Fagor: number;
+    Forgemaster: number; Polymaster: number; sinIdentificar: number; total: number;
+  }>;
   anillosVueltas: AnilloVuelta[];
   sinPrensaKg: Record<EtapaGrafito, number>;
   sinVueltaKg: Record<EtapaGrafito, number>;
@@ -216,6 +220,9 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
   }));
   const haySinPrensa = desgloseEstado.some(dato => dato.sinIdentificar > 0);
   const acColores = ['#3176bb', '#16916f'];
+  const [vistaAcumulados, setVistaAcumulados] = useState<'general' | 'prensa'>('prensa');
+  const desgloseAcumulados = graficas.acumuladosPorPrensa ?? [];
+  const haySinPrensaAcumulados = desgloseAcumulados.some(dato => dato.sinIdentificar > 0);
   return <section className="space-y-5" aria-label="Control de volumen y vueltas de grafito">
     <div>
       <h2 className="flex items-center gap-2 text-xl font-bold text-[#173e35]">
@@ -270,9 +277,39 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
         <p className="mt-1 text-xs text-slate-500">
           Entradas de recepción y generación de producto liberado durante el período indicado.
         </p>
-        <div className="mt-6 h-[260px]">
+        <div className="mt-4 inline-flex rounded-lg border border-[#e1e9e2] bg-[#f7faf7] p-1 text-xs" role="group" aria-label="Vista de acumulados">
+          <button type="button" aria-pressed={vistaAcumulados === 'general'}
+            onClick={() => setVistaAcumulados('general')}
+            className={'rounded-md px-3 py-1.5 font-semibold transition-colors ' +
+              (vistaAcumulados === 'general' ? 'bg-white text-[#173e35] shadow-sm' : 'text-slate-500 hover:text-[#173e35]')}>
+            General
+          </button>
+          <button type="button" aria-pressed={vistaAcumulados === 'prensa'}
+            onClick={() => setVistaAcumulados('prensa')}
+            className={'rounded-md px-3 py-1.5 font-semibold transition-colors ' +
+              (vistaAcumulados === 'prensa' ? 'bg-white text-[#173e35] shadow-sm' : 'text-slate-500 hover:text-[#173e35]')}>
+            Por prensa
+          </button>
+        </div>
+        <div className="mt-3 h-[260px] min-w-0">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={graficas.acumulados} margin={{ top: 12, right: 8, left: 8, bottom: 10 }}>
+            {vistaAcumulados === 'prensa' && desgloseAcumulados.length ? <BarChart
+              data={desgloseAcumulados}
+              margin={{ top: 12, right: 4, left: 0, bottom: 4 }}
+              barGap={3} barCategoryGap="20%">
+              <CartesianGrid vertical={false} stroke="#e8efea" strokeDasharray="3 3"/>
+              <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: '#52655e' }}
+                tickFormatter={v => String(v).replace(' acumuladas', '').replace(' acumulado', '')}
+                axisLine={false} tickLine={false} interval={0}/>
+              <YAxis width={59} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => n(Number(v))}
+                axisLine={false} tickLine={false}/>
+              <Tooltip formatter={(value, name) => [n(Number(value), 2) + ' kg', name]}/>
+              <Legend verticalAlign="top" height={40} wrapperStyle={{ fontSize: 11 }}/>
+              {PRENSAS.map(prensa => <Bar key={prensa} dataKey={prensa} name={prensa}
+                fill={COLORES[prensa]} maxBarSize={28} radius={[4, 4, 0, 0]}/>)}
+              {haySinPrensaAcumulados && <Bar dataKey="sinIdentificar" name="Sin prensa"
+                fill="#94a3b8" maxBarSize={28} radius={[4, 4, 0, 0]}/>}
+            </BarChart> : <BarChart data={graficas.acumulados} margin={{ top: 12, right: 8, left: 8, bottom: 10 }}>
               <CartesianGrid vertical={false} stroke="#e8efea" strokeDasharray="3 3"/>
               <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: '#52655e' }}
                 axisLine={false} tickLine={false} interval={0}/>
@@ -283,7 +320,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
                 {graficas.acumulados.map((dato, i) =>
                   <Cell key={dato.clave} fill={acColores[i]}/>)}
               </Bar>
-            </BarChart>
+            </BarChart>}
           </ResponsiveContainer>
         </div>
         <div className="grid grid-cols-2 gap-2 text-center">
@@ -292,6 +329,11 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
             <div className="mt-1 text-sm font-bold">{n(dato.kg, 2)} kg</div>
           </div>)}
         </div>
+        {vistaAcumulados === 'prensa' && desgloseAcumulados.length > 0 &&
+          <p className="mt-2 text-[11px] leading-5 text-slate-500">
+            Los acumulados se clasifican por la prensa registrada en cada lote; los movimientos sin prensa
+            identificada se muestran por separado y también cuentan en el total.
+          </p>}
       </article>
     </div>
     <div className="rounded-2xl border border-[#e1e9e2] bg-white p-5 shadow-sm">
