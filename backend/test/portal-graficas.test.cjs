@@ -50,6 +50,16 @@ test('Distribución de sucio, activo y liberado; acumulados incluyen entregado',
   ];
   const out = calcularGraficasGrafito(lotes, movimientos, p);
   assert.deepEqual(out.estadoActual.map(x => x.kg), [2400, 600, 300]);
+  assert.deepEqual(out.estadoActualPorPrensa.map(x => ({
+    Fagor: x.Fagor, Forgemaster: x.Forgemaster,
+    Polymaster: x.Polymaster, sinIdentificar: x.sinIdentificar, total: x.total,
+  })), [
+    { Fagor: 2000, Forgemaster: 400, Polymaster: 0, sinIdentificar: 0, total: 2400 },
+    { Fagor: 0, Forgemaster: 600, Polymaster: 0, sinIdentificar: 0, total: 600 },
+    { Fagor: 0, Forgemaster: 0, Polymaster: 300, sinIdentificar: 0, total: 300 },
+  ]);
+  assert.ok(out.estadoActualPorPrensa.every((fila, i) =>
+    fila.Fagor + fila.Forgemaster + fila.Polymaster + fila.sinIdentificar === out.estadoActual[i].kg));
   assert.deepEqual(out.acumulados.map(x => x.kg), [1000, 500]);
   assert.equal(out.anillosVueltas.find(x => x.etapa === 'PROCESANDO' && x.prensa === 'Forgemaster').maxVuelta, 5);
   assert.equal(out.anillosVueltas.find(x => x.etapa === 'LIBERADO' && x.prensa === 'Polymaster').maxVuelta, 8);
@@ -111,4 +121,17 @@ test('No anuncia liberación sólo porque el inventario indica REGENERADO', () =
   );
   assert.equal(out.estadoActual[2].kg, 0);
   assert.equal(out.acumulados[1].kg, 0);
+});
+
+test('El material sin prensa no se omite en el desglose ni cambia los totales', () => {
+  idMovimiento = 1;
+  const salidaGrafito = calcularGraficasGrafito([
+    lote(1, 'SUCIO', 'RECEPCION', 'Desconocida', 5),
+    lote(2, 'SUCIO', 'RECEPCION', 'Fagor', 7),
+  ], [entrada(1, 125), entrada(2, 875)], []);
+  assert.deepEqual(salidaGrafito.estadoActualPorPrensa[0], {
+    clave: 'SUCIO', etiqueta: 'Inventario sucio',
+    Fagor: 875, Forgemaster: 0, Polymaster: 0, sinIdentificar: 125, total: 1000,
+  });
+  assert.equal(salidaGrafito.estadoActual[0].kg, 1000);
 });
