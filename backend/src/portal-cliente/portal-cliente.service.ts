@@ -425,7 +425,7 @@ export class PortalClienteService {
         propietario_id: cliente.id,
         producto: { nombre_Producto: { contains: 'ORSA VFG', mode: 'insensitive' } },
       },
-      select: { id: true, folio: true, unidad: true, condicion: true, especificaciones: true },
+      select: { id: true, folio: true, unidad: true, condicion: true, origen: true, lote_produccion_id: true, especificaciones: true },
     });
     const movimientosExistencias = existenciasCliente.length
       ? await this.prisma.movimientos_inventario.findMany({
