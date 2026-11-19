@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { BarChart3, CheckCircle2, ClipboardList, Droplets, Factory, FileCheck2, Info, Leaf, PackageCheck, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { pedir, sesionActual } from '@/utils/api';
+import PortalGraficasGrafito, { type GraficasGrafito } from '@/components/PortalGraficasGrafito';
 
 type Lote = {
   recepcion: string; lote: string; fecha: string; prensa: string; vuelta: string | null;
@@ -20,6 +21,7 @@ type Unidad = {
   rendimiento: number | null; prensas: Prensa[]; lotes: Lote[];
 };
 type Reporte = {
+  graficas: GraficasGrafito;
   inventarioActual: Array<{ unidad: string; condicion: string; prensa: string; vuelta: string | null; saldo: number; lotes: number }>;
   cliente: { id: number; nombre: string };
   periodo: { descripcion: string };
@@ -157,6 +159,7 @@ export default function PortalClientePage() {
               className={'rounded-full px-4 py-2 text-xs font-semibold ' + (actual?.unidad === u.unidad ? 'bg-[#173e35] text-white' : 'border border-slate-200 bg-white text-slate-600')}>{u.unidad}</button>)}
           </div>
         </div>
+        {reporte.graficas && <PortalGraficasGrafito graficas={reporte.graficas}/>}
         <section className="rounded-2xl border border-[#e0e8e0] bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
