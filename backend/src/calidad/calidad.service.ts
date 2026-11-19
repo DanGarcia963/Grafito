@@ -1656,6 +1656,12 @@ export class CalidadService {
           fecha_llegada: { lte: fechaLimite },
           estado_recepcion: { not: 'CANCELADA' },
           estado_checklist: { in: ['PENDIENTE', 'EN_REVISION', 'CON_INCIDENCIAS'] },
+          // Archivo histórico importado sin checklist operativo: no enviarlo
+          // a la lista de revisiones pendientes de la planta.
+          OR: [
+            { observaciones: null },
+            { NOT: { observaciones: { contains: 'IMPORT_HAAS_2026' } } },
+          ],
         },
         include: {
           remitente: { select: { nombre: true } },
