@@ -58,12 +58,14 @@ function IndicadorAnillos({ elementos, etapa }: {
   elementos: AnilloVuelta[];
   etapa: string;
 }) {
-  const centro = 110;
-  const radios = [83, 62, 41];
-  const ancho = 12;
+  // Los radios más amplios dejan un hueco central real: los textos ya no invaden
+  // el anillo interior incluso cuando el SVG se reduce en pantallas pequeñas.
+  const centro = 140;
+  const radios = [110, 84, 58];
+  const ancho = 14;
   return <div className="flex w-full flex-col">
-    <div className="flex w-full justify-center py-3">
-      <svg className="h-auto w-full max-w-[216px]" viewBox="0 0 220 220" role="img"
+    <div className="flex w-full justify-center py-4">
+      <svg className="h-auto w-full max-w-[264px] shrink-0" viewBox="0 0 280 280" role="img"
         aria-label={'Vueltas por prensa para ' + etapa + ': ' +
           elementos.map(e => e.prensa + ' ' + (e.maxVuelta ?? 'sin registro') + ' de 10').join(', ')}>
         {elementos.map((registro, i) => {
@@ -79,9 +81,10 @@ function IndicadorAnillos({ elementos, etapa }: {
               strokeDasharray={perimetro} strokeDashoffset={perimetro * (1 - porcentaje)}/>
           </g>;
         })}
-        <text x={centro} y={centro - 9} textAnchor="middle" fontSize="11" fill="#64748b">Límite de</text>
-        <text x={centro} y={centro + 19} textAnchor="middle" fontSize="29" fontWeight="700" fill="#163c30">10</text>
-        <text x={centro} y={centro + 34} textAnchor="middle" fontSize="10" fill="#64748b">vueltas</text>
+        <circle cx={centro} cy={centro} r={48} fill="#fcfefc"/>
+        <text x={centro} y={centro - 22} textAnchor="middle" fontSize="10" fill="#64748b">Límite de</text>
+        <text x={centro} y={centro + 11} textAnchor="middle" fontSize="28" fontWeight="700" fill="#163c30">10</text>
+        <text x={centro} y={centro + 29} textAnchor="middle" fontSize="10" fill="#64748b">vueltas</text>
       </svg>
     </div>
     <div className="mt-2 w-full space-y-1.5" aria-label={'Detalle por prensa en ' + etapa}>
