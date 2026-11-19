@@ -211,11 +211,11 @@ export function calcularGraficasGrafito(
       { clave: 'PROCESANDO', etiqueta: 'En proceso', kg: redondear(estadoKg.PROCESANDO) },
       { clave: 'LIBERADO', etiqueta: 'Liberado en inventario', kg: redondear(estadoKg.LIBERADO) },
     ],
-    estadoActualPorPrensa: [
+    estadoActualPorPrensa: ([
       { clave: 'SUCIO', etiqueta: 'Inventario sucio' },
       { clave: 'PROCESANDO', etiqueta: 'En proceso' },
       { clave: 'LIBERADO', etiqueta: 'Liberado en inventario' },
-    ].map(x => ({
+    ] as Array<{ clave: EtapaGrafito; etiqueta: string }>).map(x => ({
       ...x,
       Fagor: redondear(estadoPorPrensa[x.clave as EtapaGrafito].Fagor),
       Forgemaster: redondear(estadoPorPrensa[x.clave as EtapaGrafito].Forgemaster),
