@@ -49,6 +49,10 @@ export type GraficasGrafito = {
     Forgemaster: number; Polymaster: number; sinIdentificar: number; total: number;
   }>;
   acumulados: Array<{ clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; kg: number }>;
+  acumuladosPorPrensa: Array<{
+    clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; Fagor: number;
+    Forgemaster: number; Polymaster: number; sinIdentificar: number; total: number;
+  }>;
   anillosVueltas: AnilloVuelta[];
   sinPrensaKg: Record<EtapaGrafito, number>;
   sinVueltaKg: Record<EtapaGrafito, number>;
@@ -183,6 +187,10 @@ export function calcularGraficasGrafito(
 
   let entradas = 0;
   let liberadoAcumulado = 0;
+  const acumuladoPorPrensa: Record<'ENTRADAS' | 'LIBERADO', Record<PrensaGrafito | 'sinIdentificar', number>> = {
+    ENTRADAS: { Fagor: 0, Forgemaster: 0, Polymaster: 0, sinIdentificar: 0 },
+    LIBERADO: { Fagor: 0, Forgemaster: 0, Polymaster: 0, sinIdentificar: 0 },
+  };
   for (const m of movimientosValidos) {
     const lote = porId.get(m.lote_inventario_id)!;
     const kg = cantidad(m.cantidad);
@@ -194,8 +202,15 @@ export function calcularGraficasGrafito(
       }
     }
     if (!vigenteEnPeriodo(m.fecha, desde, hastaExclusivo)) continue;
-    if (m.tipo === 'ENTRADA_RECEPCION' && lote.origen === 'RECEPCION') entradas += kg;
-    if (m.tipo === 'ENTRADA_PRODUCCION' && esLiberado(lote)) liberadoAcumulado += kg;
+    const prensa = identificarPrensa(lote.especificaciones) ?? 'sinIdentificar';
+    if (m.tipo === 'ENTRADA_RECEPCION' && lote.origen === 'RECEPCION') {
+      entradas += kg;
+      acumuladoPorPrensa.ENTRADAS[prensa] += kg;
+    }
+    if (m.tipo === 'ENTRADA_PRODUCCION' && esLiberado(lote)) {
+      liberadoAcumulado += kg;
+      acumuladoPorPrensa.LIBERADO[prensa] += kg;
+    }
   }
   const anillosVueltas = [...anillos.entries()].map(([key, a]) => ({
     ...a,
@@ -227,6 +242,17 @@ export function calcularGraficasGrafito(
       { clave: 'ENTRADAS', etiqueta: 'Entradas acumuladas', kg: redondear(entradas) },
       { clave: 'LIBERADO', etiqueta: 'Liberado acumulado', kg: redondear(liberadoAcumulado) },
     ],
+    acumuladosPorPrensa: ([
+      { clave: 'ENTRADAS', etiqueta: 'Entradas acumuladas', total: entradas },
+      { clave: 'LIBERADO', etiqueta: 'Liberado acumulado', total: liberadoAcumulado },
+    ] as Array<{ clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; total: number }>).map(x => ({
+      clave: x.clave, etiqueta: x.etiqueta,
+      Fagor: redondear(acumuladoPorPrensa[x.clave].Fagor),
+      Forgemaster: redondear(acumuladoPorPrensa[x.clave].Forgemaster),
+      Polymaster: redondear(acumuladoPorPrensa[x.clave].Polymaster),
+      sinIdentificar: redondear(acumuladoPorPrensa[x.clave].sinIdentificar),
+      total: redondear(x.total),
+    })),
     anillosVueltas,
     sinPrensaKg: {
       SUCIO: redondear(sinPrensaKg.SUCIO),
