@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
@@ -58,51 +58,140 @@ function IndicadorAnillos({ elementos, etapa }: {
   elementos: AnilloVuelta[];
   etapa: string;
 }) {
-  // Los radios más amplios dejan un hueco central real: los textos ya no invaden
-  // el anillo interior incluso cuando el SVG se reduce en pantallas pequeñas.
+  // El anillo seleccionado conserva su información hasta que se elija otro.
+  // Con el cursor mostramos una vista temporal; al salir se restaura la selección.
+  const [seleccion, setSeleccion] = useState<PrensaGrafito | null>(null);
+  const [encima, setEncima] = useState<PrensaGrafito | null>(null);
+  const activa = encima ?? seleccion;
+  const detalle = elementos.find(e => e.prensa === activa) ?? null;
   const centro = 140;
   const radios = [110, 84, 58];
   const ancho = 14;
+  const seleccionar = (prensa: PrensaGrafito) => {
+    setSeleccion(actual => actual === prensa ? null : prensa);
+  };
   return <div className="flex w-full flex-col">
     <div className="flex w-full justify-center py-4">
-      <svg className="h-auto w-full max-w-[264px] shrink-0" viewBox="0 0 280 280" role="img"
-        aria-label={'Vueltas por prensa para ' + etapa + ': ' +
-          elementos.map(e => e.prensa + ' ' + (e.maxVuelta ?? 'sin registro') + ' de 10').join(', ')}>
+      <svg className="h-auto w-full max-w-[264px] shrink-0" viewBox="0 0 280 280"
+        role="group" aria-label={'Anillos interactivos por prensa para ' + etapa}>
         {elementos.map((registro, i) => {
           const radio = radios[i];
           const perimetro = 2 * Math.PI * radio;
           const porcentaje = registro.maxVuelta == null ? 0 :
             Math.min(registro.maxVuelta / registro.limite, 1);
           const color = registro.excedida ? COLOR_EXCESO : COLORES[registro.prensa];
-          return <g key={registro.prensa} transform={'rotate(-90 ' + centro + ' ' + centro + ')'}>
-            <circle cx={centro} cy={centro} r={radio} fill="none" stroke="#e3ebe7" strokeWidth={ancho}/>
+          const resaltado = activa === registro.prensa;
+          const atenuado = activa != null && !resaltado;
+          const descripcion = registro.prensa + ', ' + etapa +
+            ': ' + (registro.maxVuelta == null ? 'sin vuelta registrada' :
+              'vuelta máxima ' + registro.maxVuelta + ' de ' + registro.limite) +
+            ', ' + n(registro.kg, 2) + ' kilogramos. ' +
+            (registro.excedida ? 'Supera el límite. ' : '') +
+            'Pulsa para ' + (seleccion === registro.prensa ? 'deseleccionar' : 'seleccionar') + '.';
+          return <g key={registro.prensa}
+            role="button" tabIndex={0}
+            aria-label={descripcion}
+            aria-pressed={seleccion === registro.prensa}
+            onMouseEnter={() => setEncima(registro.prensa)}
+            onMouseLeave={() => setEncima(null)}
+            onFocus={() => setEncima(registro.prensa)}
+            onBlur={() => setEncima(null)}
+            onClick={() => seleccionar(registro.prensa)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                seleccionar(registro.prensa);
+              }
+            }}
+            className="cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+            style={{ opacity: atenuado ? 0.34 : 1, transition: 'opacity 180ms ease' }}
+            transform={'rotate(-90 ' + centro + ' ' + centro + ')'}>
+            <title>{descripcion}</title>
             <circle cx={centro} cy={centro} r={radio} fill="none"
-              stroke={color} strokeWidth={ancho} strokeLinecap="round"
-              strokeDasharray={perimetro} strokeDashoffset={perimetro * (1 - porcentaje)}/>
+              stroke="#e3ebe7" strokeWidth={ancho + (resaltado ? 3 : 0)}/>
+            <circle cx={centro} cy={centro} r={radio} fill="none"
+              stroke={color} strokeWidth={ancho + (resaltado ? 3 : 0)} strokeLinecap="round"
+              strokeDasharray={perimetro} strokeDashoffset={perimetro * (1 - porcentaje)}
+              style={{ transition: 'stroke-width 180ms ease, stroke-dashoffset 200ms ease' }}/>
+            <circle cx={centro} cy={centro} r={radio} fill="none"
+              stroke="transparent" strokeWidth={ancho + 10}/>
           </g>;
         })}
-        <circle cx={centro} cy={centro} r={48} fill="#fcfefc"/>
-        <text x={centro} y={centro - 22} textAnchor="middle" fontSize="10" fill="#64748b">Límite de</text>
-        <text x={centro} y={centro + 11} textAnchor="middle" fontSize="28" fontWeight="700" fill="#163c30">10</text>
-        <text x={centro} y={centro + 29} textAnchor="middle" fontSize="10" fill="#64748b">vueltas</text>
+        <circle cx={centro} cy={centro} r={48} fill="#fcfefc" pointerEvents="none"/>
+        {detalle ? <>
+          <text x={centro} y={centro - 22} textAnchor="middle" fontSize="10"
+            fill="#64748b" pointerEvents="none">{detalle.prensa}</text>
+          <text x={centro} y={centro + 11} textAnchor="middle" fontSize="27"
+            fontWeight="700" fill={detalle.excedida ? COLOR_EXCESO : COLORES[detalle.prensa]}
+            pointerEvents="none">{detalle.maxVuelta ?? '—'}</text>
+          <text x={centro} y={centro + 29} textAnchor="middle" fontSize="10"
+            fill="#64748b" pointerEvents="none">de {detalle.limite} vueltas</text>
+        </> : <>
+          <text x={centro} y={centro - 22} textAnchor="middle" fontSize="10" fill="#64748b" pointerEvents="none">Límite de</text>
+          <text x={centro} y={centro + 11} textAnchor="middle" fontSize="28"
+            fontWeight="700" fill="#163c30" pointerEvents="none">10</text>
+          <text x={centro} y={centro + 29} textAnchor="middle" fontSize="10"
+            fill="#64748b" pointerEvents="none">vueltas</text>
+        </>}
       </svg>
     </div>
-    <div className="mt-2 w-full space-y-1.5" aria-label={'Detalle por prensa en ' + etapa}>
-      {elementos.map(e => <div key={e.prensa}
-        className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2.5 rounded-lg bg-white px-2.5 py-2 text-xs">
-        <span className="flex min-w-0 items-center gap-2 font-semibold text-slate-700">
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: e.excedida ? COLOR_EXCESO : COLORES[e.prensa] }}/>
-          <span className="truncate">{e.prensa}</span>
-        </span>
-        <span className={'whitespace-nowrap font-semibold tabular-nums ' +
-          (e.excedida ? 'text-red-700' : 'text-[#173e35]')}>
-          {e.maxVuelta == null ? 'Sin dato' : e.maxVuelta + ' / 10'}
-        </span>
-        <span className="min-w-[72px] whitespace-nowrap text-right tabular-nums text-slate-500">
-          {n(e.kg, 2)} kg
-        </span>
-      </div>)}
+    <p className="mb-2 text-center text-[11px] text-slate-500">
+      Pasa el cursor o selecciona un anillo para consultar sus datos.
+    </p>
+    <div className="w-full space-y-1.5" aria-label={'Detalle por prensa en ' + etapa}>
+      {elementos.map(e => {
+        const resaltado = activa === e.prensa;
+        return <button key={e.prensa} type="button"
+          aria-pressed={seleccion === e.prensa}
+          onMouseEnter={() => setEncima(e.prensa)}
+          onMouseLeave={() => setEncima(null)}
+          onFocus={() => setEncima(e.prensa)}
+          onBlur={() => setEncima(null)}
+          onClick={() => seleccionar(e.prensa)}
+          className={'grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2.5 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 ' +
+            (resaltado ? 'border-emerald-300 bg-emerald-50' : 'border-transparent bg-white hover:bg-slate-100')}>
+          <span className="flex min-w-0 items-center gap-2 font-semibold text-slate-700">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: e.excedida ? COLOR_EXCESO : COLORES[e.prensa] }}/>
+            <span className="truncate">{e.prensa}</span>
+          </span>
+          <span className={'whitespace-nowrap font-semibold tabular-nums ' +
+            (e.excedida ? 'text-red-700' : 'text-[#173e35]')}>
+            {e.maxVuelta == null ? 'Sin dato' : e.maxVuelta + ' / 10'}
+          </span>
+          <span className="min-w-[72px] whitespace-nowrap text-right tabular-nums text-slate-500">
+            {n(e.kg, 2)} kg
+          </span>
+        </button>;
+      })}
+    </div>
+    <div aria-live="polite" aria-atomic="true" className="mt-3 min-h-[99px] rounded-xl border border-[#e0eae3] bg-white p-3">
+      {detalle ? <>
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2 text-xs font-bold text-[#173e35]">
+            <span className="h-2.5 w-2.5 rounded-full" style={{
+              backgroundColor: detalle.excedida ? COLOR_EXCESO : COLORES[detalle.prensa],
+            }}/>
+            {detalle.prensa}
+          </span>
+          {detalle.excedida && <span className="rounded bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700">
+            Excede 10 vueltas
+          </span>}
+          {seleccion && <button type="button" onClick={() => { setSeleccion(null); setEncima(null); }}
+            className="text-[10px] text-slate-500 underline hover:text-slate-800">Limpiar selección</button>}
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+          <span className="text-slate-500">Material: <strong className="text-[#173e35]">{n(detalle.kg, 2)} kg</strong></span>
+          <span className="text-slate-500">Vuelta máxima: <strong className={detalle.excedida ? 'text-red-700' : 'text-[#173e35]'}>
+            {detalle.maxVuelta ?? 'Sin registro'} / 10</strong></span>
+        </div>
+        <p className="mt-2 text-[11px] leading-4 text-slate-600">
+          Vueltas registradas: {detalle.vueltasDetectadas.length ? detalle.vueltasDetectadas.join(', ') : 'ninguna'}.
+          {detalle.sinVueltaKg > 0 ? ' ' + n(detalle.sinVueltaKg, 2) + ' kg sin vuelta identificada.' : ''}
+        </p>
+      </> : <p className="flex min-h-[72px] items-center justify-center text-center text-xs leading-5 text-slate-500">
+        Selecciona Fagor, Forgemaster o Polymaster para consultar kilos y vueltas de esta etapa.
+      </p>}
     </div>
   </div>;
 }
