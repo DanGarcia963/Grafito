@@ -135,3 +135,33 @@ test('El material sin prensa no se omite en el desglose ni cambia los totales', 
   });
   assert.equal(salidaGrafito.estadoActual[0].kg, 1000);
 });
+
+test('Los acumulados se desglosan por prensa y sin identificar, sin alterar totales ni el filtro de fechas', () => {
+  idMovimiento = 1;
+  const lotes = [
+    lote(1, 'SUCIO', 'RECEPCION', 'Fagor', 1),
+    lote(2, 'SUCIO', 'RECEPCION', 'Forgemaster', 2),
+    lote(3, 'SUCIO', 'RECEPCION', 'Desconocida', 3),
+    lote(4, 'REGENERADO', 'PRODUCCION', 'Polymaster', 4, 10),
+    lote(5, 'REGENERADO', 'PRODUCCION', 'Desconocida', 5, 11),
+  ];
+  const movements = [
+    entrada(1, 500, 'ENTRADA_RECEPCION'),
+    entrada(2, 300, 'ENTRADA_RECEPCION'),
+    entrada(3, 200, 'ENTRADA_RECEPCION'),
+    entrada(4, 120, 'ENTRADA_PRODUCCION'),
+    entrada(5, 80, 'ENTRADA_PRODUCCION'),
+    entrada(1, 600, 'ENTRADA_RECEPCION', { fecha: '2026-10-01T00:00:00Z' }),
+  ];
+  const produccion = [
+    { id_Lote_Produccion: 10, estado: 'FINALIZADO', estado_Calida: 'LIBERADO' },
+    { id_Lote_Produccion: 11, estado: 'FINALIZADO', estado_Calida: 'LIBERADO' },
+  ];
+  const result = calcularGraficasGrafito(lotes, movements, produccion,
+    new Date('2026-11-01T00:00:00Z'), new Date('2026-12-01T00:00:00Z'));
+  assert.deepEqual(result.acumulados.map(x => x.kg), [1000, 200]);
+  assert.deepEqual(result.acumuladosPorPrensa, [
+    { clave: 'ENTRADAS', etiqueta: 'Entradas acumuladas', Fagor: 500, Forgemaster: 300, Polymaster: 0, sinIdentificar: 200, total: 1000 },
+    { clave: 'LIBERADO', etiqueta: 'Liberado acumulado', Fagor: 0, Forgemaster: 0, Polymaster: 120, sinIdentificar: 80, total: 200 },
+  ]);
+});
