@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Usuario } from '../auth/auth.service';
 import { PrismaService } from '../prisma.service';
+import { calcularGraficasGrafito } from './portal-cliente-graficas.logic';
 
 type Movimiento = {
   id_Movi_Invent: number;
@@ -462,6 +463,44 @@ export class PortalClienteService {
     const inventarioActual = [...gruposActuales.values()].map(x => ({
       ...x, saldo: redondear(x.saldo),
     })).sort((a, b) => a.condicion.localeCompare(b.condicion) || a.prensa.localeCompare(b.prensa));
+
+    // Las gráficas operativas son una fotografía física completa del cliente,
+    // independiente de la cohorte del reporte de humedad/recepción.
+    const loteIdsGraficas = existenciasCliente.map(l => l.id);
+    const lpIdsGraficas = [...new Set([
+      ...movimientosExistencias
+        .filter(m => m.tipo === 'SALIDA_CONSUMO' && m.lote_produccion_id != null)
+        .map(m => m.lote_produccion_id!),
+      ...existenciasCliente.map(l => l.lote_produccion_id)
+        .filter((id): id is number => id != null),
+    ])];
+    const [movimientosGraficas, lotesProduccionGraficas] = await Promise.all([
+      loteIdsGraficas.length ? this.prisma.movimientos_inventario.findMany({
+        where: { lote_inventario_id: { in: loteIdsGraficas } },
+        select: {
+          id_Movi_Invent: true, lote_inventario_id: true,
+          lote_produccion_id: true, reversa_de_id: true, tipo: true,
+          cantidad: true, ubicacion_origen_id: true,
+          ubicacion_destino_id: true, fecha: true,
+        },
+      }) : Promise.resolve([]),
+      lpIdsGraficas.length ? this.prisma.lotes_produccion.findMany({
+        where: { id_Lote_Produccion: { in: lpIdsGraficas } },
+        select: { id_Lote_Produccion: true, estado: true, estado_Calida: true },
+      }) : Promise.resolve([]),
+    ]);
+    const graficas = calcularGraficasGrafito(
+      existenciasCliente.map(l => ({
+        id: l.id, unidad: String(l.unidad), condicion: String(l.condicion),
+        origen: String(l.origen), especificaciones: l.especificaciones,
+        lote_produccion_id: l.lote_produccion_id,
+      })),
+      movimientosGraficas,
+      lotesProduccionGraficas,
+      desde,
+      hastaExclusivo,
+    );
+
     const [manifiestos, resguardados] = await Promise.all([
       this.prisma.manifiestos.count({ where: { cliente_id: cliente.id } }),
       this.prisma.manifiestos.count({ where: { cliente_id: cliente.id, resguardado_en: { not: null } } }),
@@ -471,6 +510,7 @@ export class PortalClienteService {
         descripcion: 'Cohorte de recepciones confirmadas con checklist completo. Procesamiento acumulado de esos mismos lotes.' },
       unidades: [...unidades.values()],
       inventarioActual,
+      graficas,
       documentos: { manifiestos, resguardados },
       trazabilidad: {
         recepcionesConfirmadas: recepciones.length,
