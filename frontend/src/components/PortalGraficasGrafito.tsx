@@ -22,6 +22,10 @@ export type AnilloVuelta = {
 export type GraficasGrafito = {
   unidad: 'Kilogramos';
   estadoActual: Array<{ clave: EtapaGrafito; etiqueta: string; kg: number }>;
+  estadoActualPorPrensa: Array<{
+    clave: EtapaGrafito; etiqueta: string; Fagor: number; Forgemaster: number;
+    Polymaster: number; sinIdentificar: number; total: number;
+  }>;
   acumulados: Array<{ clave: 'ENTRADAS' | 'LIBERADO'; etiqueta: string; kg: number }>;
   anillosVueltas: AnilloVuelta[];
   sinPrensaKg: Record<EtapaGrafito, number>;
@@ -54,45 +58,47 @@ function IndicadorAnillos({ elementos, etapa }: {
   elementos: AnilloVuelta[];
   etapa: string;
 }) {
-  const centro = 116;
-  const radios = [86, 65, 44];
-  const ancho = 14;
-  return <div className="flex flex-col items-center">
-    <svg className="w-full max-w-[255px]" viewBox="0 0 232 232" role="img"
-      aria-label={'Vueltas por prensa para ' + etapa + ': ' +
-        elementos.map(e => e.prensa + ' ' + (e.maxVuelta ?? 'sin registro') + ' de 10').join(', ')}>
-      {elementos.map((registro, i) => {
-        const radio = radios[i];
-        const perimetro = 2 * Math.PI * radio;
-        const porcentaje = registro.maxVuelta == null ? 0 :
-          Math.min(registro.maxVuelta / registro.limite, 1);
-        const color = registro.excedida ? COLOR_EXCESO : COLORES[registro.prensa];
-        return <g key={registro.prensa} transform={'rotate(-90 ' + centro + ' ' + centro + ')'}>
-          <circle cx={centro} cy={centro} r={radio} fill="none" stroke="#e4ece7" strokeWidth={ancho}/>
-          <circle cx={centro} cy={centro} r={radio} fill="none"
-            stroke={color} strokeWidth={ancho} strokeLinecap="round"
-            strokeDasharray={perimetro} strokeDashoffset={perimetro * (1 - porcentaje)}/>
-        </g>;
-      })}
-      <text x={centro} y={centro - 6} textAnchor="middle" fontSize="12" fill="#64748b">Límite</text>
-      <text x={centro} y={centro + 21} textAnchor="middle" fontSize="30" fontWeight="700" fill="#163c30">10</text>
-      <text x={centro} y={centro + 37} textAnchor="middle" fontSize="10" fill="#64748b">vueltas</text>
-    </svg>
-    <div className="mt-3 w-full space-y-2">
-      {elementos.map(e => <div key={e.prensa} className="flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2">
+  const centro = 110;
+  const radios = [83, 62, 41];
+  const ancho = 12;
+  return <div className="flex w-full flex-col">
+    <div className="flex w-full justify-center py-3">
+      <svg className="h-auto w-full max-w-[216px]" viewBox="0 0 220 220" role="img"
+        aria-label={'Vueltas por prensa para ' + etapa + ': ' +
+          elementos.map(e => e.prensa + ' ' + (e.maxVuelta ?? 'sin registro') + ' de 10').join(', ')}>
+        {elementos.map((registro, i) => {
+          const radio = radios[i];
+          const perimetro = 2 * Math.PI * radio;
+          const porcentaje = registro.maxVuelta == null ? 0 :
+            Math.min(registro.maxVuelta / registro.limite, 1);
+          const color = registro.excedida ? COLOR_EXCESO : COLORES[registro.prensa];
+          return <g key={registro.prensa} transform={'rotate(-90 ' + centro + ' ' + centro + ')'}>
+            <circle cx={centro} cy={centro} r={radio} fill="none" stroke="#e3ebe7" strokeWidth={ancho}/>
+            <circle cx={centro} cy={centro} r={radio} fill="none"
+              stroke={color} strokeWidth={ancho} strokeLinecap="round"
+              strokeDasharray={perimetro} strokeDashoffset={perimetro * (1 - porcentaje)}/>
+          </g>;
+        })}
+        <text x={centro} y={centro - 9} textAnchor="middle" fontSize="11" fill="#64748b">Límite de</text>
+        <text x={centro} y={centro + 19} textAnchor="middle" fontSize="29" fontWeight="700" fill="#163c30">10</text>
+        <text x={centro} y={centro + 34} textAnchor="middle" fontSize="10" fill="#64748b">vueltas</text>
+      </svg>
+    </div>
+    <div className="mt-2 w-full space-y-1.5" aria-label={'Detalle por prensa en ' + etapa}>
+      {elementos.map(e => <div key={e.prensa}
+        className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2.5 rounded-lg bg-white px-2.5 py-2 text-xs">
+        <span className="flex min-w-0 items-center gap-2 font-semibold text-slate-700">
           <span className="h-2.5 w-2.5 shrink-0 rounded-full"
             style={{ backgroundColor: e.excedida ? COLOR_EXCESO : COLORES[e.prensa] }}/>
-          <span className="font-semibold text-slate-700">{e.prensa}</span>
-          {e.excedida && <span title="Supera el límite de vueltas"
-            className="rounded-full bg-red-50 px-1.5 py-0.5 font-semibold text-red-700">Excede</span>}
-        </div>
-        <div className="text-right text-slate-600">
-          <strong className={e.excedida ? 'text-red-700' : 'text-[#173e35]'}>
-            {e.maxVuelta == null ? 'Sin dato' : e.maxVuelta + ' / 10'}
-          </strong>
-          <span className="ml-2 text-slate-500">{n(e.kg, 2)} kg</span>
-        </div>
+          <span className="truncate">{e.prensa}</span>
+        </span>
+        <span className={'whitespace-nowrap font-semibold tabular-nums ' +
+          (e.excedida ? 'text-red-700' : 'text-[#173e35]')}>
+          {e.maxVuelta == null ? 'Sin dato' : e.maxVuelta + ' / 10'}
+        </span>
+        <span className="min-w-[72px] whitespace-nowrap text-right tabular-nums text-slate-500">
+          {n(e.kg, 2)} kg
+        </span>
       </div>)}
     </div>
   </div>;
@@ -111,6 +117,12 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
   const totalSinPrensa = Object.values(graficas.sinPrensaKg).reduce((a, b) => a + b, 0);
   const exceso = graficas.anillosVueltas.filter(a => a.excedida);
   const estadoColores = ['#d6a150', '#3176bb', '#16916f'];
+  const desgloseEstado = graficas.estadoActualPorPrensa.map(dato => ({
+    ...dato,
+    eje: dato.clave === 'SUCIO' ? 'Sucio' :
+      dato.clave === 'PROCESANDO' ? 'En proceso' : 'Liberado',
+  }));
+  const haySinPrensa = desgloseEstado.some(dato => dato.sinIdentificar > 0);
   const acColores = ['#3176bb', '#16916f'];
   return <section className="space-y-5" aria-label="Control de volumen y vueltas de grafito">
     <div>
@@ -123,33 +135,39 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
       </p>
     </div>
     <div className="grid gap-4 lg:grid-cols-2">
-      <article className="rounded-2xl border border-[#e1e9e2] bg-white p-5 shadow-sm">
+      <article className="min-w-0 rounded-2xl border border-[#e1e9e2] bg-white p-5 shadow-sm">
         <h3 className="flex items-center gap-2 font-semibold text-[#173e35]">
-          <ChartColumn size={18} className="text-[#176f5b]"/> Estado actual del material
+          <ChartColumn size={18} className="text-[#176f5b]"/> Estado actual por prensa
         </h3>
-        <p className="mt-1 text-xs text-slate-500">
-          Sucio en almacén, consumido en lotes activos y producto liberado aún en inventario.
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Sucio en inventario, consumido en lotes activos y liberado disponible, separados por tipo de prensa.
         </p>
-        <div className="mt-6 h-[260px]">
+        <div className="mt-5 h-[305px] min-w-0">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={graficas.estadoActual} margin={{ top: 12, right: 8, left: 8, bottom: 10 }}>
+            <BarChart data={desgloseEstado} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
+              barGap={3} barCategoryGap="20%">
               <CartesianGrid vertical={false} stroke="#e8efea" strokeDasharray="3 3"/>
-              <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: '#52655e' }}
+              <XAxis dataKey="eje" tick={{ fontSize: 11, fill: '#52655e' }}
                 axisLine={false} tickLine={false} interval={0}/>
-              <YAxis width={58} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => n(Number(v))}
+              <YAxis width={59} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => n(Number(v))}
                 axisLine={false} tickLine={false}/>
-              <Tooltip formatter={value => n(Number(value), 2) + ' kg'}/>
-              <Bar dataKey="kg" name="Kilogramos" maxBarSize={72} radius={[7, 7, 0, 0]}>
-                {graficas.estadoActual.map((dato, i) =>
-                  <Cell key={dato.clave} fill={estadoColores[i]}/>)}
-              </Bar>
+              <Tooltip formatter={(value, name) => [n(Number(value), 2) + ' kg', name]}
+                labelFormatter={label => 'Material ' + label}/>
+              <Legend verticalAlign="top" height={40} wrapperStyle={{ fontSize: 11 }}/>
+              {PRENSAS.map(prensa => <Bar key={prensa} dataKey={prensa} name={prensa}
+                fill={COLORES[prensa]} maxBarSize={25} radius={[4, 4, 0, 0]}/>)}
+              {haySinPrensa && <Bar dataKey="sinIdentificar" name="Sin prensa" fill="#94a3b8"
+                maxBarSize={25} radius={[4, 4, 0, 0]}/>}
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          {graficas.estadoActual.map((dato, i) => <div key={dato.clave} className="rounded-xl bg-[#f7faf7] p-2">
-            <div className="text-[11px] font-semibold" style={{ color: estadoColores[i] }}>{dato.etiqueta}</div>
-            <div className="mt-1 text-sm font-bold">{n(dato.kg, 2)} kg</div>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+          {graficas.estadoActual.map((dato, i) => <div key={dato.clave}
+            className="min-w-0 rounded-xl bg-[#f7faf7] px-2 py-3">
+            <div className="text-[11px] font-semibold leading-4" style={{ color: estadoColores[i] }}>
+              {dato.etiqueta}
+            </div>
+            <div className="mt-1 text-sm font-bold tabular-nums">{n(dato.kg, 2)} kg</div>
           </div>)}
         </div>
       </article>
@@ -203,14 +221,18 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
           Límite excedido
         </div>
       </div>
-      <div className="mt-6 grid gap-5 md:grid-cols-3">
-        {porEtapa.map(etapa => <article key={etapa.id} className="rounded-2xl border border-[#e6eee8] bg-[#fcfefc] p-4">
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        {porEtapa.map(etapa => <article key={etapa.id} className="flex min-w-0 flex-col rounded-2xl border border-[#e6eee8] bg-[#fcfefc] p-4 sm:p-5">
           <div className="text-sm font-bold text-[#173e35]">{etapa.titulo}</div>
-          <p className="mt-1 min-h-[32px] text-xs text-slate-500">{etapa.descripcion}</p>
+          <p className="mt-1 min-h-[30px] text-xs leading-5 text-slate-500">{etapa.descripcion}</p>
           <IndicadorAnillos elementos={etapa.anillos} etapa={etapa.titulo}/>
-          <div className="mt-4 border-t border-[#e6eee8] pt-3 text-xs text-slate-500">
-            Vueltas observadas: {etapa.anillos.map(a => a.prensa + ' ' +
-              (a.vueltasDetectadas.length ? a.vueltasDetectadas.join(', ') : '—')).join(' · ')}
+          <div className="mt-4 border-t border-[#e6eee8] pt-3 text-xs leading-5 text-slate-500">
+            <p className="mb-1 font-semibold text-[#37564a]">Vueltas observadas</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {etapa.anillos.map(a => <span key={a.prensa}>
+                {a.prensa}: {a.vueltasDetectadas.length ? a.vueltasDetectadas.join(', ') : '—'}
+              </span>)}
+            </div>
           </div>
         </article>)}
       </div>
