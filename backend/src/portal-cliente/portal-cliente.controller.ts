@@ -15,6 +15,15 @@ export class PortalClienteController {
     return this.portal.clientes();
   }
 
+  @Get('entregas-semanales')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  entregasSemanales(@Req() req: any, @Query() query: {
+    clienteId?: string; anio?: string;
+  }) {
+    return this.portal.entregasSemanales(req.usuario, query);
+  }
+
   @Get('resumen')
   @Header('Cache-Control', 'private, no-store')
   @Header('X-Content-Type-Options', 'nosniff')
