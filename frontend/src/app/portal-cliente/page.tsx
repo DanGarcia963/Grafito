@@ -7,6 +7,7 @@ import { BarChart3, CheckCircle2, ClipboardList, Droplets, Factory, FileCheck2, 
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { pedir, sesionActual } from '@/utils/api';
 import PortalGraficasGrafito, { type GraficasGrafito } from '@/components/PortalGraficasGrafito';
+import PortalEntregasSemanales from '@/components/PortalEntregasSemanales';
 import PortalPlanTransportes from '@/components/PortalPlanTransportes';
 
 type Lote = {
@@ -161,6 +162,7 @@ export default function PortalClientePage() {
           </div>
         </div>
         {reporte.graficas && <PortalGraficasGrafito graficas={reporte.graficas}/>}
+        <PortalEntregasSemanales key={reporte.cliente.id} clienteId={reporte.cliente.id} esProduccion={esProduccion}/>
         <PortalPlanTransportes key={reporte.cliente.id} clienteId={reporte.cliente.id}/>
         <section className="rounded-2xl border border-[#e0e8e0] bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
