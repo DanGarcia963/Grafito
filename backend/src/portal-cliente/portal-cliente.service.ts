@@ -2,6 +2,10 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { Usuario } from '../auth/auth.service';
 import { PrismaService } from '../prisma.service';
 import { calcularGraficasGrafito } from './portal-cliente-graficas.logic';
+import {
+  calcularEntregasSemanales, fechaEnMexico, fechaInicioSemanaISO,
+  semanaISODeFecha,
+} from './portal-entregas-semanales.logic';
 
 type Movimiento = {
   id_Movi_Invent: number;
@@ -113,6 +117,73 @@ export class PortalClienteService {
       throw new NotFoundException('No existe el cliente configurado.');
     }
     return { id: persona.id_Persona, nombre: persona.nombre };
+  }
+
+  async entregasSemanales(usuario: Usuario, params: { clienteId?: string; anio?: string }) {
+    const cliente = await this.clientePermitido(usuario, params.clienteId);
+    const ahora = new Date();
+    const referencia = semanaISODeFecha(fechaEnMexico(ahora));
+    const anio = params.anio == null || params.anio === ''
+      ? referencia.anio
+      : (/^\d{4}$/.test(params.anio) ? Number(params.anio) : NaN);
+    if (!Number.isSafeInteger(anio) || anio < 2020 || anio > referencia.anio + 1) {
+      throw new BadRequestException('Selecciona un año válido entre 2020 y el siguiente al actual.');
+    }
+    // Consultar solo el año ISO seleccionado y la semana anterior al día de hoy.
+    // Un día de margen preserva cortes de horario local (America/Mexico_City),
+    // incluso cuando la semana cruza al año calendario siguiente.
+    const dia = 86400000;
+    const inicio = fechaInicioSemanaISO(anio, 1);
+    const fin = fechaInicioSemanaISO(anio + 1, 1);
+    const inicioActual = fechaInicioSemanaISO(referencia.anio, referencia.semana);
+    const inicioAnterior = new Date(inicioActual.getTime() - 7 * dia);
+    const periodos = [
+      { gte: new Date(inicio.getTime() - dia), lt: new Date(fin.getTime() + dia) },
+      { gte: new Date(inicioAnterior.getTime() - dia), lt: new Date(inicioActual.getTime() + dia) },
+    ];
+    const movimientos = await this.prisma.movimientos_inventario.findMany({
+      where: {
+        tipo: 'SALIDA_ENTREGA',
+        OR: periodos.map(fecha => ({ fecha })),
+        lote: {
+          propiedad: 'DE_CLIENTE',
+          propietario_id: cliente.id,
+          unidad: 'Kilogramos',
+          origen: 'PRODUCCION',
+          condicion: { in: ['REGENERADO', 'TERMINADO'] },
+          producto: { nombre_Producto: { contains: 'ORSA VFG', mode: 'insensitive' } },
+          lote_produccion: { estado: 'FINALIZADO', estado_Calida: 'LIBERADO' },
+        },
+      },
+      select: {
+        id_Movi_Invent: true, fecha: true, cantidad: true,
+        lote: { select: { especificaciones: true } },
+      },
+    });
+    const reversiones = movimientos.length
+      ? await this.prisma.movimientos_inventario.findMany({
+          where: {
+            tipo: 'REVERSION',
+            reversa_de_id: { in: movimientos.map(x => x.id_Movi_Invent) },
+          },
+          select: { reversa_de_id: true },
+        })
+      : [];
+    const revertidos = new Set(reversiones.map(r => r.reversa_de_id)
+      .filter((id): id is number => id != null));
+    return {
+      success: true,
+      cliente,
+      ...calcularEntregasSemanales(
+        anio,
+        movimientos.map(m => ({
+          id_Movi_Invent: m.id_Movi_Invent, fecha: m.fecha,
+          cantidad: m.cantidad, especificaciones: m.lote.especificaciones,
+        })),
+        revertidos,
+        ahora,
+      ),
+    };
   }
 
   async resumen(usuario: Usuario, params: { clienteId?: string; desde?: string; hasta?: string }) {
