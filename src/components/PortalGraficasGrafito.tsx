@@ -6,6 +6,7 @@ import {
   Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { AlertTriangle, ChartColumn, CircleGauge, Info, PackageCheck } from 'lucide-react';
+import PortalProyeccionHumedad, { estimarMasaSinAgua } from './PortalProyeccionHumedad';
 
 export type EtapaGrafito = 'SUCIO' | 'PROCESANDO' | 'LIBERADO';
 export type PrensaGrafito = 'Fagor' | 'Forgemaster' | 'Polymaster';
@@ -219,6 +220,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
       dato.clave === 'PROCESANDO' ? 'En proceso' : 'Liberado',
   }));
   const haySinPrensa = desgloseEstado.some(dato => dato.sinIdentificar > 0);
+  const sucioActual = graficas.estadoActualPorPrensa.find(dato => dato.clave === 'SUCIO');
   const acColores = ['#3176bb', '#16916f'];
   const [vistaAcumulados, setVistaAcumulados] = useState<'general' | 'prensa'>('prensa');
   const desgloseAcumulados = graficas.acumuladosPorPrensa ?? [];
@@ -250,7 +252,20 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
                 axisLine={false} tickLine={false} interval={0}/>
               <YAxis width={59} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => n(Number(v))}
                 axisLine={false} tickLine={false}/>
-              <Tooltip formatter={(value, name) => [n(Number(value), 2) + ' kg', name]}
+              <Tooltip formatter={(value, name, item) => {
+                const kg = Number(value) || 0;
+                const etapa = (item.payload as { clave?: EtapaGrafito } | undefined)?.clave;
+                if (etapa === 'SUCIO') {
+                  const proyeccion = estimarMasaSinAgua(kg);
+                  return [
+                    n(kg, 2) + ' kg sucios · ≈ ' +
+                    n(proyeccion.equivalenteSinAguaKg, 2) +
+                    ' kg equivalentes sin agua (55 % humedad estimada)',
+                    name,
+                  ];
+                }
+                return [n(kg, 2) + ' kg', name];
+              }}
                 labelFormatter={label => 'Material ' + label}/>
               <Legend verticalAlign="top" height={40} wrapperStyle={{ fontSize: 11 }}/>
               {PRENSAS.map(prensa => <Bar key={prensa} dataKey={prensa} name={prensa}
@@ -269,6 +284,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
             <div className="mt-1 text-sm font-bold tabular-nums">{n(dato.kg, 2)} kg</div>
           </div>)}
         </div>
+        {sucioActual && <PortalProyeccionHumedad sucio={sucioActual}/>}
       </article>
       <article className="rounded-2xl border border-[#e1e9e2] bg-white p-5 shadow-sm">
         <h3 className="flex items-center gap-2 font-semibold text-[#173e35]">
