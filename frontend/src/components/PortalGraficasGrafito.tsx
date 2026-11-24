@@ -55,6 +55,8 @@ const COLORES: Record<PrensaGrafito, string> = {
   Polymaster: '#eab308',
 };
 const COLOR_EXCESO = '#dc2626';
+const COLOR_AGUA_ESTIMADA = '#dbeafe';
+const BORDE_AGUA_ESTIMADA = '#bfdbfe';
 const n = (valor: number, digitos = 0) => new Intl.NumberFormat('es-MX', {
   maximumFractionDigits: digitos,
 }).format(valor);
@@ -214,11 +216,30 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
   const totalSinPrensa = Object.values(graficas.sinPrensaKg).reduce((a, b) => a + b, 0);
   const exceso = graficas.anillosVueltas.filter(a => a.excedida);
   const estadoColores = ['#d6a150', '#3176bb', '#16916f'];
-  const desgloseEstado = graficas.estadoActualPorPrensa.map(dato => ({
-    ...dato,
-    eje: dato.clave === 'SUCIO' ? 'Sucio' :
-      dato.clave === 'PROCESANDO' ? 'En proceso' : 'Liberado',
-  }));
+  const desgloseEstado = graficas.estadoActualPorPrensa.map(dato => {
+    const esSucio = dato.clave === 'SUCIO';
+    // Se conserva el volumen total de cada barra: base (45%) + agua (55%)
+    // exclusivamente en material SUCIO. Otras etapas mantienen su valor íntegro.
+    const descomponer = (kg: number) => esSucio
+      ? estimarMasaSinAgua(kg)
+      : { equivalenteSinAguaKg: kg, aguaKg: 0 };
+    const fagor = descomponer(dato.Fagor);
+    const forgemaster = descomponer(dato.Forgemaster);
+    const polymaster = descomponer(dato.Polymaster);
+    const sinPrensa = descomponer(dato.sinIdentificar);
+    return {
+      ...dato,
+      eje: esSucio ? 'Sucio' : dato.clave === 'PROCESANDO' ? 'En proceso' : 'Liberado',
+      FagorBase: fagor.equivalenteSinAguaKg,
+      FagorAgua: fagor.aguaKg,
+      ForgemasterBase: forgemaster.equivalenteSinAguaKg,
+      ForgemasterAgua: forgemaster.aguaKg,
+      PolymasterBase: polymaster.equivalenteSinAguaKg,
+      PolymasterAgua: polymaster.aguaKg,
+      sinIdentificarBase: sinPrensa.equivalenteSinAguaKg,
+      sinIdentificarAgua: sinPrensa.aguaKg,
+    };
+  });
   const haySinPrensa = desgloseEstado.some(dato => dato.sinIdentificar > 0);
   const sucioActual = graficas.estadoActualPorPrensa.find(dato => dato.clave === 'SUCIO');
   const acColores = ['#3176bb', '#16916f'];
@@ -252,29 +273,62 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
                 axisLine={false} tickLine={false} interval={0}/>
               <YAxis width={59} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => n(Number(v))}
                 axisLine={false} tickLine={false}/>
-              <Tooltip formatter={(value, name, item) => {
-                const kg = Number(value) || 0;
-                const etapa = (item.payload as { clave?: EtapaGrafito } | undefined)?.clave;
-                if (etapa === 'SUCIO') {
-                  const proyeccion = estimarMasaSinAgua(kg);
-                  return [
-                    n(kg, 2) + ' kg sucios · ≈ ' +
-                    n(proyeccion.equivalenteSinAguaKg, 2) +
-                    ' kg equivalentes sin agua (55 % humedad estimada)',
-                    name,
-                  ];
-                }
-                return [n(kg, 2) + ' kg', name];
-              }}
-                labelFormatter={label => 'Material ' + label}/>
+              <Tooltip cursor={{ fill: '#eff6f2', fillOpacity: 0.65 }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const fila = payload[0]?.payload as (typeof desgloseEstado)[number] | undefined;
+                  if (!fila) return null;
+                  return <div className="max-w-[270px] rounded-xl border border-[#dce8df] bg-white p-3 text-xs shadow-lg">
+                    <p className="mb-2 font-bold text-[#173e35]">Material {String(label ?? '')}</p>
+                    {PRENSAS.map(prensa => {
+                      const kg = fila[prensa];
+                      if (kg <= 0) return null;
+                      const estimacion = estimarMasaSinAgua(kg);
+                      return <div key={prensa} className="mb-2 border-b border-slate-100 pb-2 last:mb-0 last:border-0 last:pb-0">
+                        <p className="flex items-center gap-2 font-semibold">
+                          <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: COLORES[prensa] }}/>
+                          {prensa}: {n(kg, 2)} kg
+                        </p>
+                        {fila.clave === 'SUCIO' && <p className="mt-1 pl-4 leading-5 text-slate-600">
+                          Agua estimada (55 %): {n(estimacion.aguaKg, 2)} kg
+                          <span className="block">Equivalente sin agua (45 %): {n(estimacion.equivalenteSinAguaKg, 2)} kg</span>
+                        </p>}
+                      </div>;
+                    })}
+                    {fila.sinIdentificar > 0 && <p className="mt-1 text-slate-600">
+                      Sin prensa: {n(fila.sinIdentificar, 2)} kg
+                      {fila.clave === 'SUCIO' && <span className="block">
+                        Agua estimada: {n(estimarMasaSinAgua(fila.sinIdentificar).aguaKg, 2)} kg
+                      </span>}
+                    </p>}
+                    {fila.clave === 'SUCIO' && <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                      Proyección con 55 % de agua supuesto; no es un resultado de laboratorio.
+                    </p>}
+                  </div>;
+                }}/>
               <Legend verticalAlign="top" height={40} wrapperStyle={{ fontSize: 11 }}/>
-              {PRENSAS.map(prensa => <Bar key={prensa} dataKey={prensa} name={prensa}
-                fill={COLORES[prensa]} maxBarSize={25} radius={[4, 4, 0, 0]}/>)}
-              {haySinPrensa && <Bar dataKey="sinIdentificar" name="Sin prensa" fill="#94a3b8"
-                maxBarSize={25} radius={[4, 4, 0, 0]}/>}
+              {PRENSAS.map(prensa => <Bar key={prensa + '-base'}
+                dataKey={prensa + 'Base'} name={prensa}
+                stackId={prensa} fill={COLORES[prensa]} maxBarSize={25}
+                radius={[3, 3, 0, 0]}/>)}
+              {PRENSAS.map(prensa => <Bar key={prensa + '-agua'}
+                dataKey={prensa + 'Agua'} name={prensa + ' · agua estimada'}
+                stackId={prensa} fill={COLOR_AGUA_ESTIMADA} stroke={BORDE_AGUA_ESTIMADA}
+                legendType="none" maxBarSize={25} radius={[4, 4, 0, 0]}/>)}
+              {haySinPrensa && <Bar dataKey="sinIdentificarBase" name="Sin prensa"
+                stackId="SinPrensa" fill="#94a3b8" maxBarSize={25} radius={[3, 3, 0, 0]}/>}
+              {haySinPrensa && <Bar dataKey="sinIdentificarAgua" name="Sin prensa · agua estimada"
+                stackId="SinPrensa" fill={COLOR_AGUA_ESTIMADA} stroke={BORDE_AGUA_ESTIMADA}
+                legendType="none" maxBarSize={25} radius={[4, 4, 0, 0]}/>}
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <p className="mt-2 flex items-center gap-2 text-[11px] leading-5 text-slate-600">
+          <span className="h-3 w-3 shrink-0 rounded-sm border border-sky-200"
+            style={{ backgroundColor: COLOR_AGUA_ESTIMADA }}/>
+          Azul claro: 55 % de agua estimada únicamente en las barras de material sucio.
+          La altura total continúa representando los kilogramos sucios registrados.
+        </p>
         <div className="mt-2 grid grid-cols-3 gap-2 text-center">
           {graficas.estadoActual.map((dato, i) => <div key={dato.clave}
             className="min-w-0 rounded-xl bg-[#f7faf7] px-2 py-3">
