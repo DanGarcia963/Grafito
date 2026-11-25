@@ -8,6 +8,7 @@
 - Los resultados se guardan como BORRADOR o EN_REVISION. Ninguno altera la estadística oficial hasta que otro usuario de Seguridad revise y apruebe.
 - Cada captura tiene tipo y unidad definidos por la configuración, meta, versión, periodo, fecha límite original, fuente histórica, fecha del documento, datos base de cálculo si corresponde, observaciones, análisis, acciones, motivo y autor/fecha real.
 - Las desviaciones requieren análisis y acciones antes del envío a revisión.
+- Si un periodo no aplica, se captura una justificación (mínimo 15 caracteres), sin inventar un valor. Tras revisión independiente queda en NO_APLICA y no se considera medición cumplida.
 - Si requiere evidencia, el envío a revisión exige un archivo válido PDF/PNG/JPG/XLSX hasta 8 MB; se almacena en kpi_evidencias y se enlaza a la revisión de kpi_resultado_historial.
 - Captura nueva crea revisión 1 con CREACION; corrección de un borrador crea revisión sucesiva CORRECCION, conservando historial previo y sin borrar evidencias.
 - La aprobación requiere un usuario Seguridad distinto al capturista, motivo documentado y evidencia actual si está configurada como requerida. Genera APROBACION con nueva revisión y referencia a los documentos validados; solo después el dato cuenta como oficial.
