@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import type { ReactNode } from "react";
 import {
   Bar,
@@ -365,14 +366,44 @@ export default function KpisPage() {
     !!applied && JSON.stringify(filters) !== JSON.stringify(applied);
   return (
     <main className={`kpi-app ${presentation ? "kpi-presentation" : ""}`}>
-      <header className="kpi-top">
-        <div>
-          <p className="kpi-eyebrow">
-            US TECHNOLOGIES · SISTEMA DE GESTIÓN DE CALIDAD
-          </p>
-          <h1>Indicadores de desempeño</h1>
-          <p>Resultados, metas y evidencia para la revisión del SGC.</p>
+      <section className="kpi-document-header" aria-labelledby="kpi-document-title">
+        <div className="kpi-document-logo-panel">
+          <Image
+            src="/brand/us-technologies.png"
+            alt="US Technologies"
+            width={260}
+            height={112}
+            priority
+            className="kpi-document-logo"
+          />
+          <span className="kpi-document-company">US TECHNOLOGIES</span>
         </div>
+        <div className="kpi-document-right">
+          <div className="kpi-document-orange" aria-hidden="true" />
+          <div className="kpi-document-navy">
+            <p className="kpi-document-heading-overline">SISTEMA DE GESTIÓN DE CALIDAD</p>
+            <h1 id="kpi-document-title">INDICADORES DE DESEMPEÑO</h1>
+            <p className="kpi-document-heading-subtitle">
+              SEGURIDAD, HIGIENE Y MEDIO AMBIENTE · SHyMA
+            </p>
+          </div>
+          <div className="kpi-document-red" aria-hidden="true" />
+          <div className="kpi-document-cyan" aria-hidden="true" />
+          <div className="kpi-document-details">
+            <div>
+              <p className="kpi-document-reference">TABLERO DIGITAL DE KPIs · SGC</p>
+              <p className="kpi-document-period">
+                Periodo consultado: {applied?.year ?? filters.year} · Corte: {applied?.cutoff ?? filters.cutoff}
+              </p>
+            </div>
+            <span className="kpi-document-view">
+              {applied?.mode === "preliminar" ? "VISTA PRELIMINAR" : "VISTA OFICIAL"}
+            </span>
+          </div>
+        </div>
+      </section>
+      <div className="kpi-top kpi-toolbar">
+        <p>Resultados, metas y evidencia para la revisión del SGC.</p>
         <div className="kpi-actions">
           <button
             className="kpi-button"
@@ -388,7 +419,7 @@ export default function KpisPage() {
             {presentation ? "Salir de presentación" : "Modo presentación"}
           </button>
         </div>
-      </header>
+      </div>
       {!presentation && (
         <form
           className="kpi-panel kpi-filters"

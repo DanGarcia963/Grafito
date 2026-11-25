@@ -52,6 +52,134 @@
   letter-spacing: 1.5px;
   font-weight: 700;
 }
+/* Encabezado documental del tablero KPI: composición HTML/CSS, reutiliza el logo de marca. */
+.kpi-document-header {
+  display: grid;
+  grid-template-columns: minmax(205px, 24%) minmax(0, 1fr);
+  border: 2px solid #092b56;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 3px 12px #0b2f5214;
+}
+.kpi-document-logo-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 22px 16px;
+  border-right: 2px solid #092b56;
+  background: #fff;
+}
+.kpi-document-logo {
+  display: block;
+  width: min(100%, 225px);
+  height: auto;
+  max-height: 115px;
+  object-fit: contain;
+}
+.kpi-document-company {
+  font-size: 11px;
+  font-weight: 800;
+  color: #12335e;
+  letter-spacing: .13em;
+  text-align: center;
+}
+.kpi-document-right { min-width: 0; display: flex; flex-direction: column; }
+.kpi-document-orange { height: 12px; flex: 0 0 12px; background: #e99a29; }
+.kpi-document-navy {
+  background: #0d2e5d;
+  color: #fff;
+  padding: 20px clamp(18px, 3vw, 42px);
+}
+.kpi-app .kpi-document-heading-overline {
+  margin: 0 0 5px;
+  color: #d7e7f7;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .15em;
+}
+.kpi-app .kpi-document-navy h1,
+.kpi-app.kpi-presentation .kpi-document-navy h1 {
+  color: #fff;
+  font-size: clamp(20px, 2.35vw, 35px);
+  line-height: 1.18;
+  font-weight: 800;
+  margin: 0;
+  letter-spacing: .018em;
+  overflow-wrap: anywhere;
+}
+.kpi-app .kpi-document-heading-subtitle {
+  margin: 8px 0 0;
+  color: #ecf3fa;
+  font-size: clamp(10px, 1vw, 13px);
+  letter-spacing: .06em;
+  font-weight: 600;
+}
+.kpi-document-red { height: 4px; flex: 0 0 4px; background: #d64f45; }
+.kpi-document-cyan { height: 5px; flex: 0 0 5px; background: #2bb4c9; }
+.kpi-document-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px clamp(18px, 3vw, 42px);
+  background: #fff;
+  color: #12335e;
+}
+.kpi-app .kpi-document-reference {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .015em;
+}
+.kpi-app .kpi-document-period {
+  margin: 5px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #426078;
+}
+.kpi-document-view {
+  flex-shrink: 0;
+  border: 1px solid #ccdae3;
+  padding: 6px 9px;
+  border-radius: 4px;
+  color: #23465f;
+  background: #f3f7fa;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.kpi-toolbar { margin: 15px 0 23px; }
+.kpi-app .kpi-toolbar > p {
+  margin: 0;
+  color: #526b7c;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .kpi-document-header { grid-template-columns: 1fr; }
+  .kpi-document-logo-panel {
+    border-right: 0;
+    border-bottom: 2px solid #092b56;
+    padding: 12px 18px;
+    gap: 4px;
+  }
+  .kpi-document-logo { max-height: 68px; width: min(70%, 215px); }
+  .kpi-document-company { font-size: 9px; }
+  .kpi-document-orange { height: 8px; flex-basis: 8px; }
+  .kpi-document-navy { padding: 17px 19px; }
+  .kpi-document-details { padding: 12px 19px; flex-wrap: wrap; }
+  .kpi-app .kpi-document-reference { font-size: 13px; }
+  .kpi-app .kpi-document-period { font-size: 11px; }
+}
+@media print {
+  .kpi-document-header { box-shadow: none; break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .kpi-toolbar { display: none; }
+}
+
 .kpi-actions {
   display: flex;
   gap: 8px;
