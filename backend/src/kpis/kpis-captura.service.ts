@@ -82,7 +82,7 @@ export class KpisCapturaService {
         throw new ConflictException('Este periodo está en revisión, aprobado o no aplica. No puede sobrescribirse.');
       if(r.revision_esperada!==(existente?.revision_actual??0))
         throw new ConflictException('La revisión cambió. Actualiza el calendario antes de guardar.');
-      if(existente && r.motivo.trim().length<10)
+      if(existente && String(raw.motivo??'').trim().length<10)
         throw new BadRequestException('Documenta el motivo de corrección (mínimo 10 caracteres).');
       if(r.estado==='EN_REVISION' && config.requiere_evidencia && !adjunto)
         throw new BadRequestException('Este indicador requiere evidencia para enviar a revisión.');
@@ -187,6 +187,10 @@ export class KpisCapturaService {
         where:{id_Resultado:id},include:{kpi_configuraciones:true},
       });
       if(!r)throw new NotFoundException('Resultado no encontrado.');
+      let referencia:any={};
+      try { referencia=JSON.parse(r.referencia_origen ?? '{}'); } catch {}
+      if(r.origen!=='MANUAL'||referencia?.tipo!=='CAPTURA_HISTORICA_CALENDARIO')
+        throw new ConflictException('Solo puede aprobarse un histórico registrado desde el calendario.');
       if(r.revision_actual!==esperado||r.estado!=='EN_REVISION')
         throw new ConflictException('La revisión cambió o no está pendiente de aprobación.');
       if(r.capturado_por===user.usuario)
