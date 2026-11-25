@@ -283,7 +283,7 @@ export default function LogisticaEntregas() {
                   </div>
                   <button type="button" className={primary+' mt-3'} disabled={busy||cotejados.length!==cajas.length}
                     onClick={()=>void ejecutar(()=>pedir('/api/logistica/viajes/'+v.id+'/cargar',{
-                      confirmo_carga:true,codigos_verificados:cajas.filter(c=>cotejados.includes(c.id)).map(c=>c.codigo),
+                      confirmo_carga:true,contenedores_verificados:cajas.filter(c=>cotejados.includes(c.id)).map(c=>({id:c.id,codigo:c.codigo})),
                     }),'Carga física validada.')}>
                     <CheckCircle2 size={15}/> Confirmar carga ({cotejados.length}/{cajas.length})
                   </button>
