@@ -13,7 +13,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, apiFetch } from "./kpis.api";
+import { api, apiFetch, post } from "./kpis.api";
+import KpiCapturaHistorica from "./KpiCapturaHistorica";
+import { sesionActual } from "@/utils/api";
 import type {
   Catalog,
   Cell,
@@ -150,6 +152,10 @@ export default function KpisPage() {
     } | null>(null),
     [fileError, setFileError] = useState(""),
     [fileLoading, setFileLoading] = useState(false);
+  const [captura, setCaptura] = useState<{ indicador: Indicator; celda: Cell } | null>(null);
+  const [guardado, setGuardado] = useState("");
+  const [aprobando, setAprobando] = useState(false);
+  const [aprobacionError, setAprobacionError] = useState("");
   const fileRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search),
@@ -219,6 +225,30 @@ export default function KpisPage() {
     [file],
   );
   useEffect(() => () => fileRequest.current?.abort(), []);
+  async function aprobarResultado() {
+    if (!detail || presentation || aprobando) return;
+    const sesion = sesionActual();
+    if (!sesion?.usuario || sesion.area !== "seguridad" ||
+        sesion.usuario === detail.capturado_por) return;
+    const motivo = window.prompt(
+      "Motivo de aprobación (mínimo 10 caracteres):",
+      "Medición y evidencia histórica revisadas y conformes.",
+    );
+    if (!motivo) return;
+    setAprobando(true);
+    setAprobacionError("");
+    try {
+      await post("resultados/" + detail.id_Resultado + "/aprobar", {
+        motivo,
+        revision_esperada: detail.revision_actual,
+      });
+      setGuardado("La medición fue aprobada por un revisor independiente.");
+      closeDetail();
+      setRefresh(v => v + 1);
+    } catch (err) {
+      setAprobacionError(err instanceof Error ? err.message : "No se pudo aprobar.");
+    } finally { setAprobando(false); }
+  }
   function closeDetail() {
     fileRequest.current?.abort();
     setFile(null);
@@ -329,7 +359,7 @@ export default function KpisPage() {
           </button>
           <button
             className="kpi-button primary"
-            onClick={() => setPresentation((v) => !v)}
+            onClick={() => { setCaptura(null); setPresentation((v) => !v); }}
           >
             {presentation ? "Salir de presentación" : "Modo presentación"}
           </button>
@@ -666,8 +696,8 @@ export default function KpisPage() {
                     <div>
                       <h2>Matriz de resultados</h2>
                       <p>
-                        Selecciona el nombre para ver su evolución o una celda
-                        para consultar evidencia.
+                        Selecciona el nombre para ver su evolución. Fuera del modo presentación, pulsa un periodo cerrado
+                        para registrar resultados históricos o corregir un borrador; los aprobados conservan su detalle.
                       </p>
                     </div>
                     <span className="kpi-badge neutral">
@@ -718,18 +748,34 @@ export default function KpisPage() {
                               const c = i.cells.find(
                                 (c) => c.start === p.start && c.end === p.end,
                               );
+                              const editable =
+                                !presentation && !!c?.valid && !!c.configId &&
+                                c.end <= localToday() &&
+                                (c.state === "SIN_DATO" || c.state === "PENDIENTE" ||
+                                 c.state === "BORRADOR");
                               return (
                                 <td key={p.start + p.end}>
                                   {c ? (
                                     <button
-                                      className={`kpi-cell ${tone(c)}`}
-                                      disabled={!c.resultId}
-                                      onClick={() => setResultId(c.resultId)}
-                                      title={`Meta: ${c.target}. Fecha límite: ${c.due}`}
+                                      className={`kpi-cell ${tone(c)} ${editable ? "kpi-cell-editable" : ""}`}
+                                      disabled={!c.resultId && !editable}
+                                      onClick={() => {
+                                        if (editable) setCaptura({ indicador: i, celda: c });
+                                        else if (c.resultId) setResultId(c.resultId);
+                                      }}
+                                      title={editable
+                                        ? `Capturar histórico de ${i.name} · ${period(c)}`
+                                        : `Meta: ${c.target}. Fecha límite: ${c.due}`}
+                                      aria-label={editable
+                                        ? `Registrar resultado de ${i.name} para ${period(c)}`
+                                        : `Consultar medición de ${i.name} para ${period(c)}`}
                                     >
                                       <strong>{value(c)}</strong>
                                       <small>{state(c)}</small>
                                       <small>Meta: {c.target}</small>
+                                      {editable && <small className="kpi-edit-label">
+                                        {c.resultId ? "Editar borrador histórico" : "＋ Registrar histórico"}
+                                      </small>}
                                     </button>
                                   ) : (
                                     <span className="kpi-small">
@@ -953,6 +999,33 @@ export default function KpisPage() {
           </>
         )
       )}
+      {guardado && !presentation && (
+        <div className="kpi-alert good" role="status">
+          {guardado}
+          <button type="button" className="kpi-link" onClick={() => setGuardado("")}>
+            Cerrar aviso
+          </button>
+        </div>
+      )}
+      {!presentation && captura && (
+        <Modal title="Registrar resultado histórico desde el calendario"
+          onClose={() => setCaptura(null)}>
+          <KpiCapturaHistorica
+            key={captura.indicador.id + "-" + captura.celda.start}
+            indicador={captura.indicador}
+            celda={captura.celda}
+            onCancel={() => setCaptura(null)}
+            onSaved={mensaje => {
+              setGuardado(mensaje);
+              setCaptura(null);
+              setRefresh(v => v + 1);
+              if (applied?.mode === "oficial") {
+                apply({ ...applied, mode: "preliminar" });
+              }
+            }}
+          />
+        </Modal>
+      )}
       {resultId !== null && (
         <Modal title="Detalle y evidencia de la medición" onClose={closeDetail}>
           <div className="kpi-dialog-body">
@@ -995,6 +1068,17 @@ export default function KpisPage() {
                     </div>
                   ))}
                 </dl>
+                {!presentation && detail.estado === "EN_REVISION" &&
+                  sesionActual()?.usuario !== detail.capturado_por && (
+                    <div className="kpi-approval-tools">
+                      <p>Este resultado requiere un revisor distinto de quien lo capturó.</p>
+                      <button type="button" className="kpi-button primary"
+                        disabled={aprobando} onClick={() => void aprobarResultado()}>
+                        {aprobando ? "Aprobando…" : "Aprobar resultado histórico"}
+                      </button>
+                      {aprobacionError && <p role="alert" className="kpi-alert bad">{aprobacionError}</p>}
+                    </div>
+                  )}
                 <h3>Evidencias por revisión</h3>
                 {!detail.evidence.length ? (
                   <p>
