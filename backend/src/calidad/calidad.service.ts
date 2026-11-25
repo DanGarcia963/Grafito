@@ -47,6 +47,101 @@ export class CalidadService {
     private readonly eventos: EventsGateway,
   ) {}
 
+  async estadoConciliacionHistorica() {
+    const registros = await this.prisma.lotes_produccion.findMany({
+      where: { estado: 'FINALIZADO', estado_Calida: 'LIBERADO' },
+      select: {
+        id_Lote_Produccion: true, no_Lote: true, fecha_fin: true,
+        ordenes_produccion: { select: { no_Orden_Produc: true, propietario_id: true } },
+        certificado_calidad: {
+          where: { estatus: 'EMITIDO', estatus_Calidad: 'APROBADO' },
+          select: { id_Certif_Calidad: true, documento_nombre: true },
+        },
+      },
+      orderBy: { fecha_fin: 'desc' },
+      take: 300,
+    });
+    const revisiones = await this.prisma.calidad_conciliaciones_legacy.findMany({
+      where: { lote_produccion_id: { in: registros.map(x => x.id_Lote_Produccion) } },
+      select: {
+        lote_produccion_id: true, estado: true, motivo: true,
+        documento_nombre: true, revisado_por: true, revisado_en: true,
+      },
+    });
+    const porLote = new Map(revisiones.map(x => [x.lote_produccion_id, x]));
+    return {
+      success: true, data: registros.map(l => {
+        const revision = porLote.get(l.id_Lote_Produccion);
+        const certificado = l.certificado_calidad.find(x => !!x.documento_nombre);
+        return {
+          lote_id: l.id_Lote_Produccion, folio: l.no_Lote, fecha: l.fecha_fin,
+          op: l.ordenes_produccion?.no_Orden_Produc ?? null,
+          cliente_id: l.ordenes_produccion?.propietario_id ?? null,
+          estado_expediente: certificado ? 'CERTIFICADO' : revision?.estado ?? 'SIN_EVIDENCIA',
+          documento: certificado?.documento_nombre ?? revision?.documento_nombre ?? null,
+          observaciones: revision?.motivo ?? null,
+          revisado_por: revision?.revisado_por ?? null,
+          revisado_en: revision?.revisado_en ?? null,
+        };
+      }),
+    };
+  }
+
+  async resolverConciliacionHistorica(
+    id: number, body: Record<string, unknown>,
+    documento: Express.Multer.File | undefined,
+    usuario: { usuario: string },
+  ) {
+    const estado = String(body.estado ?? '').trim();
+    const motivo = String(body.motivo ?? '').trim();
+    if (!['VALIDADA', 'BLOQUEADA'].includes(estado) || motivo.length < 12 || motivo.length > 4000) {
+      throw new BadRequestException('Indica VALIDADA/BLOQUEADA y una justificación de 12 a 4000 caracteres.');
+    }
+    if (estado === 'VALIDADA' &&
+        (!documento?.buffer?.length || documento.mimetype !== 'application/pdf' ||
+         documento.buffer.subarray(0, 5).toString() !== '%PDF-' || documento.size > 10 * 1024 * 1024)) {
+      throw new BadRequestException('La validación histórica necesita un PDF de evidencia de hasta 10 MB.');
+    }
+    if (documento && (documento.mimetype !== 'application/pdf' ||
+        documento.buffer.subarray(0, 5).toString() !== '%PDF-')) {
+      throw new BadRequestException('El documento debe ser PDF.');
+    }
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRawUnsafe(
+        'SELECT "id_Lote_Produccion" FROM lotes_produccion WHERE "id_Lote_Produccion"=$1 FOR UPDATE', id,
+      );
+      const [lote, pendiente] = await Promise.all([
+        tx.lotes_produccion.findUnique({ where: { id_Lote_Produccion: id } }),
+        tx.calidad_conciliaciones_legacy.findUnique({ where: { lote_produccion_id: id } }),
+      ]);
+      if (!lote || lote.estado !== 'FINALIZADO' || lote.estado_Calida !== 'LIBERADO' || !pendiente) {
+        throw new BadRequestException('Solo se concilian lotes históricos previamente detectados sin certificado.');
+      }
+      const ahora = new Date();
+      await tx.calidad_conciliaciones_legacy.update({
+        where: { lote_produccion_id: id },
+        data: {
+          estado, motivo, revisado_por: usuario.usuario, revisado_en: ahora,
+          ...(documento ? {
+            documento_nombre: (documento.originalname || 'evidencia.pdf').replace(/[\\/]/g, '_').slice(0, 255),
+            documento_mime: 'application/pdf',
+            documento_contenido: new Uint8Array(documento.buffer),
+          } : estado === 'BLOQUEADA' ? {
+            documento_nombre: null, documento_mime: null, documento_contenido: null,
+          } : {}),
+        },
+      });
+      await tx.proceso_eventos.create({
+        data: {
+          entidad: 'LOTE', entidad_id: id, ciclo: 1, fecha: ahora,
+          accion: 'CONCILIACION_CALIDAD_HISTORICA',
+          detalle: JSON.stringify({ estado, motivo, revisado_por: usuario.usuario, documento: documento?.originalname ?? null }),
+        },
+      });
+      return { success: true, lote_id: id, estado };
+    });
+  }
+
   private normalizarTexto(valor: unknown): string {
     return String(valor ?? '')
       .normalize('NFD')
