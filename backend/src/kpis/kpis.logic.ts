@@ -241,6 +241,7 @@ export function buildDashboard(
           end: slot.end,
           due,
           resultId: r?.id_Resultado ?? null,
+          historicoEditable: !!r && json(r.referencia_origen)?.tipo === "CAPTURA_HISTORICA_CALENDARIO",
           configId: c?.id_Configuracion ?? null,
           state: r?.estado ?? (slot.end > f.cutoff ? "EN_CURSO" : "SIN_DATO"),
           approved,
