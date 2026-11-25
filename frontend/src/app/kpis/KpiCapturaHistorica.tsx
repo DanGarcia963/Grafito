@@ -25,11 +25,12 @@ type Draft = {
   observaciones: string;
   analisis: string;
   acciones_propuestas: string;
+  justificacion_no_aplica: string;
   motivo: string;
 };
 const empty: Draft = {
   valor: "", fuente: "", fecha_documento: "", datos_base: "",
-  observaciones: "", analisis: "", acciones_propuestas: "",
+  observaciones: "", analisis: "", acciones_propuestas: "", justificacion_no_aplica: "",
   motivo: "Registro histórico desde el calendario mensual.",
 };
 const period = (c:Cell) =>
@@ -59,6 +60,7 @@ export default function KpiCapturaHistorica({
   const [config,setConfig]=useState<Config|null>(null);
   const [form,setForm]=useState<Draft>(empty);
   const [revision,setRevision]=useState(0);
+  const [noAplica,setNoAplica]=useState(false);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
@@ -79,6 +81,7 @@ export default function KpiCapturaHistorica({
           typeof detalle.referencia_origen==="object"
           ? detalle.referencia_origen as Record<string,unknown> : {};
         setRevision(detalle.revision_actual);
+        setNoAplica(!!detalle.justificacion_no_aplica);
         setForm({
           valor: conf.tipo_dato==="NUMERICO"
             ? String(detalle.valor_numerico??"")
@@ -90,9 +93,10 @@ export default function KpiCapturaHistorica({
           observaciones:detalle.observaciones??"",
           analisis:detalle.analisis??"",
           acciones_propuestas:detalle.acciones_propuestas??"",
+          justificacion_no_aplica:detalle.justificacion_no_aplica??"",
           motivo:"",
         });
-      } else {setRevision(0);setForm({...empty});}
+      } else {setRevision(0);setForm({...empty});setNoAplica(false);}
     }).catch((err)=>{
       if(!ac.signal.aborted)setError(err instanceof Error?err.message:"No se pudo abrir la configuración.");
     }).finally(()=>{if(!ac.signal.aborted)setLoading(false);});
@@ -110,7 +114,7 @@ export default function KpiCapturaHistorica({
       setError("Para enviar a revisión debes adjuntar evidencia del periodo.");
       return;
     }
-    if(estado==="EN_REVISION"&&form.valor.trim()===""){
+    if(estado==="EN_REVISION"&&!noAplica&&form.valor.trim()===""){
       setError("Captura el valor antes de enviarlo a revisión.");
       return;
     }
@@ -129,6 +133,7 @@ export default function KpiCapturaHistorica({
       payload.set("periodo_fin",celda.end);
       payload.set("revision_esperada",String(revision));
       payload.set("estado",estado);
+      payload.set("no_aplica",String(noAplica));
       for(const [key,value] of Object.entries(form))payload.set(key,value);
       if(evidencia)payload.set("evidencia",evidencia,evidencia.name);
       const resultado=await post<{success:boolean;id:number;revision:number;estado:string}>(
@@ -155,8 +160,19 @@ export default function KpiCapturaHistorica({
       </div>
       {error&&<p role="alert" className="kpi-alert bad">{error}</p>}
       <form ref={formRef} onSubmit={e=>e.preventDefault()} className="kpi-capture-form">
+        <label className="kpi-capture-na">
+          <input type="checkbox" checked={noAplica} onChange={e=>setNoAplica(e.target.checked)}/>
+          Este indicador no aplicó durante el periodo
+        </label>
+        {noAplica&&<label>
+          Justificación de no aplicabilidad *
+          <textarea required minLength={15} maxLength={3000} rows={3}
+            value={form.justificacion_no_aplica} onChange={e=>set("justificacion_no_aplica",e.target.value)}
+            placeholder="Explica por qué no corresponde medir este indicador en el periodo histórico."/>
+          <small>Necesita revisión independiente; no se contabiliza como medición cumplida.</small>
+        </label>}
         <div className="kpi-capture-fields">
-          <label>
+          {!noAplica&&<label>
             Resultado del periodo *
             {config.tipo_dato==="NUMERICO"?
               <input type="number" step="any" required value={form.valor}
@@ -172,7 +188,7 @@ export default function KpiCapturaHistorica({
                   {allowed(config.opciones_permitidas).map(x=><option key={x} value={x}>{x}</option>)}
                 </select>}
             <small>Se utiliza el tipo y la precisión aprobados para este periodo.</small>
-          </label>
+          </label>}
           <label>
             Fuente del dato histórico *
             <input required minLength={5} maxLength={2000} value={form.fuente}
@@ -195,7 +211,7 @@ export default function KpiCapturaHistorica({
           <textarea rows={3} value={form.datos_base} onChange={e=>set("datos_base",e.target.value)}
             placeholder='{"numerador": 12, "denominador": 20, "fuente": "registro de mediciones"}'/>
           <small>
-            {config.metodo_calculo==="DIRECTO"
+            {noAplica?"No corresponde al periodo no aplicable.":config.metodo_calculo==="DIRECTO"
               ?"Opcional si el valor se obtiene directamente de la fuente."
               :"Obligatorio porque la configuración usa un cálculo; registra las variables usadas y su procedencia."}
           </small>
