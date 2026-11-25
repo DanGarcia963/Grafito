@@ -1070,6 +1070,9 @@ export default function KpisPage() {
                   ))}
                 </dl>
                 {!presentation && detail.estado === "EN_REVISION" &&
+                  detail.referencia_origen !== null &&
+                  typeof detail.referencia_origen === "object" &&
+                  (detail.referencia_origen as Record<string, unknown>).tipo === "CAPTURA_HISTORICA_CALENDARIO" &&
                   sesionActual()?.usuario !== detail.capturado_por && (
                     <div className="kpi-approval-tools">
                       <p>Este resultado requiere un revisor distinto de quien lo capturó.</p>
