@@ -170,6 +170,15 @@ export class KpisCapturaService {
     if(!Number.isSafeInteger(esperado)||esperado<=0)
       throw new BadRequestException('Revisión esperada inválida.');
     return this.prisma.$transaction(async tx=>{
+      const previoId=await tx.kpi_resultados.findUnique({
+        where:{id_Resultado:id},select:{indicador_id:true},
+      });
+      if(!previoId)throw new NotFoundException('Resultado no encontrado.');
+      // Mismo orden de bloqueo que capturar(): primero indicador, luego resultado.
+      await tx.$queryRawUnsafe(
+        'SELECT "id_Indicador" FROM kpi_indicadores WHERE "id_Indicador"=$1 FOR UPDATE',
+        previoId.indicador_id,
+      );
       const lock=await tx.$queryRawUnsafe<Array<{id_Resultado:number}>>(
         'SELECT "id_Resultado" FROM kpi_resultados WHERE "id_Resultado"=$1 FOR UPDATE',id,
       );
