@@ -90,6 +90,14 @@ export interface Evidence {
   descripcion: string | null;
 }
 export interface Detail {
+  id_Resultado: number;
+  indicador_id: number;
+  configuracion_id: number;
+  periodo_inicio: string;
+  periodo_fin: string;
+  valor_numerico: string | number | null;
+  valor_booleano: boolean | null;
+  valor_opcion: string | null;
   indicador: string;
   area: string;
   responsable: string | null;
