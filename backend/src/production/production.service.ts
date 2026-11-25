@@ -1257,7 +1257,7 @@ export class ProductionService {
           });
       for (const c of consumos) {
         const r = reservas.find((r) => r.id === c.id)!;
-        await tx.movimientos_inventario.create({
+        const movConsumo = await tx.movimientos_inventario.create({
           data: {
             folio_Movi: `CON-${randomUUID()}`,
             clave_evento: `consumo:${lote.id_Lote_Produccion}:${r.id}`,
@@ -1270,6 +1270,45 @@ export class ProductionService {
             realizado_por: u.usuario,
           },
         });
+        // Actualizar la identidad física de los contenedores en la misma transacción.
+        // Material histórico sin identidad física permanece identificado como legado:
+        // el movimiento del lote se registra, sin inventar un contenedor de origen.
+        const fisicos = await tx.inventario_contenedores.findMany({
+          where: { lote_inventario_id: r.lote_inventario_id, ubicacion_id: r.ubicacion_id },
+          orderBy: { id: 'asc' },
+        });
+        if (fisicos.length) {
+          const sinConciliar = fisicos.some(item =>
+            item.saldo_kg.gt(0) &&
+            item.estado !== 'VERIFICADO' &&
+            !(r.lote.condicion === 'FUERA_DE_ESPECIFICACION' && item.estado === 'INCIDENCIA'));
+          if (sinConciliar) {
+            throw new ConflictException('Hay contenedores pendientes de verificar o con incidencia en el lote de consumo.');
+          }
+          const saldoContenedores = fisicos.reduce(
+            (total, item) => total.add(item.saldo_kg), new Prisma.Decimal(0));
+          if (saldoContenedores.lt(c.cantidad)) {
+            throw new ConflictException('El saldo de contenedores es menor que la cantidad consumida. Conciliar antes de procesar.');
+          }
+          let pendiente = c.cantidad;
+          for (const contenedor of fisicos) {
+            if (pendiente.lte(0)) break;
+            const tomado = Prisma.Decimal.min(contenedor.saldo_kg, pendiente);
+            if (tomado.lte(0)) continue;
+            const restante = contenedor.saldo_kg.sub(tomado);
+            await tx.inventario_contenedores.update({
+              where: { id: contenedor.id },
+              data: { saldo_kg: restante, ...(restante.isZero() ? { estado: 'AGOTADO' } : {}) },
+            });
+            await tx.contenedor_movimientos.create({
+              data: {
+                contenedor_id: contenedor.id, movimiento_inventario_id: movConsumo.id_Movi_Invent,
+                tipo: 'CONSUMO', cantidad: tomado, actor: u.usuario,
+              },
+            });
+            pendiente = pendiente.sub(tomado);
+          }
+        }
         if (consumido(r.movimientos).add(c.cantidad).eq(r.cantidad))
           await tx.inventario_reservas.update({
             where: { id: r.id },
