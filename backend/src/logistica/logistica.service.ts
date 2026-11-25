@@ -734,9 +734,14 @@ export class LogisticaService {
     this.validarPersonal(u);
     const motivo = textoSeguro(b.motivo, 'Motivo de cancelación', 4000);
     return this.prisma.$transaction(async tx => {
+      const previa = await tx.entregas_logistica.findUnique({ where: { id_Entrega: id } });
+      if (!previa) throw new NotFoundException('Entrega no encontrada.');
+      if (previa.viaje_id != null)
+        await tx.$queryRawUnsafe('SELECT id FROM viajes_logistica WHERE id=$1 FOR UPDATE', previa.viaje_id);
       await tx.$queryRawUnsafe('SELECT "id_Entrega" FROM entregas_logistica WHERE "id_Entrega"=$1 FOR UPDATE', id);
       const entrega = await tx.entregas_logistica.findUnique({ where: { id_Entrega: id } });
-      if (!entrega) throw new NotFoundException('Entrega no encontrada.');
+      if (!entrega || entrega.viaje_id !== previa.viaje_id)
+        throw new ConflictException('La entrega cambió durante la cancelación.');
       if (entrega.estado_entrega === 'CANCELADA') return { success: true, repetido: true };
       if (entrega.estado_entrega !== 'BORRADOR')
         throw new ConflictException('No es posible cancelar salidas físicas. Registra una devolución verificada.');
