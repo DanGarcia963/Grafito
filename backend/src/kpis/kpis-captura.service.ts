@@ -78,6 +78,12 @@ export class KpisCapturaService {
         throw new ConflictException('La versión de configuración del resultado existente es distinta.');
       if(existente && existente.origen !== 'MANUAL')
         throw new ConflictException('No se puede sobrescribir un dato importado o automático desde el calendario.');
+      if(existente){
+        let refAnterior:any={};
+        try { refAnterior=JSON.parse(existente.referencia_origen??'{}'); } catch {}
+        if(refAnterior?.tipo!=='CAPTURA_HISTORICA_CALENDARIO')
+          throw new ConflictException('El periodo tiene un resultado previo ajeno a esta captura histórica. Revísalo sin sobrescribirlo.');
+      }
       if(existente && !['PENDIENTE','BORRADOR'].includes(existente.estado))
         throw new ConflictException('Este periodo está en revisión, aprobado o no aplica. No puede sobrescribirse.');
       if(r.revision_esperada!==(existente?.revision_actual??0))
