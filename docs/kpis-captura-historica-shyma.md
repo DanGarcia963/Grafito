@@ -12,6 +12,7 @@
 - Si requiere evidencia, el envío a revisión exige un archivo válido PDF/PNG/JPG/XLSX hasta 8 MB; se almacena en kpi_evidencias y se enlaza a la revisión de kpi_resultado_historial.
 - Captura nueva crea revisión 1 con CREACION; corrección de un borrador crea revisión sucesiva CORRECCION, conservando historial previo y sin borrar evidencias.
 - La aprobación requiere un usuario Seguridad distinto al capturista, motivo documentado y evidencia actual si está configurada como requerida. Genera APROBACION con nueva revisión y referencia a los documentos validados; solo después el dato cuenta como oficial.
+- El revisor puede devolver un resultado EN_REVISION a BORRADOR con motivo, sin borrar captura ni evidencia. El capturista podrá corregirlo como nueva revisión y volverlo a enviar.
 
 ## Protección de integridad
 
@@ -27,6 +28,7 @@
 
 - POST /api/kpis/capturas-historicas — multipart con campos de resultado, configuración, periodo, metadatos y evidencia.
 - POST /api/kpis/resultados/:id/aprobar — JSON con motivo y revisión esperada, solo un revisor distinto al capturista.
+- POST /api/kpis/resultados/:id/devolver — devolución de revisión a borrador, con motivo y auditoría.
 - GET /api/kpis/configuraciones/:id/captura — metadatos de configuración para formulario.
 
 ## Despliegue
