@@ -25,6 +25,7 @@ export interface Cell {
   end: string;
   due: string;
   resultId: number | null;
+  historicoEditable: boolean;
   configId: number | null;
   state: string;
   approved: boolean;
