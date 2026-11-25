@@ -1834,14 +1834,31 @@ export class CalidadService {
           data: { estado_calidad_recepcion: 'CUARENTENA', liberado_en: null, liberado_por: null },
         });
       } else {
-        await tx.lotes_inventario.updateMany({
-          where: { recepcion_id: id, origen: 'RECEPCION', estado_calidad_recepcion: 'CUARENTENA' },
-          data: {
-            estado_calidad_recepcion: 'LIBERADO',
-            liberado_en: new Date(),
-            liberado_por: payload.reviso_nombre.trim(),
+        // El checklist solo aprueba el contenedor; no sustituye el dictamen inicial
+        // del laboratorio. Si falta muestra APROBADA, conserva CUARENTENA.
+        const lotes = await tx.lotes_inventario.findMany({
+          where: { recepcion_id: id, origen: 'RECEPCION' },
+          select: {
+            id: true,
+            muestras: { where: { area_Muestra: 'CALIDAD', categoria_Muestra: 'MUESTRA_INICIAL' },
+              select: { estado_Muestra: true } },
           },
         });
+        for (const lote of lotes) {
+          const dictamenInicial = lote.muestras.some(m => m.estado_Muestra === 'APROBADO');
+          await tx.lotes_inventario.update({
+            where: { id: lote.id },
+            data: dictamenInicial ? {
+              estado_calidad_recepcion: 'LIBERADO',
+              liberado_en: new Date(),
+              liberado_por: payload.reviso_nombre.trim(),
+            } : {
+              estado_calidad_recepcion: 'CUARENTENA',
+              liberado_en: null,
+              liberado_por: null,
+            },
+          });
+        }
       }
       await tx.inventario_contenedores.updateMany({
         where: { lote_inventario_id: { in: recepcion.materiales.map(m => m.id) } },
