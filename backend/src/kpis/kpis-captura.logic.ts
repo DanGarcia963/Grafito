@@ -62,7 +62,7 @@ export function periodoConfigurado(
       (m-1) % mesesPeriodo !== 0) {
     throw new BadRequestException('El periodo no coincide con el inicio de la periodicidad del indicador.');
   }
-  const finCorrecto = new Date(Date.UTC(y, m-1 + mesesPeriodo + 1, 0))
+  const finCorrecto = new Date(Date.UTC(y, m-1 + mesesPeriodo, 0))
     .toISOString().slice(0,10);
   if (end !== finCorrecto || Number(end.slice(0,4)) !== y) {
     throw new BadRequestException('El periodo no corresponde a un mes/trimestre/semestre/año completo.');
@@ -74,8 +74,10 @@ export function periodoConfigurado(
     throw new ConflictException('La configuración o el indicador no estaban vigentes durante todo el periodo.');
   }
   // Los resultados históricos son periodos completados, nunca futuros.
-  const fechaHoy = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Mexico_City',
-    year:'numeric',month:'2-digit',day:'2-digit' }).format(new Date());
+  const p = new Intl.DateTimeFormat('en-US', {timeZone:'America/Mexico_City',
+    year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const parte = (tipo: string) => p.find(x=>x.type===tipo)?.value || '';
+  const fechaHoy = parte('year')+'-'+parte('month')+'-'+parte('day');
   if (end > fechaHoy) throw new ConflictException('No se puede registrar un periodo que aún no termina.');
   return { inicio: start, fin: end,
     limite: addDays(end, Math.max(0, Math.min(365, config.dias_limite_captura))) };
