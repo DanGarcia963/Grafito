@@ -1801,7 +1801,7 @@ export class CalidadService {
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM lotes_llegada WHERE id=${id} FOR UPDATE`;
       const recepcion = await tx.lotes_llegada.findUnique({
-        where: { id }, include: { materiales: { select: { especificaciones: true } } },
+        where: { id }, include: { materiales: { select: { id: true, especificaciones: true } } },
       });
       if (!recepcion || recepcion.estado_recepcion === 'CANCELADA')
         throw new BadRequestException('Recepción no disponible');
@@ -1843,6 +1843,12 @@ export class CalidadService {
           },
         });
       }
+      await tx.inventario_contenedores.updateMany({
+        where: { lote_inventario_id: { in: recepcion.materiales.map(m => m.id) } },
+        data: tieneIncidencias
+          ? { estado: 'INCIDENCIA', verificado_en: null, verificado_por: null }
+          : { estado: 'VERIFICADO', verificado_en: new Date(), verificado_por: payload.reviso_nombre.trim() },
+      });
       return tx.lotes_llegada.update({
         where: { id },
         data: { reviso_nombre: payload.reviso_nombre.trim(), fecha_Revision: new Date(), estado_checklist: estadoChecklist },
