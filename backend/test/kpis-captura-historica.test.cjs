@@ -81,3 +81,11 @@ test('No permite revisiones inválidas ni periodos futuros',()=>{
   assert.throws(()=>validarCapturaHistorica(raw({revision_esperada:'-1'}),conf()),BadRequestException);
   assert.throws(()=>periodoConfigurado(conf(), '2099-01-01','2099-01-31',indicador),ConflictException);
 });
+
+test('Un periodo no aplicable requiere motivo y no inventa resultados',()=>{
+  assert.throws(()=>validarCapturaHistorica(raw({no_aplica:'true',justificacion_no_aplica:'corta',valor:''}),conf()),BadRequestException);
+  const resultado=validarCapturaHistorica(raw({no_aplica:'true',justificacion_no_aplica:'No hubo operación durante este periodo completo.',valor:''}),conf());
+  assert.equal(resultado.justificacion_no_aplica,'No hubo operación durante este periodo completo.');
+  assert.equal(resultado.valor_numerico,null);
+  assert.equal(resultado.evaluacion,'NO_EVALUABLE');
+});
