@@ -114,6 +114,18 @@ CREATE TABLE IF NOT EXISTS public.logistica_eventos (
 );
 CREATE INDEX IF NOT EXISTS idx_logistica_eventos_entrega ON public.logistica_eventos(entrega_id,creado_en);
 
+-- Corrección conservadora: una revisión de envase sin dictamen de la muestra
+-- inicial no libera material recibido. Solo afecta lotes sin APROBACIÓN inicial.
+UPDATE public.lotes_inventario li
+SET estado_calidad_recepcion = 'CUARENTENA', liberado_en = NULL, liberado_por = NULL
+WHERE li.origen = 'RECEPCION' AND li.estado_calidad_recepcion = 'LIBERADO'
+  AND EXISTS (SELECT 1 FROM public.muestras m
+    WHERE m.lote_inventario_id = li.id AND m."area_Muestra" = 'CALIDAD'
+      AND m."categoria_Muestra" = 'MUESTRA_INICIAL')
+  AND NOT EXISTS (SELECT 1 FROM public.muestras ma
+    WHERE ma.lote_inventario_id = li.id AND ma."area_Muestra" = 'CALIDAD'
+      AND ma."categoria_Muestra" = 'MUESTRA_INICIAL' AND ma."estado_Muestra" = 'APROBADO');
+
 -- Acceso únicamente mediante API NestJS; nunca conceder acceso Data API a nuevos registros físicos.
 REVOKE ALL ON TABLE public.inventario_contenedores, public.contenedor_movimientos,
   public.calidad_conciliaciones_legacy, public.vehiculos_logistica, public.viajes_logistica,
