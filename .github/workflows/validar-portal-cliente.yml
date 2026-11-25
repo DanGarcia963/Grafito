@@ -33,6 +33,7 @@ jobs:
       - run: node --test test/portal-graficas.test.cjs
       - run: node --test test/portal-entregas-semanales.test.cjs
       - run: node --test test/logistica.ciclo.test.cjs
+      - run: node --test test/kpis-captura-historica.test.cjs
   frontend:
     runs-on: ubuntu-latest
     defaults:
