@@ -1395,6 +1395,21 @@ export class ProductionService {
           'Libera el lote o descarga explícitamente como F.E. tras el rechazo final',
         );
       }
+      if (!fe) {
+        if (lote.estado_Calida !== 'LIBERADO') {
+          throw new BadRequestException('El producto no se puede descargar como terminado sin liberación final de Calidad.');
+        }
+        const certificado = await tx.certificado_calidad.findFirst({
+          where: {
+            lote_id: id, estatus: 'EMITIDO', estatus_Calidad: 'APROBADO',
+            documento_contenido: { not: null },
+          },
+          select: { id_Certif_Calidad: true },
+        });
+        if (!certificado) {
+          throw new ConflictException('Falta el certificado digital aprobado de Calidad. No se permite descargar producto comercial sin expediente.');
+        }
+      }
       const especificaciones = especificacionesValidas(
         b.especificaciones,
         op.productos_materiales.configuracion_operativa,
@@ -1431,7 +1446,7 @@ export class ProductionService {
           lote_produccion_id: id,
         },
       });
-      await tx.movimientos_inventario.create({
+      const entradaProduccion = await tx.movimientos_inventario.create({
         data: {
           folio_Movi: `PRO-${randomUUID()}`,
           clave_evento: `produccion:${id}`,
@@ -1443,6 +1458,27 @@ export class ProductionService {
           realizado_por: u.usuario,
         },
       });
+      // Identidad física de cada contenedor obtenido, sin duplicar kilos en el kardex.
+      if (Array.isArray(contenedores)) {
+        for (const envase of contenedores) {
+          const codigo = String(envase.codigo ?? '').trim();
+          const kg = new Prisma.Decimal(String(envase.peso_kg));
+          const item = await tx.inventario_contenedores.create({
+            data: {
+              lote_inventario_id: material.id, codigo, peso_inicial_kg: kg,
+              saldo_kg: kg, ubicacion_id: ubicacion, estado: fe ? 'INCIDENCIA' : 'VERIFICADO',
+              verificado_por: fe ? null : u.usuario,
+              verificado_en: fe ? null : new Date(),
+            },
+          });
+          await tx.contenedor_movimientos.create({
+            data: {
+              contenedor_id: item.id, movimiento_inventario_id: entradaProduccion.id_Movi_Invent,
+              tipo: 'PRODUCCION', cantidad: kg, actor: u.usuario,
+            },
+          });
+        }
+      }
       await tx.lotes_produccion.update({
         where: { id_Lote_Produccion: id },
         data: {
@@ -1631,7 +1667,7 @@ export class ProductionService {
             estado_calidad_recepcion: 'CUARENTENA',
           },
         });
-        await tx.movimientos_inventario.create({
+        const movEntrada = await tx.movimientos_inventario.create({
           data: {
             folio_Movi: `REC-${randomUUID()}`,
             clave_evento: esGrafitoPorPrensa
@@ -1644,6 +1680,26 @@ export class ProductionService {
             realizado_por: u.usuario,
           },
         });
+        // Recepción: contenedores físicos en espera de checklist y aprobación.
+        const detalles = (grupo.especificaciones as any)?.contenedores;
+        if (Array.isArray(detalles)) {
+          for (const envase of detalles) {
+            const kg = new Prisma.Decimal(String(envase.peso_kg));
+            const item = await tx.inventario_contenedores.create({
+              data: {
+                lote_inventario_id: lote.id, codigo: String(envase.codigo),
+                peso_inicial_kg: kg, saldo_kg: kg, ubicacion_id: ubicacion,
+                estado: 'POR_VERIFICAR',
+              },
+            });
+            await tx.contenedor_movimientos.create({
+              data: {
+                contenedor_id: item.id, movimiento_inventario_id: movEntrada.id_Movi_Invent,
+                tipo: 'RECEPCION', cantidad: kg, actor: u.usuario,
+              },
+            });
+          }
+        }
         const muestra = await tx.muestras.create({
           data: {
             no_Muestra: esGrafitoPorPrensa
