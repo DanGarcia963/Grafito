@@ -160,6 +160,50 @@ export class KpisCapturaService {
     },{timeout:20000});
   }
 
+  async devolver(id:number, body:Record<string,unknown>, user:Usuario) {
+    if(user.area!=='seguridad')throw new ForbiddenException('Solo SHyMA puede devolver mediciones.');
+    if(!Number.isSafeInteger(id)||id<=0)throw new BadRequestException('Resultado inválido.');
+    const motivo=String(body.motivo??'').trim();
+    const esperado=Number(body.revision_esperada);
+    if(motivo.length<10||motivo.length>2000||!Number.isSafeInteger(esperado)||esperado<=0)
+      throw new BadRequestException('Justifica la devolución e indica la revisión actual.');
+    return this.prisma.$transaction(async tx=>{
+      const previo=await tx.kpi_resultados.findUnique({
+        where:{id_Resultado:id},select:{indicador_id:true},
+      });
+      if(!previo)throw new NotFoundException('Resultado no encontrado.');
+      await tx.$queryRawUnsafe(
+        'SELECT "id_Indicador" FROM kpi_indicadores WHERE "id_Indicador"=$1 FOR UPDATE',previo.indicador_id,
+      );
+      await tx.$queryRawUnsafe('SELECT "id_Resultado" FROM kpi_resultados WHERE "id_Resultado"=$1 FOR UPDATE',id);
+      const resultado=await tx.kpi_resultados.findUnique({where:{id_Resultado:id}});
+      if(!resultado||resultado.revision_actual!==esperado||resultado.estado!=='EN_REVISION')
+        throw new ConflictException('La medición cambió o no está pendiente de revisión.');
+      let referencia:any={};
+      try { referencia=JSON.parse(resultado.referencia_origen??'{}'); } catch {}
+      if(resultado.origen!=='MANUAL'||referencia?.tipo!=='CAPTURA_HISTORICA_CALENDARIO')
+        throw new ConflictException('Solo se devuelven históricos registrados desde este calendario.');
+      if(resultado.capturado_por===user.usuario)
+        throw new ForbiddenException('El capturista no puede revisar su propio registro.');
+      const now=new Date(),revision=resultado.revision_actual+1;
+      await tx.kpi_resultados.update({
+        where:{id_Resultado:id},
+        data:{estado:'BORRADOR',revision_actual:revision,
+          revisado_por:null,revisado_en:null,actualizado_en:now},
+      });
+      await tx.kpi_resultado_historial.create({
+        data:{
+          resultado_id:id,revision,accion:'CORRECCION',realizado_por:user.usuario,
+          realizado_en:now,motivo:'DEVOLUCION DE REVISION: '+motivo,
+          datos_revision:JSON.stringify({estado:'BORRADOR',motivo,
+            revision_observada:esperado,devuelto_por:user.usuario,
+            observacion:'Documento y valores históricos conservados para corregir; requiere nueva captura.'}),
+        },
+      });
+      return {success:true,id,revision,estado:'BORRADOR'};
+    },{timeout:20000});
+  }
+
   async aprobar(id:number, body:Record<string,unknown>, user:Usuario) {
     if(user.area!=='seguridad')throw new ForbiddenException('Solo SHyMA puede revisar indicadores.');
     if(!Number.isSafeInteger(id)||id<=0)throw new BadRequestException('Resultado inválido.');
