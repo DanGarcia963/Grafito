@@ -426,3 +426,95 @@
     position: static;
   }
 }
+
+
+/* Captura histórica por periodo: solo visible fuera de modo presentación */
+.kpi-cell-editable {
+  border: 1px solid #6fae9d;
+  background: #f2faf6;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.kpi-cell-editable:hover,
+.kpi-cell-editable:focus-visible {
+  border-color: #13735c;
+  background: #e7f6ee;
+  box-shadow: 0 0 0 2px #ccead9;
+}
+.kpi-edit-label {
+  margin-top: 9px !important;
+  display: inline-block !important;
+  font-size: 11px;
+  font-weight: 700 !important;
+  color: #11634d;
+}
+.kpi-captura {
+  max-height: calc(90vh - 75px);
+  overflow-y: auto;
+}
+.kpi-capture-summary {
+  border: 1px solid #cbded6;
+  border-radius: 12px;
+  background: #f1f9f4;
+  padding: 15px;
+  margin-bottom: 20px;
+}
+.kpi-capture-summary strong { color: #124c3c; }
+.kpi-capture-summary p { font-size: 12px; margin-top: 5px; }
+.kpi-capture-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.kpi-capture-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.kpi-capture-form textarea,
+.kpi-capture-form select {
+  font: inherit;
+  width: 100%;
+  background: #fff;
+  color: #172c3d;
+  border: 1px solid #bbcbd5;
+  border-radius: 8px;
+  padding: 10px;
+}
+.kpi-capture-form textarea { min-height: 75px; resize: vertical; }
+.kpi-capture-form label small { font-weight: 400; color: #526878; line-height: 1.5; }
+.kpi-capture-fields {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 16px;
+}
+.kpi-capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid #e1e8e6;
+  padding: 14px 0 3px;
+}
+.kpi-approval-tools {
+  margin: 15px 0;
+  padding: 14px;
+  border: 1px solid #b7d9c2;
+  background: #f2faf6;
+  border-radius: 10px;
+}
+.kpi-presentation .kpi-cell-editable { border-color: inherit; background: inherit; }
+@media(max-width:640px) {
+  .kpi-capture-fields { grid-template-columns: 1fr; }
+  .kpi-capture-actions .kpi-button { flex: 1; text-align: center; }
+}
+@media print {
+  .kpi-capture-actions, .kpi-edit-label { display: none !important; }
+}
+
+.kpi-capture-na { flex-direction: row !important; align-items: center; gap: 10px; background: #fffbeb; padding: 11px; border: 1px solid #ecd9a8; border-radius: 9px; }
+.kpi-capture-na input[type="checkbox"] { width: 18px; height: 18px; min-width: 18px; min-height: 18px; accent-color: #13735c; }
