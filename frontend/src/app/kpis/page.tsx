@@ -774,7 +774,7 @@ export default function KpisPage() {
                               );
                               const editable =
                                 !presentation && !!c?.valid && !!c.configId &&
-                                c.end <= localToday() &&
+                                c.end < localToday() &&
                                 (!c.resultId ||
                                   (c.historicoEditable &&
                                     (c.state === "PENDIENTE" || c.state === "BORRADOR")));
