@@ -2,6 +2,10 @@ import { AuthGuard } from '../auth/auth.guard';
 import {
   BadRequestException,
   Controller,
+  Body,
+  Post,
+  UploadedFile,
+  UseInterceptors,
   Get,
   Header,
   Param,
@@ -12,6 +16,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { KpisService } from "./kpis.service";
+import { KpisCapturaService } from "./kpis-captura.service";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { parseFilters } from "./kpis.logic";
 import type { Row } from "./kpis.logic";
 import { KpisAccessGuard } from "./kpis-access.guard";
@@ -19,7 +25,7 @@ import type { KpiRequest } from "./kpis-access.guard";
 @Controller("api/kpis")
 @UseGuards(AuthGuard, KpisAccessGuard)
 export class KpisController {
-  constructor(private readonly service: KpisService) {}
+  constructor(private readonly service: KpisService, private readonly captura: KpisCapturaService) {}
   @Get("catalogos")
   @Header("Cache-Control", "private, no-store")
   catalog(@Req() req: KpiRequest) {
@@ -38,6 +44,51 @@ export class KpisController {
     }
     return this.service.dashboard(filters, req.kpiScope);
   }
+  @Post("capturas-historicas")
+  @Header("Cache-Control", "private, no-store")
+  @UseInterceptors(FileInterceptor("evidencia", {
+    limits: { files: 1, fileSize: 8 * 1024 * 1024 },
+  }))
+  capturarHistorico(
+    @Req() req: KpiRequest,
+    @Body() body: Record<string, unknown>,
+    @UploadedFile() archivo: Express.Multer.File | undefined,
+  ) {
+    if (!req.usuario) throw new BadRequestException("La sesión expiró.");
+    return this.captura.capturar(body, archivo, req.usuario);
+  }
+
+  @Post("resultados/:id/aprobar")
+  @Header("Cache-Control", "private, no-store")
+  aprobarHistorico(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() req: KpiRequest,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (!req.usuario) throw new BadRequestException("La sesión expiró.");
+    return this.captura.aprobar(id, body, req.usuario);
+  }
+
+  @Post("resultados/:id/devolver")
+  @Header("Cache-Control", "private, no-store")
+  devolverHistorico(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() req: KpiRequest,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (!req.usuario) throw new BadRequestException("La sesión expiró.");
+    return this.captura.devolver(id, body, req.usuario);
+  }
+
+  @Get("configuraciones/:id/captura")
+  @Header("Cache-Control", "private, no-store")
+  configuracionCaptura(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() req: KpiRequest,
+  ) {
+    return this.service.configuracionCaptura(id, req.kpiScope);
+  }
+
   @Get("resultados/:id")
   @Header("Cache-Control", "private, no-store")
   detail(@Param("id", ParseIntPipe) id: number, @Req() req: KpiRequest) {
