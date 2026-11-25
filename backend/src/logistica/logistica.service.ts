@@ -352,14 +352,19 @@ export class LogisticaService {
     const ids: number[] = b.contenedor_ids.map((v: unknown) => idSeguro(v, 'Contenedor'));
     if (new Set(ids).size !== ids.length) throw new BadRequestException('No repitas contenedores.');
     return this.prisma.$transaction(async tx => {
+      // Bloquear siempre primero viaje, luego entrega, luego OV y lotes.
+      // Así despachar/cargar/preparar no pueden quedar en espera circular.
+      const previa = await tx.entregas_logistica.findUnique({ where: { id_Entrega: id } });
+      if (!previa?.viaje_id) throw new BadRequestException('Entrega sin viaje.');
+      await tx.$queryRawUnsafe('SELECT id FROM viajes_logistica WHERE id=$1 FOR UPDATE', previa.viaje_id);
       await tx.$queryRawUnsafe('SELECT "id_Entrega" FROM entregas_logistica WHERE "id_Entrega"=$1 FOR UPDATE', id);
       const entrega = await tx.entregas_logistica.findUnique({ where: { id_Entrega: id } });
-      if (!entrega || entrega.estado_entrega !== 'BORRADOR' || entrega.viaje_id == null) {
+      if (!entrega || entrega.estado_entrega !== 'BORRADOR' || entrega.viaje_id !== previa.viaje_id) {
         throw new BadRequestException('Entrega no disponible para preparación.');
       }
-      const { viaje, vehiculo } = await this.viajeConVehiculo(tx, entrega.viaje_id);
-      await tx.$queryRawUnsafe('SELECT id FROM viajes_logistica WHERE id=$1 FOR UPDATE', viaje.id);
+      const { viaje, vehiculo } = await this.viajeConVehiculo(tx, previa.viaje_id);
       if (viaje.estado !== 'PROGRAMADO') throw new ConflictException('Viaje ya cargado o despachado.');
+      await tx.$queryRawUnsafe('SELECT id FROM crm_ordenes_venta WHERE id=$1 FOR UPDATE', entrega.orden_venta_id);
       if (await tx.entrega_materiales.count({ where: { entrega_id: id } }))
         throw new ConflictException('La entrega ya tiene carga asignada; cancela y crea otra para cambiarla.');
       const ov = await tx.crm_ordenes_venta.findUnique({ where: { id: entrega.orden_venta_id } });
