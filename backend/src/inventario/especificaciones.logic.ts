@@ -148,6 +148,7 @@ export function aptitudMaterial(l: {
   estado_calidad_recepcion: string | null;
   recepcion?: { estado_checklist: string } | null;
   lote_produccion?: { estado_Calida: string } | null;
+  muestras?: Array<{ categoria_Muestra: string; estado_Muestra: string }>;
 }) {
   const calidad =
     l.origen === 'PRODUCCION'
@@ -161,8 +162,14 @@ export function aptitudMaterial(l: {
     calidad === 'LIBERADO' &&
     !['SUCIO', 'FUERA_DE_ESPECIFICACION', 'RESIDUO'].includes(l.condicion);
   const rechazado = ['RECHAZADO', 'BLOQUEADO'].includes(calidad ?? '');
+  // Una muestra inicial existente y todavía pendiente no autoriza a consumir
+  // el lote recibido. El archivo histórico sin muestra permanece sujeto a
+  // conciliación física y al resto de restricciones.
+  const iniciales = l.muestras?.filter(m => m.categoria_Muestra === 'MUESTRA_INICIAL') ?? [];
+  const faltaDictamenInicial = l.origen === 'RECEPCION' && iniciales.length > 0 &&
+    !iniciales.some(m => m.estado_Muestra === 'APROBADO');
   const materiaPorRegenerar =
-    l.condicion === 'SUCIO' && !rechazado && checklistRecepcionAprobado;
+    l.condicion === 'SUCIO' && !rechazado && checklistRecepcionAprobado && !faltaDictamenInicial;
   const fueraDeEspecificacion =
     l.condicion === 'FUERA_DE_ESPECIFICACION' &&
     ['RECHAZADO', 'FUERA_DE_ESPECIFICACION'].includes(calidad ?? '') &&

@@ -32,6 +32,7 @@ jobs:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       - run: node --test test/portal-graficas.test.cjs
       - run: node --test test/portal-entregas-semanales.test.cjs
+      - run: node --test test/logistica.ciclo.test.cjs
   frontend:
     runs-on: ubuntu-latest
     defaults:

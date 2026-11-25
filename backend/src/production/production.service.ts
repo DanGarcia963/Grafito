@@ -108,6 +108,14 @@ export class ProductionService {
       orderBy: { id: 'desc' },
       take: 500,
     });
+    const idReservas = [...new Set(ordenesOrdenadas.flatMap(o =>
+      o.reservas_material.map(r => r.lote_inventario_id)))];
+    const contenedoresFisicos = idReservas.length
+      ? await this.prisma.inventario_contenedores.findMany({
+          where: { lote_inventario_id: { in: idReservas }, saldo_kg: { gt: 0 } },
+          orderBy: { id: 'asc' },
+        })
+      : [];
     return {
       success: true,
       result: ordenesOrdenadas.map((o) => ({
@@ -115,6 +123,9 @@ export class ProductionService {
         reservas_material: o.reservas_material.map((r) => ({
           ...r,
           pendiente: r.cantidad.sub(consumido(r.movimientos)),
+          contenedores_fisicos: contenedoresFisicos.filter(x =>
+            x.lote_inventario_id === r.lote_inventario_id &&
+            x.ubicacion_id === r.ubicacion_id),
         })),
         lotes_produccion: o.lotes_produccion.map((l) => {
           const cantidad_cargada =
@@ -1168,11 +1179,16 @@ export class ProductionService {
         throw new BadRequestException(
           'Selecciona materiales reservados para este lote',
         );
-      const consumos: { id: number; cantidad: Prisma.Decimal }[] =
-        b.consumos.map((c: any) => ({
-          id: idValido(c.reserva_id),
-          cantidad: decimalCrm(c.cantidad, 4),
-        }));
+      const consumos: {
+        id: number; cantidad: Prisma.Decimal;
+        contenedores: Array<{ id: number; cantidad: Prisma.Decimal }>;
+      }[] = b.consumos.map((c: any) => ({
+        id: idValido(c.reserva_id),
+        cantidad: decimalCrm(c.cantidad, 4),
+        contenedores: Array.isArray(c.contenedores) ? c.contenedores.map((x:any) => ({
+          id: idValido(x.id), cantidad: decimalCrm(x.cantidad, 4),
+        })) : [],
+      }));
       if (new Set(consumos.map((c) => c.id)).size !== consumos.length)
         throw new BadRequestException('Reserva duplicada');
       let reservas = await tx.inventario_reservas.findMany({
@@ -1185,6 +1201,8 @@ export class ProductionService {
             include: {
               lote_produccion: true,
               recepcion: { select: { estado_checklist: true } },
+              muestras: { where: { area_Muestra: 'CALIDAD', categoria_Muestra: 'MUESTRA_INICIAL' },
+                select: { categoria_Muestra: true, estado_Muestra: true } },
             },
           },
           movimientos: { include: { reversion: true } },
@@ -1206,6 +1224,8 @@ export class ProductionService {
             include: {
               lote_produccion: true,
               recepcion: { select: { estado_checklist: true } },
+              muestras: { where: { area_Muestra: 'CALIDAD', categoria_Muestra: 'MUESTRA_INICIAL' },
+                select: { categoria_Muestra: true, estado_Muestra: true } },
             },
           },
           movimientos: { include: { reversion: true } },
@@ -1257,7 +1277,7 @@ export class ProductionService {
           });
       for (const c of consumos) {
         const r = reservas.find((r) => r.id === c.id)!;
-        await tx.movimientos_inventario.create({
+        const movConsumo = await tx.movimientos_inventario.create({
           data: {
             folio_Movi: `CON-${randomUUID()}`,
             clave_evento: `consumo:${lote.id_Lote_Produccion}:${r.id}`,
@@ -1270,6 +1290,42 @@ export class ProductionService {
             realizado_por: u.usuario,
           },
         });
+        // Los contenedores físicos rastreados requieren selección EXPLÍCITA
+        // para evitar atribuir un consumo FIFO como si fuera un conteo real.
+        const fisicos = await tx.inventario_contenedores.findMany({
+          where: { lote_inventario_id: r.lote_inventario_id, ubicacion_id: r.ubicacion_id },
+          orderBy: { id: 'asc' },
+        });
+        if (fisicos.length) {
+          if (!c.contenedores.length || new Set(c.contenedores.map(x => x.id)).size !== c.contenedores.length) {
+            throw new BadRequestException('Selecciona explícitamente los contenedores físicos que cargarás en el tanque.');
+          }
+          const suma = c.contenedores.reduce((t,x) => t.add(x.cantidad), new Prisma.Decimal(0));
+          if (!suma.eq(c.cantidad)) throw new ConflictException('La suma de contenedores no coincide con la cantidad cargada.');
+          for (const elegido of [...c.contenedores].sort((a,b)=>a.id-b.id)) {
+            await tx.$queryRawUnsafe('SELECT id FROM inventario_contenedores WHERE id=$1 FOR UPDATE', elegido.id);
+            const item = await tx.inventario_contenedores.findUnique({ where: { id: elegido.id } });
+            if (!item || item.lote_inventario_id !== r.lote_inventario_id ||
+                item.ubicacion_id !== r.ubicacion_id || item.saldo_kg.lt(elegido.cantidad) ||
+                (item.estado !== 'VERIFICADO' &&
+                  !(r.lote.condicion === 'FUERA_DE_ESPECIFICACION' && item.estado === 'INCIDENCIA'))) {
+              throw new ConflictException('Contenedor no disponible o incompatible con la reserva.');
+            }
+            const restante = item.saldo_kg.sub(elegido.cantidad);
+            await tx.inventario_contenedores.update({
+              where: { id: item.id },
+              data: { saldo_kg: restante, ...(restante.isZero()?{ estado: 'AGOTADO' }:{}) },
+            });
+            await tx.contenedor_movimientos.create({
+              data: {
+                contenedor_id: item.id, movimiento_inventario_id: movConsumo.id_Movi_Invent,
+                tipo: 'CONSUMO', cantidad: elegido.cantidad, actor: u.usuario,
+              },
+            });
+          }
+        } else if (c.contenedores.length) {
+          throw new BadRequestException('La reserva es histórica y no tiene contenedores individualizados.');
+        }
         if (consumido(r.movimientos).add(c.cantidad).eq(r.cantidad))
           await tx.inventario_reservas.update({
             where: { id: r.id },
@@ -1395,6 +1451,21 @@ export class ProductionService {
           'Libera el lote o descarga explícitamente como F.E. tras el rechazo final',
         );
       }
+      if (!fe && op.linea_Produccion?.trim().toUpperCase() === 'GRAFITO') {
+        if (lote.estado_Calida !== 'LIBERADO') {
+          throw new BadRequestException('El producto no se puede descargar como terminado sin liberación final de Calidad.');
+        }
+        const certificado = await tx.certificado_calidad.findFirst({
+          where: {
+            lote_id: id, estatus: 'EMITIDO', estatus_Calidad: 'APROBADO',
+            documento_contenido: { not: null },
+          },
+          select: { id_Certif_Calidad: true },
+        });
+        if (!certificado) {
+          throw new ConflictException('Falta el certificado digital aprobado de Calidad. No se permite descargar producto comercial sin expediente.');
+        }
+      }
       const especificaciones = especificacionesValidas(
         b.especificaciones,
         op.productos_materiales.configuracion_operativa,
@@ -1431,7 +1502,7 @@ export class ProductionService {
           lote_produccion_id: id,
         },
       });
-      await tx.movimientos_inventario.create({
+      const entradaProduccion = await tx.movimientos_inventario.create({
         data: {
           folio_Movi: `PRO-${randomUUID()}`,
           clave_evento: `produccion:${id}`,
@@ -1443,6 +1514,28 @@ export class ProductionService {
           realizado_por: u.usuario,
         },
       });
+      // Identidad física de cada contenedor obtenido, sin duplicar kilos en el kardex.
+      if (op.linea_Produccion?.trim().toUpperCase() === 'GRAFITO' &&
+          op.unidad === 'Kilogramos' && Array.isArray(contenedores)) {
+        for (const envase of contenedores) {
+          const codigo = String(envase.codigo ?? '').trim();
+          const kg = new Prisma.Decimal(String(envase.peso_kg));
+          const item = await tx.inventario_contenedores.create({
+            data: {
+              lote_inventario_id: material.id, codigo, peso_inicial_kg: kg,
+              saldo_kg: kg, ubicacion_id: ubicacion, estado: fe ? 'INCIDENCIA' : 'VERIFICADO',
+              verificado_por: fe ? null : u.usuario,
+              verificado_en: fe ? null : new Date(),
+            },
+          });
+          await tx.contenedor_movimientos.create({
+            data: {
+              contenedor_id: item.id, movimiento_inventario_id: entradaProduccion.id_Movi_Invent,
+              tipo: 'PRODUCCION', cantidad: kg, actor: u.usuario,
+            },
+          });
+        }
+      }
       await tx.lotes_produccion.update({
         where: { id_Lote_Produccion: id },
         data: {
@@ -1631,7 +1724,7 @@ export class ProductionService {
             estado_calidad_recepcion: 'CUARENTENA',
           },
         });
-        await tx.movimientos_inventario.create({
+        const movEntrada = await tx.movimientos_inventario.create({
           data: {
             folio_Movi: `REC-${randomUUID()}`,
             clave_evento: esGrafitoPorPrensa
@@ -1644,6 +1737,26 @@ export class ProductionService {
             realizado_por: u.usuario,
           },
         });
+        // Recepción: contenedores físicos en espera de checklist y aprobación.
+        const detalles = (grupo.especificaciones as any)?.contenedores;
+        if (producto.UM === 'Kilogramos' && Array.isArray(detalles)) {
+          for (const envase of detalles) {
+            const kg = new Prisma.Decimal(String(envase.peso_kg));
+            const item = await tx.inventario_contenedores.create({
+              data: {
+                lote_inventario_id: lote.id, codigo: String(envase.codigo),
+                peso_inicial_kg: kg, saldo_kg: kg, ubicacion_id: ubicacion,
+                estado: 'POR_VERIFICAR',
+              },
+            });
+            await tx.contenedor_movimientos.create({
+              data: {
+                contenedor_id: item.id, movimiento_inventario_id: movEntrada.id_Movi_Invent,
+                tipo: 'RECEPCION', cantidad: kg, actor: u.usuario,
+              },
+            });
+          }
+        }
         const muestra = await tx.muestras.create({
           data: {
             no_Muestra: esGrafitoPorPrensa

@@ -1291,10 +1291,20 @@ export default function TanquesPage() {
                       ...b,
                       orden_produccion_id: d.id_Orden_Produc,
                       consumos: d.reservas_material
-                        .map((r: any) => ({
-                          reserva_id: r.id,
-                          cantidad: b[`reserva-${r.id}`],
-                        }))
+                        .map((r: any) => {
+                          const fisicos = Array.isArray(r.contenedores_fisicos) ? r.contenedores_fisicos : [];
+                          const elegidos = fisicos.map((envase: any) => ({
+                            id: envase.id,
+                            cantidad: b["envase-" + r.id + "-" + envase.id],
+                          })).filter((x: any) => Number(x.cantidad) > 0);
+                          return {
+                            reserva_id: r.id,
+                            cantidad: fisicos.length
+                              ? elegidos.reduce((s: number, x: any) => s + Number(x.cantidad), 0).toFixed(4)
+                              : b["reserva-" + r.id],
+                            contenedores: elegidos,
+                          };
+                        })
                         .filter((r: any) => Number(r.cantidad) > 0),
                     });
                 });
@@ -1698,15 +1708,44 @@ export default function TanquesPage() {
                         <label key={r.id}>
                           {r.lote.folio} · {r.lote.producto.nombre_Producto} ·
                           disponible {r.pendiente} {r.lote.unidad}
-                          <input
-                            className={input}
-                            name={`reserva-${r.id}`}
-                            type="number"
-                            min="0"
-                            max={r.pendiente}
-                            step="0.0001"
-                            defaultValue="0"
-                          />
+                          {Array.isArray(r.contenedores_fisicos) && r.contenedores_fisicos.length ? (
+                            <div className="mt-2 space-y-2 rounded-xl border border-emerald-700/50 bg-slate-900/40 p-3">
+                              <p className="text-xs text-emerald-300">
+                                Selecciona contenedores físicos y sus kilos. La suma se descuenta al cargar el tanque.
+                              </p>
+                              {r.contenedores_fisicos.map((envase: any) => (
+                                <label key={envase.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                  <span>{envase.codigo} · saldo {envase.saldo_kg} kg · {envase.estado}</span>
+                                  <input
+                                    className={input + " w-32"}
+                                    aria-label={"Kilogramos del contenedor " + envase.codigo}
+                                    name={"envase-" + r.id + "-" + envase.id}
+                                    type="number"
+                                    min="0"
+                                    max={Math.min(Number(r.pendiente), Number(envase.saldo_kg))}
+                                    step="0.0001"
+                                    defaultValue="0"
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <>
+                              <input
+                                className={input}
+                                name={"reserva-" + r.id}
+                                type="number"
+                                min="0"
+                                max={r.pendiente}
+                                step="0.0001"
+                                defaultValue="0"
+                              />
+                              <p className="mt-1 text-xs text-amber-300">
+                                Lote histórico sin contenedores individualizados.
+                                Conciliar físicamente en Almacén para identificar cada consumo.
+                              </p>
+                            </>
+                          )}
                         </label>
                       ))}
                   </>
