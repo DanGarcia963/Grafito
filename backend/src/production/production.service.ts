@@ -108,6 +108,14 @@ export class ProductionService {
       orderBy: { id: 'desc' },
       take: 500,
     });
+    const idReservas = [...new Set(ordenesOrdenadas.flatMap(o =>
+      o.reservas_material.map(r => r.lote_inventario_id)))];
+    const contenedoresFisicos = idReservas.length
+      ? await this.prisma.inventario_contenedores.findMany({
+          where: { lote_inventario_id: { in: idReservas }, saldo_kg: { gt: 0 } },
+          orderBy: { id: 'asc' },
+        })
+      : [];
     return {
       success: true,
       result: ordenesOrdenadas.map((o) => ({
@@ -115,6 +123,9 @@ export class ProductionService {
         reservas_material: o.reservas_material.map((r) => ({
           ...r,
           pendiente: r.cantidad.sub(consumido(r.movimientos)),
+          contenedores_fisicos: contenedoresFisicos.filter(x =>
+            x.lote_inventario_id === r.lote_inventario_id &&
+            x.ubicacion_id === r.ubicacion_id),
         })),
         lotes_produccion: o.lotes_produccion.map((l) => {
           const cantidad_cargada =
@@ -1168,11 +1179,16 @@ export class ProductionService {
         throw new BadRequestException(
           'Selecciona materiales reservados para este lote',
         );
-      const consumos: { id: number; cantidad: Prisma.Decimal }[] =
-        b.consumos.map((c: any) => ({
-          id: idValido(c.reserva_id),
-          cantidad: decimalCrm(c.cantidad, 4),
-        }));
+      const consumos: {
+        id: number; cantidad: Prisma.Decimal;
+        contenedores: Array<{ id: number; cantidad: Prisma.Decimal }>;
+      }[] = b.consumos.map((c: any) => ({
+        id: idValido(c.reserva_id),
+        cantidad: decimalCrm(c.cantidad, 4),
+        contenedores: Array.isArray(c.contenedores) ? c.contenedores.map((x:any) => ({
+          id: idValido(x.id), cantidad: decimalCrm(x.cantidad, 4),
+        })) : [],
+      }));
       if (new Set(consumos.map((c) => c.id)).size !== consumos.length)
         throw new BadRequestException('Reserva duplicada');
       let reservas = await tx.inventario_reservas.findMany({
@@ -1270,44 +1286,41 @@ export class ProductionService {
             realizado_por: u.usuario,
           },
         });
-        // Actualizar la identidad física de los contenedores en la misma transacción.
-        // Material histórico sin identidad física permanece identificado como legado:
-        // el movimiento del lote se registra, sin inventar un contenedor de origen.
+        // Los contenedores físicos rastreados requieren selección EXPLÍCITA
+        // para evitar atribuir un consumo FIFO como si fuera un conteo real.
         const fisicos = await tx.inventario_contenedores.findMany({
           where: { lote_inventario_id: r.lote_inventario_id, ubicacion_id: r.ubicacion_id },
           orderBy: { id: 'asc' },
         });
         if (fisicos.length) {
-          const sinConciliar = fisicos.some(item =>
-            item.saldo_kg.gt(0) &&
-            item.estado !== 'VERIFICADO' &&
-            !(r.lote.condicion === 'FUERA_DE_ESPECIFICACION' && item.estado === 'INCIDENCIA'));
-          if (sinConciliar) {
-            throw new ConflictException('Hay contenedores pendientes de verificar o con incidencia en el lote de consumo.');
+          if (!c.contenedores.length || new Set(c.contenedores.map(x => x.id)).size !== c.contenedores.length) {
+            throw new BadRequestException('Selecciona explícitamente los contenedores físicos que cargarás en el tanque.');
           }
-          const saldoContenedores = fisicos.reduce(
-            (total, item) => total.add(item.saldo_kg), new Prisma.Decimal(0));
-          if (saldoContenedores.lt(c.cantidad)) {
-            throw new ConflictException('El saldo de contenedores es menor que la cantidad consumida. Conciliar antes de procesar.');
-          }
-          let pendiente = c.cantidad;
-          for (const contenedor of fisicos) {
-            if (pendiente.lte(0)) break;
-            const tomado = Prisma.Decimal.min(contenedor.saldo_kg, pendiente);
-            if (tomado.lte(0)) continue;
-            const restante = contenedor.saldo_kg.sub(tomado);
+          const suma = c.contenedores.reduce((t,x) => t.add(x.cantidad), new Prisma.Decimal(0));
+          if (!suma.eq(c.cantidad)) throw new ConflictException('La suma de contenedores no coincide con la cantidad cargada.');
+          for (const elegido of [...c.contenedores].sort((a,b)=>a.id-b.id)) {
+            await tx.$queryRawUnsafe('SELECT id FROM inventario_contenedores WHERE id=$1 FOR UPDATE', elegido.id);
+            const item = await tx.inventario_contenedores.findUnique({ where: { id: elegido.id } });
+            if (!item || item.lote_inventario_id !== r.lote_inventario_id ||
+                item.ubicacion_id !== r.ubicacion_id || item.saldo_kg.lt(elegido.cantidad) ||
+                (item.estado !== 'VERIFICADO' &&
+                  !(r.lote.condicion === 'FUERA_DE_ESPECIFICACION' && item.estado === 'INCIDENCIA'))) {
+              throw new ConflictException('Contenedor no disponible o incompatible con la reserva.');
+            }
+            const restante = item.saldo_kg.sub(elegido.cantidad);
             await tx.inventario_contenedores.update({
-              where: { id: contenedor.id },
-              data: { saldo_kg: restante, ...(restante.isZero() ? { estado: 'AGOTADO' } : {}) },
+              where: { id: item.id },
+              data: { saldo_kg: restante, ...(restante.isZero()?{ estado: 'AGOTADO' }:{}) },
             });
             await tx.contenedor_movimientos.create({
               data: {
-                contenedor_id: contenedor.id, movimiento_inventario_id: movConsumo.id_Movi_Invent,
-                tipo: 'CONSUMO', cantidad: tomado, actor: u.usuario,
+                contenedor_id: item.id, movimiento_inventario_id: movConsumo.id_Movi_Invent,
+                tipo: 'CONSUMO', cantidad: elegido.cantidad, actor: u.usuario,
               },
             });
-            pendiente = pendiente.sub(tomado);
           }
+        } else if (c.contenedores.length) {
+          throw new BadRequestException('La reserva es histórica y no tiene contenedores individualizados.');
         }
         if (consumido(r.movimientos).add(c.cantidad).eq(r.cantidad))
           await tx.inventario_reservas.update({
