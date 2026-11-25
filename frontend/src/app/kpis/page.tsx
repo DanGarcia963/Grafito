@@ -1042,7 +1042,7 @@ export default function KpisPage() {
                   {detail.revision_actual}
                 </p>
                 <h2>{detail.indicador}</h2>
-                {detail.estado !== "APROBADO" && (
+                {detail.estado !== "APROBADO" && detail.estado !== "NO_APLICA" && (
                   <p className="kpi-alert amber">
                     Este registro no está aprobado. El detalle permite revisar
                     su origen, pero no forma parte del cumplimiento oficial.
@@ -1059,6 +1059,7 @@ export default function KpisPage() {
                     ["Revisó", detail.revisado_por],
                     ["Fecha de revisión", detail.revisado_en],
                     ["Observaciones", detail.observaciones],
+                    ["Justificación no aplica", detail.justificacion_no_aplica],
                     ["Análisis", detail.analisis],
                     ["Acciones propuestas", detail.acciones_propuestas],
                   ].map(([k, v]) => (
