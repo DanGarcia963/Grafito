@@ -87,6 +87,19 @@ export class CalidadService {
     };
   }
 
+  async obtenerEvidenciaHistorica(id: number) {
+    const documento = await this.prisma.calidad_conciliaciones_legacy.findUnique({
+      where: { lote_produccion_id: id },
+      select: { documento_nombre: true, documento_contenido: true },
+    });
+    if (!documento?.documento_contenido?.length)
+      throw new NotFoundException('No se ha cargado evidencia documental para este lote.');
+    return {
+      nombre: documento.documento_nombre ?? 'conciliacion.pdf',
+      buffer: Buffer.from(documento.documento_contenido),
+    };
+  }
+
   async resolverConciliacionHistorica(
     id: number, body: Record<string, unknown>,
     documento: Express.Multer.File | undefined,
