@@ -33,6 +33,7 @@ export type RegistroHistorico = {
   observaciones: string | null;
   analisis: string | null;
   acciones_propuestas: string | null;
+  justificacion_no_aplica: string | null;
   motivo: string;
   estado: 'BORRADOR' | 'EN_REVISION';
   revision_esperada: number;
@@ -133,9 +134,15 @@ export function validarCapturaHistorica(
   const analisis=campo(raw.analisis,5000);
   const acciones=campo(raw.acciones_propuestas,5000);
   const datosBase=parseJson(raw.datos_base);
+  const noAplica=raw.no_aplica===true || raw.no_aplica==='true';
+  const justificacion=campo(raw.justificacion_no_aplica,3000);
+  if(noAplica && (!justificacion || justificacion.length<15))
+    throw new BadRequestException('Un periodo no aplicable necesita justificación de al menos 15 caracteres.');
   const valor=String(raw.valor ?? '').trim();
   let numerico: Prisma.Decimal | null=null, booleano: boolean | null=null, opcion: string | null=null;
-  if(config.tipo_dato==='NUMERICO') {
+  if(noAplica) {
+    // Conservar valores nulos, sin crear mediciones ficticias.
+  } else if(config.tipo_dato==='NUMERICO') {
     if (!/^[+-]?\d{1,12}(?:\.\d{1,6})?$/.test(valor))
       throw new BadRequestException('Escribe un valor numérico válido, máximo 6 decimales.');
     numerico=new Prisma.Decimal(valor);
@@ -153,12 +160,13 @@ export function validarCapturaHistorica(
       throw new BadRequestException('Selecciona una opción configurada para el indicador.');
     opcion=valor;
   } else throw new BadRequestException('Tipo de indicador incompatible con captura manual.');
-  const evaluacion=evaluate(config as any,{
+  const evaluacion=noAplica ? 'NO_EVALUABLE' : evaluate(config as any,{
     estado,valor_numerico:numerico,valor_booleano:booleano,valor_opcion:opcion,
   });
   if (estado==='EN_REVISION') {
-    if (evaluacion==='NO_EVALUABLE') throw new BadRequestException('La medición no es evaluable; revisa valor y meta.');
-    if (evaluacion==='NO_CUMPLE' && (!analisis || !acciones))
+    if (!noAplica && evaluacion==='NO_EVALUABLE')
+      throw new BadRequestException('La medición no es evaluable; revisa valor y meta.');
+    if (!noAplica && evaluacion==='NO_CUMPLE' && (!analisis || !acciones))
       throw new BadRequestException('Una desviación requiere análisis y acciones propuestas antes de enviarse.');
   }
   return {
@@ -166,7 +174,8 @@ export function validarCapturaHistorica(
     periodo_inicio:fechaValida(raw.periodo_inicio),
     periodo_fin:fechaValida(raw.periodo_fin),
     valor,fuente,fecha_documento:fechaDocumento,datos_base:datosBase,
-    observaciones,analisis,acciones_propuestas:acciones,motivo,estado,
+    observaciones,analisis,acciones_propuestas:acciones,
+    justificacion_no_aplica:noAplica?justificacion:null,motivo,estado,
     revision_esperada:revision,valor_numerico:numerico,
     valor_booleano:booleano,valor_opcion:opcion,evaluacion,
   };
