@@ -196,7 +196,7 @@ export class LogisticaService {
       if (!lote || lote.unidad !== 'Kilogramos') throw new BadRequestException('Lote inválido o incompatible con kilogramos.');
       const ubicacion = await tx.inventario_ubicaciones.findUnique({ where: { id: ubicacionId } });
       if (!ubicacion?.activo) throw new BadRequestException('Ubicación no disponible.');
-      if (await tx.inventario_contenedores.count({ where: { lote_inventario_id: loteId } }))
+      if (await tx.inventario_contenedores.count({ where: { lote_inventario_id: loteId, ubicacion_id: ubicacionId } }))
         throw new ConflictException('El lote ya tiene contenedores identificados; no se permite sustituirlos por otra conciliación.');
       const saldo = await this.saldoEnUbicacion(tx, loteId, ubicacionId);
       const total = datos.reduce((t, x) => t.add(x.kg), D(0));
