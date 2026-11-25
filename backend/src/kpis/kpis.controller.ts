@@ -69,6 +69,15 @@ export class KpisController {
     return this.captura.aprobar(id, body, req.usuario);
   }
 
+  @Get("configuraciones/:id/captura")
+  @Header("Cache-Control", "private, no-store")
+  configuracionCaptura(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() req: KpiRequest,
+  ) {
+    return this.service.configuracionCaptura(id, req.kpiScope);
+  }
+
   @Get("resultados/:id")
   @Header("Cache-Control", "private, no-store")
   detail(@Param("id", ParseIntPipe) id: number, @Req() req: KpiRequest) {
