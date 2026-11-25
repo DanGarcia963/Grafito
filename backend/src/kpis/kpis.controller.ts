@@ -69,6 +69,17 @@ export class KpisController {
     return this.captura.aprobar(id, body, req.usuario);
   }
 
+  @Post("resultados/:id/devolver")
+  @Header("Cache-Control", "private, no-store")
+  devolverHistorico(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() req: KpiRequest,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (!req.usuario) throw new BadRequestException("La sesión expiró.");
+    return this.captura.devolver(id, body, req.usuario);
+  }
+
   @Get("configuraciones/:id/captura")
   @Header("Cache-Control", "private, no-store")
   configuracionCaptura(
