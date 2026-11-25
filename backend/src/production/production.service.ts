@@ -1201,6 +1201,8 @@ export class ProductionService {
             include: {
               lote_produccion: true,
               recepcion: { select: { estado_checklist: true } },
+              muestras: { where: { area_Muestra: 'CALIDAD', categoria_Muestra: 'MUESTRA_INICIAL' },
+                select: { categoria_Muestra: true, estado_Muestra: true } },
             },
           },
           movimientos: { include: { reversion: true } },
@@ -1222,6 +1224,8 @@ export class ProductionService {
             include: {
               lote_produccion: true,
               recepcion: { select: { estado_checklist: true } },
+              muestras: { where: { area_Muestra: 'CALIDAD', categoria_Muestra: 'MUESTRA_INICIAL' },
+                select: { categoria_Muestra: true, estado_Muestra: true } },
             },
           },
           movimientos: { include: { reversion: true } },
