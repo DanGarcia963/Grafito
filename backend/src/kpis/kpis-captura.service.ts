@@ -74,6 +74,10 @@ export class KpisCapturaService {
           periodo_fin:date(periodo.fin),
         },
       });
+      if(existente && existente.configuracion_id !== configId)
+        throw new ConflictException('La versión de configuración del resultado existente es distinta.');
+      if(existente && existente.origen !== 'MANUAL')
+        throw new ConflictException('No se puede sobrescribir un dato importado o automático desde el calendario.');
       if(existente && !['PENDIENTE','BORRADOR'].includes(existente.estado))
         throw new ConflictException('Este periodo está en revisión, aprobado o no aplica. No puede sobrescribirse.');
       if(r.revision_esperada!==(existente?.revision_actual??0))
@@ -96,7 +100,7 @@ export class KpisCapturaService {
         estado:r.estado,evaluacion:r.evaluacion,
         observaciones:r.observaciones,analisis:r.analisis,
         acciones_propuestas:r.acciones_propuestas,
-        justificacion_no_aplica:null,
+        justificacion_no_aplica:r.justificacion_no_aplica,
         capturado_por:user.usuario,capturado_en:now,
         revisado_por:null,revisado_en:null,actualizado_en:now,
       };
@@ -126,7 +130,8 @@ export class KpisCapturaService {
         datos_base:r.datos_base?JSON.parse(r.datos_base):null,
         fuente:r.fuente,fecha_documento:r.fecha_documento,
         observaciones:r.observaciones,analisis:r.analisis,
-        acciones_propuestas:r.acciones_propuestas,evaluacion:r.evaluacion,
+        acciones_propuestas:r.acciones_propuestas,
+        justificacion_no_aplica:r.justificacion_no_aplica,evaluacion:r.evaluacion,
         estado:r.estado,origen:'MANUAL',
         evidencia:adjunto?{nombre:adjunto.nombre,mime:adjunto.mime,bytes:adjunto.buffer.length}:null,
       });
@@ -184,13 +189,15 @@ export class KpisCapturaService {
       if(!previo)throw new ConflictException('Falta el historial de la medición.');
       if(r.kpi_configuraciones.requiere_evidencia && !previo.kpi_evidencias.length)
         throw new ConflictException('La revisión actual no tiene evidencia requerida.');
-      const evaluacion=evaluate(r.kpi_configuraciones as any,r as any);
-      if(evaluacion==='NO_EVALUABLE')
+      const noAplica=!!r.justificacion_no_aplica?.trim();
+      const evaluacion=noAplica ? 'NO_EVALUABLE' : evaluate(r.kpi_configuraciones as any,r as any);
+      if(!noAplica && evaluacion==='NO_EVALUABLE')
         throw new ConflictException('La medición no puede evaluarse con su configuración.');
+      const estadoAprobado=noAplica ? 'NO_APLICA' : 'APROBADO';
       const now=new Date(),revision=r.revision_actual+1;
       await tx.kpi_resultados.update({
         where:{id_Resultado:id},data:{
-          estado:'APROBADO',evaluacion,revisado_por:user.usuario,
+          estado:estadoAprobado,evaluacion,revisado_por:user.usuario,
           revisado_en:now,revision_actual:revision,actualizado_en:now,
         },
       });
@@ -199,7 +206,8 @@ export class KpisCapturaService {
           resultado_id:id,revision,accion:'APROBACION',
           realizado_por:user.usuario,realizado_en:now,motivo,
           datos_revision:JSON.stringify({
-            estado:'APROBADO',evaluacion,revision_de_captura:previo.revision,
+            estado:estadoAprobado,evaluacion,revision_de_captura:previo.revision,
+            justificacion_no_aplica:r.justificacion_no_aplica,
             indicador_id:r.indicador_id,configuracion_id:r.configuracion_id,
             valor_numerico:r.valor_numerico?.toString()??null,
             valor_booleano:r.valor_booleano,valor_opcion:r.valor_opcion,
@@ -218,7 +226,7 @@ export class KpisCapturaService {
           },
         });
       }
-      return {success:true,id,revision,estado:'APROBADO',evaluacion};
+      return {success:true,id,revision,estado:estadoAprobado,evaluacion};
     },{timeout:20000});
   }
 }
