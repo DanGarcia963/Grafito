@@ -79,7 +79,7 @@ export function periodoConfigurado(
     year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
   const parte = (tipo: string) => p.find(x=>x.type===tipo)?.value || '';
   const fechaHoy = parte('year')+'-'+parte('month')+'-'+parte('day');
-  if (end > fechaHoy) throw new ConflictException('No se puede registrar un periodo que aún no termina.');
+  if (end >= fechaHoy) throw new ConflictException('El periodo histórico debe haber terminado antes de hoy.');
   return { inicio: start, fin: end,
     limite: addDays(end, Math.max(0, Math.min(365, config.dias_limite_captura))) };
 }
