@@ -1451,7 +1451,7 @@ export class ProductionService {
           'Libera el lote o descarga explícitamente como F.E. tras el rechazo final',
         );
       }
-      if (!fe) {
+      if (!fe && op.linea_Produccion?.trim().toUpperCase() === 'GRAFITO') {
         if (lote.estado_Calida !== 'LIBERADO') {
           throw new BadRequestException('El producto no se puede descargar como terminado sin liberación final de Calidad.');
         }
@@ -1515,7 +1515,8 @@ export class ProductionService {
         },
       });
       // Identidad física de cada contenedor obtenido, sin duplicar kilos en el kardex.
-      if (Array.isArray(contenedores)) {
+      if (op.linea_Produccion?.trim().toUpperCase() === 'GRAFITO' &&
+          op.unidad === 'Kilogramos' && Array.isArray(contenedores)) {
         for (const envase of contenedores) {
           const codigo = String(envase.codigo ?? '').trim();
           const kg = new Prisma.Decimal(String(envase.peso_kg));
@@ -1738,7 +1739,7 @@ export class ProductionService {
         });
         // Recepción: contenedores físicos en espera de checklist y aprobación.
         const detalles = (grupo.especificaciones as any)?.contenedores;
-        if (Array.isArray(detalles)) {
+        if (producto.UM === 'Kilogramos' && Array.isArray(detalles)) {
           for (const envase of detalles) {
             const kg = new Prisma.Decimal(String(envase.peso_kg));
             const item = await tx.inventario_contenedores.create({
