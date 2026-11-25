@@ -25,6 +25,7 @@ export interface Cell {
   end: string;
   due: string;
   resultId: number | null;
+  historicoEditable: boolean;
   configId: number | null;
   state: string;
   approved: boolean;
@@ -90,6 +91,14 @@ export interface Evidence {
   descripcion: string | null;
 }
 export interface Detail {
+  id_Resultado: number;
+  indicador_id: number;
+  configuracion_id: number;
+  periodo_inicio: string;
+  periodo_fin: string;
+  valor_numerico: string | number | null;
+  valor_booleano: boolean | null;
+  valor_opcion: string | null;
   indicador: string;
   area: string;
   responsable: string | null;
@@ -104,6 +113,7 @@ export interface Detail {
   observaciones: string | null;
   analisis: string | null;
   acciones_propuestas: string | null;
+  justificacion_no_aplica: string | null;
   capturado_por: string | null;
   capturado_en: string | null;
   revisado_por: string | null;

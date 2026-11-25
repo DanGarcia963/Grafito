@@ -49,6 +49,21 @@ export class KpisService {
     `;
 
     const ids = new Set(indicators.map((i) => i.id_Indicador));
+    const actual = new Date().getUTCFullYear();
+    // También exponer años con configuración previa, aunque todavía no haya
+    // resultados registrados: indispensables para cargar meses históricos.
+    const configurados = await this.prisma.$queryRaw<Row[]>`
+      SELECT indicador_id, MIN(vigente_desde) AS desde
+      FROM kpi_configuraciones
+      GROUP BY indicador_id
+    `;
+    const primerAnio = Math.max(2000, Math.min(actual,
+      ...configurados.filter((c) => ids.has(c.indicador_id))
+        .map((c) => new Date(c.desde).getUTCFullYear())
+        .filter(Number.isFinite),
+    ));
+    const anosConfigurados = Array.from({ length: actual - primerAnio + 1 },
+      (_, idx) => primerAnio + idx);
 
     return {
       areas: areas.filter((a) => this.permitted(a.id, scope)),
@@ -60,7 +75,8 @@ export class KpisService {
       })),
       years: [
         ...new Set([
-          new Date().getUTCFullYear(),
+          actual,
+          ...anosConfigurados,
           ...years
             .filter((y) => ids.has(y.indicador_id))
             .map((y) => Number(y.year)),
@@ -137,6 +153,27 @@ export class KpisService {
           }
         : null,
     };
+  }
+
+  async configuracionCaptura(id: number, scope: KpiScope) {
+    if (!Number.isSafeInteger(id) || id <= 0)
+      throw new BadRequestException("Configuración inválida.");
+    const config = await this.prisma.kpi_configuraciones.findUnique({
+      where: { id_Configuracion: id },
+      select: {
+        id_Configuracion: true, indicador_id: true, version: true,
+        tipo_dato: true, unidad: true, decimales: true, periodicidad: true,
+        metodo_calculo: true, formula_descriptiva: true,
+        parametros_calculo: true, opciones_permitidas: true,
+        requiere_evidencia: true, fuente_datos: true,
+        regla_evaluacion: true, meta_minima: true, meta_maxima: true,
+        meta_booleano: true, meta_opcion: true,
+        kpi_indicadores: { select: { area_id: true, nombre: true } },
+      },
+    });
+    if (!config) throw new NotFoundException("Configuración no encontrada.");
+    this.assertArea(config.kpi_indicadores.area_id, scope);
+    return safe(config);
   }
 
   async detail(id: number, scope: KpiScope) {
