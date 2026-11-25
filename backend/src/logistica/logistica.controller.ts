@@ -17,6 +17,12 @@ export class LogisticaController {
   @Get('catalogos')
   catalogos(@Req() r: any) { return this.logistica.catalogos(r.usuario); }
 
+  @Areas('logistica','almacen','produccion','ventas')
+  @Get('candidatos')
+  candidatos(@Query('ovId',ParseIntPipe) ovId:number,@Req() r:any) {
+    return this.logistica.candidatosEntrega(ovId,r.usuario);
+  }
+
   @Areas('logistica','almacen','produccion','calidad')
   @Get('contenedores')
   @Header('Cache-Control','private, no-store')
