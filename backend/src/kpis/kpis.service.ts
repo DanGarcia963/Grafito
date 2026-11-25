@@ -139,6 +139,27 @@ export class KpisService {
     };
   }
 
+  async configuracionCaptura(id: number, scope: KpiScope) {
+    if (!Number.isSafeInteger(id) || id <= 0)
+      throw new BadRequestException("Configuración inválida.");
+    const config = await this.prisma.kpi_configuraciones.findUnique({
+      where: { id_Configuracion: id },
+      select: {
+        id_Configuracion: true, indicador_id: true, version: true,
+        tipo_dato: true, unidad: true, decimales: true, periodicidad: true,
+        metodo_calculo: true, formula_descriptiva: true,
+        parametros_calculo: true, opciones_permitidas: true,
+        requiere_evidencia: true, fuente_datos: true,
+        regla_evaluacion: true, meta_minima: true, meta_maxima: true,
+        meta_booleano: true, meta_opcion: true,
+        kpi_indicadores: { select: { area_id: true, nombre: true } },
+      },
+    });
+    if (!config) throw new NotFoundException("Configuración no encontrada.");
+    this.assertArea(config.kpi_indicadores.area_id, scope);
+    return safe(config);
+  }
+
   async detail(id: number, scope: KpiScope) {
     const rows = await this.prisma.$queryRaw<Row[]>`
       SELECT
