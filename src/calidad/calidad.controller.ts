@@ -27,6 +27,42 @@ import { CalidadService } from './calidad.service';
 export class CalidadController {
   constructor(private readonly calidadService: CalidadService) {}
 
+  @Areas('calidad')
+  @Get('conciliacion-legacy')
+  @Header('Cache-Control', 'private, no-store')
+  conciliacionHistorica() {
+    return this.calidadService.estadoConciliacionHistorica();
+  }
+
+  @Areas('calidad')
+  @Get('conciliacion-legacy/:id/documento')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async evidenciaHistorica(
+    @Param('id', ParseIntPipe) id: number,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const f = await this.calidadService.obtenerEvidenciaHistorica(id);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition',
+      "attachment; filename*=UTF-8''" + encodeURIComponent(f.nombre));
+    return new StreamableFile(f.buffer, { type: 'application/pdf', length: f.buffer.length });
+  }
+
+  @Areas('calidad')
+  @Post('conciliacion-legacy/:id')
+  @UseInterceptors(FileInterceptor('documento', {
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  }))
+  resolverConciliacion(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, unknown>,
+    @UploadedFile() documento: Express.Multer.File | undefined,
+    @Req() request: any,
+  ) {
+    return this.calidadService.resolverConciliacionHistorica(id, body, documento, request.usuario);
+  }
+
   @Get('obtenerParametros')
   async obtenerParametros() {
     const result = await this.calidadService.obtenerParametrosCalidad();
