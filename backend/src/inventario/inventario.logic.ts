@@ -37,6 +37,8 @@ export async function existencias(
     include: {
       producto: true,
       recepcion: { select: { estado_checklist: true } },
+      muestras: { where: { area_Muestra: 'CALIDAD', categoria_Muestra: 'MUESTRA_INICIAL' },
+        select: { categoria_Muestra: true, estado_Muestra: true } },
       lote_produccion: {
         include: {
           ordenes_produccion: {
