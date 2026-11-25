@@ -165,7 +165,9 @@ export default function LogisticaEntregas() {
       {tab==='operacion'&&<div className="space-y-4">
         {area==='logistica'&&<div className="grid gap-4 lg:grid-cols-2">
           <form className={box} onSubmit={e=>{
-            const b=getForm(e);void ejecutar(()=>pedir('/api/logistica/viajes',b),'Viaje programado.');}}>
+            const b=getForm(e);
+            if(b.fecha_programada) b.fecha_programada=new Date(String(b.fecha_programada)).toISOString();
+            void ejecutar(()=>pedir('/api/logistica/viajes',b),'Viaje programado.');}}>
             <h2 className="mb-3 flex items-center gap-2 font-bold text-[#173e35]"><Truck size={19}/> Nuevo viaje</h2>
             <div className="space-y-3">
               <label className="block text-xs font-semibold">Vehículo
