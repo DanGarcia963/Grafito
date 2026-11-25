@@ -70,11 +70,107 @@ model control_residuos {
   @@index([empresa_Generadora_id], map: "idx_fk_res_empresa")
 }
 
+// Seguimiento físico individual. El saldo del lote sigue perteneciendo al kardex de movimientos.
+model inventario_contenedores {
+  id                Int      @id @default(autoincrement())
+  lote_inventario_id Int
+  codigo            String   @db.VarChar(100)
+  peso_inicial_kg   Decimal  @db.Decimal(18, 4)
+  saldo_kg          Decimal  @db.Decimal(18, 4)
+  ubicacion_id      Int
+  estado            String   @default("POR_VERIFICAR") @db.VarChar(24)
+  verificado_por    String?  @db.VarChar(100)
+  verificado_en     DateTime? @db.Timestamptz(6)
+  creado_en         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([lote_inventario_id, codigo])
+  @@index([lote_inventario_id, ubicacion_id, estado], map: "idx_contenedores_lote_ubicacion")
+}
+
+model contenedor_movimientos {
+  id                      Int       @id @default(autoincrement())
+  contenedor_id           Int
+  movimiento_inventario_id Int?
+  tipo                    String    @db.VarChar(32)
+  cantidad                Decimal   @db.Decimal(18, 4)
+  actor                   String    @db.VarChar(100)
+  observaciones           String?   @db.Text
+  creado_en               DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([contenedor_id, movimiento_inventario_id])
+  @@index([contenedor_id, creado_en], map: "idx_movcontenedor_cont_fecha")
+}
+
+// No se crea un certificado retrospectivo. Calidad adjunta evidencia antes de validar
+// una liberación histórica que ya existía sin documento digital.
+model calidad_conciliaciones_legacy {
+  lote_produccion_id Int      @id
+  estado             String   @default("PENDIENTE") @db.VarChar(20)
+  motivo             String?  @db.Text
+  documento_nombre   String?  @db.VarChar(255)
+  documento_mime     String?  @db.VarChar(100)
+  documento_contenido Bytes?  @db.ByteA
+  revisado_por       String?  @db.VarChar(100)
+  revisado_en        DateTime? @db.Timestamptz(6)
+  creado_en          DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model vehiculos_logistica {
+  id                     Int     @id @default(autoincrement())
+  placa                  String  @unique @db.VarChar(30)
+  tipo                   String  @db.VarChar(12)
+  capacidad_contenedores Int
+  capacidad_kg           Decimal @db.Decimal(18, 4)
+  transportista          String? @db.VarChar(150)
+  activo                 Boolean @default(true)
+  creado_en              DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model viajes_logistica {
+  id                Int      @id @default(autoincrement())
+  folio             String   @unique @db.VarChar(100)
+  vehiculo_id       Int
+  operador          String   @db.VarChar(150)
+  estado            String   @default("PROGRAMADO") @db.VarChar(24)
+  fecha_programada  DateTime? @db.Timestamptz(6)
+  fecha_salida      DateTime? @db.Timestamptz(6)
+  fecha_cierre      DateTime? @db.Timestamptz(6)
+  observaciones     String?  @db.Text
+  creado_por        String   @db.VarChar(100)
+  creado_en         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([estado, fecha_programada], map: "idx_viajes_estado_fecha")
+}
+
+model entrega_contenedores {
+  id                  Int      @id @default(autoincrement())
+  entrega_material_id Int
+  contenedor_id       Int
+  cantidad_kg         Decimal  @db.Decimal(18, 4)
+  creado_en           DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([entrega_material_id, contenedor_id])
+  @@index([contenedor_id], map: "idx_entrega_cont_activa")
+}
+
+model logistica_eventos {
+  id         Int      @id @default(autoincrement())
+  entrega_id Int?
+  viaje_id   Int?
+  accion     String   @db.VarChar(80)
+  actor      String   @db.VarChar(100)
+  datos      Json?    @db.JsonB
+  creado_en  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([entrega_id, creado_en], map: "idx_logistica_eventos_entrega")
+}
+
 model entregas_logistica {
   id_Entrega              Int                     @id @default(autoincrement())
   folio                   String                  @unique @db.VarChar(100)
   orden_venta_id          Int
   transportista_id        Int?
+  viaje_id                Int?
   estado_entrega          estado_entrega_material @default(BORRADOR)
   destino                 String                  @db.Text
   fecha_programada        DateTime?               @db.Timestamptz(6)
