@@ -112,6 +112,7 @@ export interface Detail {
   observaciones: string | null;
   analisis: string | null;
   acciones_propuestas: string | null;
+  justificacion_no_aplica: string | null;
   capturado_por: string | null;
   capturado_en: string | null;
   revisado_por: string | null;
