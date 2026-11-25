@@ -284,10 +284,19 @@ export class LogisticaService {
     const entregas = await this.prisma.entregas_logistica.findMany({
       where,
       orderBy: { id_Entrega: 'desc' }, take: 300,
-      include: {
+      select: {
+        id_Entrega: true, folio: true, orden_venta_id: true, viaje_id: true,
+        destino: true, estado_entrega: true, fecha_programada: true,
+        fecha_Salida_Transporte: true, fecha_Entrega_Cliente: true,
+        recibido_por: true, comprobante_nombre: true, observaciones: true,
+        creado_en: true,
         orden_venta: { select: { folio: true, persona_id: true, cantidad: true, unidad: true,
           cliente: { select: { nombre: true } } } },
-        detalles: { include: { lote: { select: { folio: true, lote_produccion_id: true } } } },
+        detalles: { select: {
+          id: true, entrega_id: true, lote_inventario_id: true, ubicacion_id: true,
+          cantidad: true, cantidad_recibida: true, observaciones: true,
+          lote: { select: { folio: true, lote_produccion_id: true } },
+        } },
       },
     });
     const viajeIds = [...new Set(entregas.flatMap(e => e.viaje_id == null ? [] : [e.viaje_id]))];
@@ -515,13 +524,18 @@ export class LogisticaService {
         where: { id: { in: asignados.map(a => a.contenedor_id) } },
         select: { id: true, codigo: true, estado: true, saldo_kg: true },
       });
-      const codigosDeclarados = Array.isArray(b.codigos_verificados)
-        ? b.codigos_verificados.map(x => String(x ?? '').trim().toUpperCase()) : [];
-      const codigosEsperados = fisicos.map(x => x.codigo.toUpperCase());
-      if (new Set(codigosDeclarados).size !== codigosEsperados.length ||
-          codigosEsperados.some(x => !codigosDeclarados.includes(x))) {
-        throw new ConflictException('Verifica físicamente todos los códigos de contenedores antes de autorizar la carga.');
+      const confirmados = Array.isArray(b.contenedores_verificados) ? b.contenedores_verificados : [];
+      const confirmacion = new Map<number,string>();
+      for (const dato of confirmados) {
+        const idConfirmado = idSeguro(dato?.id, 'Contenedor verificado');
+        if (confirmacion.has(idConfirmado)) throw new ConflictException('Contenedor duplicado en el cotejo.');
+        confirmacion.set(idConfirmado, String(dato?.codigo ?? '').trim().toUpperCase());
       }
+      if (confirmacion.size !== fisicos.length || fisicos.some(x =>
+          confirmacion.get(x.id) !== x.codigo.toUpperCase())) {
+        throw new ConflictException('Verifica código e identificador de cada contenedor físicamente cargado.');
+      }
+      const codigosEsperados = fisicos.map(x => x.codigo.toUpperCase());
       if (fisicos.some(x => x.estado !== 'VERIFICADO' || x.saldo_kg.lte(0)))
         throw new ConflictException('Un contenedor fue bloqueado o consumido antes de la carga.');
       await tx.viajes_logistica.update({ where: { id }, data: { estado: 'CARGADO' } });
