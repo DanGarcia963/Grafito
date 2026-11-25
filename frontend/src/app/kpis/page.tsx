@@ -249,6 +249,30 @@ export default function KpisPage() {
       setAprobacionError(err instanceof Error ? err.message : "No se pudo aprobar.");
     } finally { setAprobando(false); }
   }
+  async function devolverResultado() {
+    if (!detail || presentation || aprobando) return;
+    const sesion = sesionActual();
+    if (!sesion?.usuario || sesion.area !== "seguridad" ||
+        sesion.usuario === detail.capturado_por) return;
+    const motivo = window.prompt(
+      "Motivo para devolver la medición a borrador (mínimo 10 caracteres):",
+      "Solicitar revisión de los datos base o la evidencia adjunta.",
+    );
+    if (!motivo) return;
+    setAprobando(true);
+    setAprobacionError("");
+    try {
+      await post("resultados/" + detail.id_Resultado + "/devolver", {
+        motivo,
+        revision_esperada: detail.revision_actual,
+      });
+      setGuardado("Resultado devuelto al capturista para corrección; se conservó su historial.");
+      closeDetail();
+      setRefresh(v => v + 1);
+    } catch (err) {
+      setAprobacionError(err instanceof Error ? err.message : "No se pudo devolver.");
+    } finally { setAprobando(false); }
+  }
   function closeDetail() {
     fileRequest.current?.abort();
     setFile(null);
@@ -1079,6 +1103,10 @@ export default function KpisPage() {
                       <button type="button" className="kpi-button primary"
                         disabled={aprobando} onClick={() => void aprobarResultado()}>
                         {aprobando ? "Aprobando…" : "Aprobar resultado histórico"}
+                      </button>
+                      <button type="button" className="kpi-button"
+                        disabled={aprobando} onClick={() => void devolverResultado()}>
+                        Devolver a borrador para corrección
                       </button>
                       {aprobacionError && <p role="alert" className="kpi-alert bad">{aprobacionError}</p>}
                     </div>
