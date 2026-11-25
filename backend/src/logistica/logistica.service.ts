@@ -82,6 +82,89 @@ export class LogisticaService {
     return { success: true, vehiculos, viajes, ordenes, ubicaciones };
   }
 
+  async candidatosEntrega(ovId: number, u: Usuario) {
+    this.validarPersonal(u);
+    const ov = await this.prisma.crm_ordenes_venta.findUnique({ where: { id: ovId } });
+    if (!ov || ov.estado !== 'CONFIRMADA') throw new NotFoundException('Orden de venta confirmada no encontrada.');
+    const asignaciones = await this.prisma.crm_ordenes_venta_produccion.findMany({
+      where: { orden_venta_id: ovId, cantidad_producto_terminado: { gt: 0 } },
+      select: { orden_produccion_id: true },
+    });
+    if (!asignaciones.length) return {
+      success: true, data: [], nota: 'La OV todavía no tiene producto terminado asignado desde Producción.',
+    };
+    const lotes = await this.prisma.lotes_inventario.findMany({
+      where: {
+        origen: 'PRODUCCION', condicion: { in: ['REGENERADO','TERMINADO'] },
+        producto_id: ov.producto_id, unidad: 'Kilogramos',
+        ...(ov.tipo_venta === 'SERVICIO_REGENERACION'
+          ? { propietario_id: ov.persona_id, propiedad: 'DE_CLIENTE' as const }
+          : { propiedad: 'PROPIO' as const }),
+        lote_produccion: {
+          orden_Produccion_id: { in: asignaciones.map(x => x.orden_produccion_id) },
+          estado: 'FINALIZADO', estado_Calida: 'LIBERADO',
+        },
+      },
+      select: {
+        id: true, folio: true, especificaciones: true,
+        lote_produccion_id: true, producto_id: true,
+      },
+    });
+    const validos: typeof lotes = [];
+    for (const lote of lotes) {
+      if (lote.lote_produccion_id &&
+          await this.expedienteValido(this.prisma,lote.lote_produccion_id)) {
+        validos.push(lote);
+      }
+    }
+    if (!validos.length) return {
+      success: true, data: [], nota: 'No hay lotes con certificado o conciliación histórica aprobada.',
+    };
+    const idsLotes = validos.map(x=>x.id);
+    const contenedores = await this.prisma.inventario_contenedores.findMany({
+      where: {
+        lote_inventario_id: { in: idsLotes }, estado: 'VERIFICADO',
+        saldo_kg: { gt: 0 },
+      }, orderBy: [{ lote_inventario_id: 'asc' }, { codigo: 'asc' }], take: 1000,
+    });
+    const asignados = contenedores.length
+      ? await this.prisma.entrega_contenedores.findMany({
+        where: { contenedor_id: { in: contenedores.map(c=>c.id) } },
+        select: { entrega_material_id: true, contenedor_id: true },
+      }) : [];
+    const detalles = asignados.length
+      ? await this.prisma.entrega_materiales.findMany({
+        where: { id: { in: asignados.map(a=>a.entrega_material_id) } },
+        select: { id: true, entrega_id: true },
+      }) : [];
+    const entregas = detalles.length
+      ? await this.prisma.entregas_logistica.findMany({
+        where: {
+          id_Entrega: { in: detalles.map(x=>x.entrega_id) },
+          estado_entrega: { in: ['BORRADOR','DESPACHADA','ENTREGADA'] },
+        }, select: { id_Entrega: true },
+      }) : [];
+    const bloqueadas = new Set(entregas.map(e=>e.id_Entrega));
+    const detallesActivos = new Set(detalles.filter(d=>bloqueadas.has(d.entrega_id)).map(d=>d.id));
+    const contActivos = new Set(asignados.filter(a=>detallesActivos.has(a.entrega_material_id)).map(a=>a.contenedor_id));
+    const lotesPorId = new Map(validos.map(x=>[x.id,x]));
+    return {
+      success: true,
+      data: contenedores.filter(x=>!contActivos.has(x.id)).map(x=>{
+        const lote = lotesPorId.get(x.lote_inventario_id)!;
+        const attrs = (lote.especificaciones as any)?.atributos || {};
+        return {
+          id:x.id,codigo:x.codigo,kg:x.saldo_kg.toString(),
+          lote_inventario_id:x.lote_inventario_id,lote:lote.folio,
+          lote_produccion_id:lote.lote_produccion_id,ubicacion_id:x.ubicacion_id,
+          prensa: String(attrs.tipo_prensa||'Sin identificar'),
+          vuelta: attrs.numero_vuelta ?? null,
+        };
+      }),
+      nota: 'Contenedores físicamente verificados, de producto final y no reservados por otra entrega.',
+    };
+  }
+
   async contenedores(u: Usuario, loteId?: string) {
     this.validarPersonal(u);
     const id = loteId ? idSeguro(loteId, 'Lote') : undefined;
