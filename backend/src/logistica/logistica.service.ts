@@ -545,5 +545,174 @@ export class LogisticaService {
     }, { timeout: 30000 });
   }
 
-  // CONTINUA_LOGISTICA
+  async confirmarRecepcion(
+    id: number, body: Record<string, unknown>,
+    comprobante: Express.Multer.File | undefined, u: Usuario,
+  ) {
+    if (!comprobante?.buffer?.length || comprobante.mimetype !== 'application/pdf' ||
+        comprobante.buffer.subarray(0,5).toString() !== '%PDF-' ||
+        comprobante.size > 10 * 1024 * 1024) {
+      throw new BadRequestException('Adjunta un comprobante de recepción PDF de hasta 10 MB.');
+    }
+    const recibidoPor = textoSeguro(body.recibido_por, 'Recibido por', 150);
+    let lista: unknown = body.detalles;
+    if (typeof lista === 'string') {
+      try { lista = JSON.parse(lista); }
+      catch { throw new BadRequestException('Detalle de cantidades recibidas inválido.'); }
+    }
+    if (!Array.isArray(lista) || !lista.length) throw new BadRequestException('Captura las cantidades recibidas por lote.');
+    const cantidades = lista.map((x: any) => ({
+      id: idSeguro(x?.id, 'Detalle'), kg: decimalNoNegativo(x?.cantidad_recibida, 'Cantidad recibida'),
+    }));
+    if (new Set(cantidades.map(x => x.id)).size !== cantidades.length)
+      throw new BadRequestException('No repitas detalles.');
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRawUnsafe('SELECT "id_Entrega" FROM entregas_logistica WHERE "id_Entrega"=$1 FOR UPDATE', id);
+      const entrega = await tx.entregas_logistica.findUnique({ where: { id_Entrega: id } });
+      if (!entrega) throw new NotFoundException('Entrega no encontrada.');
+      const ov = await tx.crm_ordenes_venta.findUnique({ where: { id: entrega.orden_venta_id } });
+      if (u.area === 'cliente' && ov?.persona_id !== u.personaId)
+        throw new NotFoundException('Entrega no encontrada para este cliente.');
+      if (entrega.estado_entrega === 'ENTREGADA') return { success: true, repetido: true };
+      if (entrega.estado_entrega !== 'DESPACHADA') throw new ConflictException('Solo se confirma material que ya fue despachado.');
+      const detalles = await tx.entrega_materiales.findMany({ where: { entrega_id: id } });
+      if (detalles.length !== cantidades.length ||
+          detalles.some(d => !cantidades.some(c => c.id === d.id))) {
+        throw new BadRequestException('Registra todas las cantidades recibidas, incluso cuando sean cero.');
+      }
+      let diferenciaTotal = D(0);
+      for (const d of detalles) {
+        const recibido = cantidades.find(x => x.id === d.id)!;
+        const { diferencia } = verificarRecepcion(d.cantidad, recibido.kg);
+        diferenciaTotal = diferenciaTotal.add(diferencia);
+        await tx.entrega_materiales.update({
+          where: { id: d.id },
+          data: { cantidad_recibida: recibido.kg },
+        });
+      }
+      const ahora = new Date();
+      await tx.entregas_logistica.update({
+        where: { id_Entrega: id },
+        data: {
+          estado_entrega: 'ENTREGADA', fecha_Entrega_Cliente: ahora,
+          recibido_por: recibidoPor,
+          comprobante_nombre: (comprobante.originalname || 'acuse.pdf').replace(/[\\/]/g,'_').slice(0,255),
+          comprobante_mime: 'application/pdf',
+          comprobante_contenido: new Uint8Array(comprobante.buffer),
+          ...(diferenciaTotal.gt(0) ? {
+            observaciones: 'INCIDENCIA: ' + diferenciaTotal.toFixed(4) +
+              ' kg despachados no acreditados como recibidos. ' + String(body.observaciones ?? '').slice(0, 3000),
+          } : { observaciones: String(body.observaciones ?? '').slice(0, 4000) || entrega.observaciones }),
+        },
+      });
+      await this.registrarEvento(tx, 'RECEPCION_CONFIRMADA', u.usuario, id, entrega.viaje_id ?? undefined,
+        { recibido_por: recibidoPor, diferencia_kg: diferenciaTotal.toFixed(4) });
+      if (entrega.viaje_id != null) {
+        await tx.$queryRawUnsafe('SELECT id FROM viajes_logistica WHERE id=$1 FOR UPDATE', entrega.viaje_id);
+        const otras = await tx.entregas_logistica.findMany({
+          where: { viaje_id: entrega.viaje_id, id_Entrega: { not: id } },
+          select: { estado_entrega: true },
+        });
+        if (otras.every(e => e.estado_entrega === 'ENTREGADA')) {
+          await tx.viajes_logistica.update({
+            where: { id: entrega.viaje_id },
+            data: { estado: 'ENTREGADO', fecha_cierre: ahora },
+          });
+        }
+      }
+      return {
+        success: true, entrega_id: id, estado: 'ENTREGADA',
+        diferencia_kg: diferenciaTotal.toFixed(4),
+        requiere_aclaracion: diferenciaTotal.gt(0),
+      };
+    }, { timeout: 30000 });
+  }
+
+  async cancelarEntrega(id: number, b: Record<string, unknown>, u: Usuario) {
+    this.validarPersonal(u);
+    const motivo = textoSeguro(b.motivo, 'Motivo de cancelación', 4000);
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRawUnsafe('SELECT "id_Entrega" FROM entregas_logistica WHERE "id_Entrega"=$1 FOR UPDATE', id);
+      const entrega = await tx.entregas_logistica.findUnique({ where: { id_Entrega: id } });
+      if (!entrega) throw new NotFoundException('Entrega no encontrada.');
+      if (entrega.estado_entrega === 'CANCELADA') return { success: true, repetido: true };
+      if (entrega.estado_entrega !== 'BORRADOR')
+        throw new ConflictException('No es posible cancelar salidas físicas. Registra una devolución verificada.');
+      if (entrega.viaje_id != null) {
+        const viaje = await tx.viajes_logistica.findUnique({ where: { id: entrega.viaje_id } });
+        if (!viaje || viaje.estado !== 'PROGRAMADO') {
+          throw new ConflictException('La carga ya fue confirmada, no se permite cancelar una entrega aislada.');
+        }
+      }
+      await tx.entregas_logistica.update({
+        where: { id_Entrega: id }, data: { estado_entrega: 'CANCELADA', motivo_cancelacion: motivo },
+      });
+      await this.registrarEvento(tx, 'ENTREGA_CANCELADA', u.usuario, id, entrega.viaje_id ?? undefined, { motivo });
+      return { success: true, entrega_id: id, estado: 'CANCELADA' };
+    });
+  }
+
+  async cancelarViaje(id: number, b: Record<string, unknown>, u: Usuario) {
+    this.validarPersonal(u);
+    const motivo = textoSeguro(b.motivo, 'Motivo', 4000);
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRawUnsafe('SELECT id FROM viajes_logistica WHERE id=$1 FOR UPDATE', id);
+      const viaje = await tx.viajes_logistica.findUnique({ where: { id } });
+      if (!viaje) throw new NotFoundException('Viaje no encontrado.');
+      if (viaje.estado === 'CANCELADO') return { success: true, repetido: true };
+      if (viaje.estado !== 'PROGRAMADO' && viaje.estado !== 'CARGADO')
+        throw new ConflictException('No se puede cancelar un vehículo que ya salió de planta.');
+      await tx.entregas_logistica.updateMany({
+        where: { viaje_id: id, estado_entrega: 'BORRADOR' },
+        data: { estado_entrega: 'CANCELADA', motivo_cancelacion: motivo },
+      });
+      await tx.viajes_logistica.update({
+        where: { id }, data: { estado: 'CANCELADO', observaciones: motivo },
+      });
+      await this.registrarEvento(tx, 'VIAJE_CANCELADO', u.usuario, undefined, id, { motivo });
+      return { success: true, viaje_id: id, estado: 'CANCELADO' };
+    });
+  }
+
+  async conciliacionComercial(u: Usuario) {
+    this.validarPersonal(u);
+    const ordenes = await this.prisma.crm_ordenes_venta.findMany({
+      where: { estado: 'CONFIRMADA' }, orderBy: { id: 'desc' }, take: 200,
+      include: {
+        cliente: { select: { nombre: true } },
+        produccion_asignada: { select: { cantidad_producto_terminado: true } },
+        entregas: {
+          where: { estado_entrega: { not: 'CANCELADA' } },
+          include: { detalles: { select: { cantidad: true, cantidad_recibida: true } } },
+        },
+        facturas: { select: { id: true, estado: true, total: true } },
+        pagos: { select: { id: true, estado: true, importe: true } },
+      },
+    });
+    return {
+      success: true, data: ordenes.map(o => {
+        const asignado = o.produccion_asignada.reduce((s,x)=>s.add(x.cantidad_producto_terminado),D(0));
+        const entregado = o.entregas.filter(e=>e.estado_entrega==='ENTREGADA')
+          .flatMap(e=>e.detalles).reduce((s,x)=>s.add(x.cantidad_recibida??0),D(0));
+        const despachado = o.entregas.filter(e=>['DESPACHADA','ENTREGADA'].includes(e.estado_entrega))
+          .flatMap(e=>e.detalles).reduce((s,x)=>s.add(x.cantidad),D(0));
+        const discrepancia = o.entregas.filter(e=>e.estado_entrega==='ENTREGADA')
+          .flatMap(e=>e.detalles).reduce((s,x)=>s.add(x.cantidad.sub(x.cantidad_recibida??0)),D(0));
+        return {
+          ov_id: o.id, folio: o.folio, cliente: o.cliente.nombre,
+          unidad: o.unidad, cantidad_solicitada: o.cantidad.toString(),
+          cantidad_asignada: asignado.toString(), cantidad_despachada: despachado.toString(),
+          cantidad_recibida: entregado.toString(),
+          pendiente_entrega: Prisma.Decimal.max(o.cantidad.sub(entregado),D(0)).toString(),
+          discrepancia_kg: discrepancia.toString(),
+          entregas: o.entregas.length,
+          facturas_registradas: o.facturas.filter(f=>f.estado==='REGISTRADA').length,
+          pagos_confirmados: o.pagos.filter(p=>p.estado==='CONFIRMADO').length,
+          cerrada_fisicamente: o.cantidad.gt(0) && entregado.gte(o.cantidad) && discrepancia.isZero(),
+          nota: 'Una factura fiscal externa no se emite desde este indicador; refleja solamente los registros existentes.',
+        };
+      }),
+    };
+  }
+
 }
