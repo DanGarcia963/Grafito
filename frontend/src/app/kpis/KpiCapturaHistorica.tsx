@@ -38,7 +38,7 @@ const period = (c:Cell) =>
   (c.start.slice(0,7)===c.end.slice(0,7)?"":" al "+
     new Date(c.end+"T12:00:00Z").toLocaleDateString("es-MX",{month:"long",year:"numeric",timeZone:"UTC"}));
 
-function allowed(raw: string | null) {
+function allowed(raw: string | null): string[] {
   if(!raw) return [] as string[];
   try{
     const j=JSON.parse(raw);
