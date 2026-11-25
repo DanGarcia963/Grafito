@@ -254,6 +254,7 @@ export default function ManifiestosPage() {
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded-full border border-cyan-900 bg-cyan-950/60 px-3 py-1.5 text-xs text-cyan-200">Sesión: {roleLabel[area] ?? area}</span>
         {['seguridad', 'contaduria'].includes(area) && <Link href="/matriz" className="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800">Matriz Legal</Link>}
+        {['logistica', 'almacen'].includes(area) && <Link href="/logistica-entregas" className="rounded-lg border border-emerald-700 bg-emerald-950/50 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-900">Entregas y embarques</Link>}
         <Link href="/" className="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800">Inicio</Link>
         <button onClick={() => { setLoading(true); void load().catch(e => setError(e.message)).finally(() => setLoading(false)); }} className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800"><RefreshCw size={15} /> Actualizar</button>
       </div>

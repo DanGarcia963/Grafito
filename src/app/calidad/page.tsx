@@ -1328,6 +1328,7 @@ return (
         </div>
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Muestras en Calidad</h1>
+          <a href="/calidad-conciliacion" className="mt-2 inline-flex rounded-lg border border-amber-700 bg-amber-950/40 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-900">Conciliar lotes históricos sin certificado</a>
           <p className="text-sm text-slate-400">
             Monitoreo e inspección de muestras recibidas desde Tanques de Grafito
           </p>
