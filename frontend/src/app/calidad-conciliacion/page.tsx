@@ -80,7 +80,7 @@ export default function ConciliacionCalidadPage(){
         <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5">
           <h2 className="flex items-center gap-2 font-bold text-[#173e35]"><FileCheck size={18}/> Expedientes de lote</h2>
           <div className="mt-3 max-h-[560px] space-y-2 overflow-y-auto">
-            {registros.map(r=><button type="button" key={r.lote_id}
+            {registros.map(r=><div key={r.lote_id}><button type="button"
               onClick={()=>setSeleccion(r.estado_expediente==='CERTIFICADO'?null:r.lote_id)}
               className={'flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-left '+
                 (seleccion===r.lote_id?'border-emerald-500 bg-emerald-50':'border-slate-200')}>
@@ -93,7 +93,21 @@ export default function ConciliacionCalidadPage(){
                   'bg-amber-100 text-amber-800')}>
                 {r.estado_expediente}
               </span>
-            </button>)}
+            </button>
+            {r.documento && r.estado_expediente!=='CERTIFICADO' && <button type="button"
+              onClick={async()=>{
+                try{
+                  const res=await apiFetch(API_URL+'/api/calidad/conciliacion-legacy/'+r.lote_id+'/documento');
+                  if(!res.ok)throw new Error('No se pudo obtener la evidencia.');
+                  const url=URL.createObjectURL(await res.blob());
+                  const a=document.createElement('a');a.href=url;a.download=r.documento||'conciliacion.pdf';a.click();
+                  setTimeout(()=>URL.revokeObjectURL(url),1500);
+                }catch(err){setError(err instanceof Error?err.message:'Error al descargar documento.');}
+              }}
+              className="mt-1 rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-800">
+              Descargar evidencia PDF
+            </button>}
+            </div>)}
             {!registros.length&&<p className="text-sm text-slate-500">No hay lotes liberados en los registros.</p>}
           </div>
         </section>
