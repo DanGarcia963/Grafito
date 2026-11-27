@@ -172,7 +172,7 @@ export default function PortalClientePage() {
               <h3 className="text-lg font-semibold">Existencias actuales del cliente</h3>
               <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
                 Inventario físico registrado, incluidas aperturas históricas. Es distinto al balance de recepciones del período
-                y no demuestra por sí mismo qué volumen se procesó o entregó.
+                y no demuestra por sí mismo qué volumen se entregó.
               </p>
             </div>
             <span className="rounded-full bg-[#e8f5ed] px-3 py-1.5 text-xs font-semibold text-[#176f5b]">Fotografía actual</span>
@@ -185,7 +185,7 @@ export default function PortalClientePage() {
                 </thead>
                 <tbody className="divide-y divide-[#e8eee9]">
                   {reporte.inventarioActual.map((stock, i) => <tr key={i}>
-                    <td className="px-4 py-3 font-medium">{stock.condicion === 'REGENERADO' ? 'Procesado / regenerado' : stock.condicion === 'SUCIO' ? 'Pendiente de regenerar' : stock.condicion.replaceAll('_', ' ')}</td>
+                    <td className="px-4 py-3 font-medium">{stock.condicion === 'REGENERADO' ? 'Regenerado' : stock.condicion === 'SUCIO' ? 'Pendiente de regenerar' : stock.condicion.replaceAll('_', ' ')}</td>
                     <td className="px-4 py-3">{stock.prensa}</td>
                     <td className="px-4 py-3">{stock.vuelta ?? 'Sin registrar'}</td>
                     <td className="px-4 py-3 font-semibold tabular-nums">{fmt(stock.saldo, 2)}</td>
@@ -201,16 +201,15 @@ export default function PortalClientePage() {
           No hay lotes de recepción con entradas acreditadas para esta selección. No se contabilizan inventarios de apertura histórica como nuevas recepciones.
         </div>}
         {actual && <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <Tarjeta titulo="Material recibido" valor={valor(actual.recibido)} detalle={String(actual.lotesRecibidos) + ' lote(s) con entrada documentada'} icono={<PackageCheck size={20}/>} color="#3176bb"/>
             <Tarjeta titulo="Humedad inicial registrada" valor={pct(actual.humedadPonderada)} detalle={String(actual.lotesMuestreados) + ' de ' + String(actual.lotesRecibidos) + ' lotes con medición; ' + fmt(actual.masaConHumedad, 2) + ' ' + actual.unidad + ' con respaldo (recepción o producción)'} icono={<Droplets size={20}/>} color="#348eaa"/>
-            <Tarjeta titulo="Material procesado" valor={valor(actual.procesado)} detalle="Consumo de los mismos lotes recibidos" icono={<Factory size={20}/>} color="#c88e37"/>
             <Tarjeta titulo="Producto liberado vinculado" valor={valor(actual.liberado)} detalle="Solo producción liberada con origen documentado" icono={<CheckCircle2 size={20}/>} color="#12836e"/>
           </section>
           <section className="grid gap-4 lg:grid-cols-[1.45fr_1fr]">
             <article className="rounded-2xl border border-[#e0e8e0] bg-white p-5 shadow-sm md:p-6">
               <h3 className="flex items-center gap-2 font-semibold"><BarChart3 size={20} className="text-[#13735c]"/> Por tipo de prensa</h3>
-              <p className="mt-1 text-xs text-slate-500">Material recibido, consumido y liberado (solo trazabilidad confirmada)</p>
+              <p className="mt-1 text-xs text-slate-500">Material recibido y liberado (solo trazabilidad confirmada)</p>
               {actual.prensas.length ? <div className="mt-6 h-[285px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={actual.prensas} barGap={3}>
@@ -220,7 +219,6 @@ export default function PortalClientePage() {
                     <Tooltip formatter={v => fmt(Number(v), 2) + ' ' + actual.unidad}/>
                     <Legend wrapperStyle={{ fontSize: 12 }}/>
                     <Bar dataKey="recibido" name="Recibido" fill="#3176bb" radius={[3,3,0,0]}/>
-                    <Bar dataKey="procesado" name="Procesado" fill="#e6a04b" radius={[3,3,0,0]}/>
                     <Bar dataKey="liberado" name="Liberado" fill="#12836e" radius={[3,3,0,0]}/>
                   </BarChart>
                 </ResponsiveContainer>
@@ -230,10 +228,8 @@ export default function PortalClientePage() {
               <h3 className="font-semibold">Indicadores de recuperación</h3>
               <p className="mt-1 text-xs text-slate-500">Balance acumulado de la cohorte de lotes recibidos</p>
               <div className="mt-7 space-y-6">
-                <div><div className="mb-2 flex justify-between text-xs"><span>Fracción recibida que se procesa</span><strong>{actual.recibido ? fmt(actual.procesado / actual.recibido * 100, 2) + ' %' : '—'}</strong></div>
-                  <div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#e6a04b]" style={{ width: String(Math.min(100, Math.max(0, actual.recibido ? actual.procesado / actual.recibido * 100 : 0))) + '%' }}/></div></div>
-                <div><div className="mb-2 flex justify-between text-xs"><span>Rendimiento liberado / procesado</span><strong>{actual.rendimiento == null ? 'No calculable' : fmt(actual.rendimiento, 2) + ' %'}</strong></div>
-                  <div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#12836e]" style={{ width: String(Math.min(100, Math.max(0, actual.rendimiento ?? 0))) + '%' }}/></div></div>
+                <div><div className="mb-2 flex justify-between text-xs"><span>Proporción liberada respecto al material recibido</span><strong>{actual.recibido ? fmt(actual.liberado / actual.recibido * 100, 2) + ' %' : '—'}</strong></div>
+                  <div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#12836e]" style={{ width: String(Math.min(100, Math.max(0, actual.recibido ? actual.liberado / actual.recibido * 100 : 0))) + '%' }}/></div></div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-[#f6f9f6] p-3"><p className="text-xs text-slate-500">Saldo de recepciones</p><p className="mt-2 text-lg font-bold">{valor(actual.saldoRecepciones)}</p></div>
                   <div className="rounded-xl bg-[#f6f9f6] p-3"><p className="text-xs text-slate-500">Liberado entregado</p><p className="mt-2 text-lg font-bold">{valor(actual.entregado)}</p></div>
@@ -253,20 +249,20 @@ export default function PortalClientePage() {
             <div className="p-5"><h3 className="font-semibold">Evidencia por lote de recepción</h3><p className="mt-1 text-xs text-slate-500">Cantidades trazadas, saldo de inventario y resultado del laboratorio inicial.</p></div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-xs">
-                <thead className="bg-[#f1f7f3] text-slate-600"><tr>{['Fecha','Recepción','Lote inventario','Prensa','Vuelta','Recibido','Procesado','Saldo','Humedad medida','Origen del análisis'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead>
+                <thead className="bg-[#f1f7f3] text-slate-600"><tr>{['Fecha','Recepción','Lote inventario','Prensa','Vuelta','Recibido','Saldo','Humedad medida','Origen del análisis'].map(h => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-[#e8eee9]">
                   {actual.lotes.map(l => <tr key={l.lote}>
                     <td className="px-4 py-3">{bonita(l.fecha)}</td>
                     <td className="px-4 py-3 font-medium">{l.recepcion}</td>
                     <td className="px-4 py-3">{l.lote}</td><td className="px-4 py-3">{l.prensa}</td><td className="px-4 py-3">{l.vuelta ?? 'Sin registrar'}</td>
-                    <td className="px-4 py-3">{fmt(l.recibido, 2)}</td><td className="px-4 py-3">{fmt(l.procesado, 2)}</td>
+                    <td className="px-4 py-3">{fmt(l.recibido, 2)}</td>
                     <td className="px-4 py-3">{fmt(l.saldo, 2)}</td>
                     <td className="px-4 py-3">{l.humedad == null ? <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-900">Sin análisis</span> : <span title={'Muestra ' + l.muestra} className="font-semibold text-[#13735c]">{pct(l.humedad)}</span>}</td>
                     <td className="px-4 py-3">{l.origenHumedad === 'INFERIDA_PRODUCCION' ?
                       <span title={'LP: ' + l.lotesProduccion.join(', ') + ' · Muestra(s): ' + l.muestra}>Producción · {fmt(l.masaConHumedad)} {l.unidad} muestreados</span> :
                       l.origenHumedad === 'DIRECTA_RECEPCION' ? <span>Recepción · muestra directa</span> : '—'}</td>
                   </tr>)}
-                  {!actual.lotes.length && <tr><td colSpan={10} className="p-8 text-center text-slate-500">No hay lotes de recepción acreditados.</td></tr>}
+                  {!actual.lotes.length && <tr><td colSpan={9} className="p-8 text-center text-slate-500">No hay lotes de recepción acreditados.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -281,7 +277,7 @@ export default function PortalClientePage() {
         </>}
         <footer className="flex items-start gap-2 rounded-xl border border-[#dce7de] bg-white p-5 text-xs leading-6 text-slate-600">
           <Info className="mt-0.5 shrink-0 text-[#13735c]" size={17}/>
-          <p><strong>Criterio de cálculo.</strong> {reporte.periodo.descripcion} La humedad es un promedio ponderado sobre la masa respaldada por análisis. Si la muestra inicial se tomó en producción, se atribuye únicamente al material consumido por ese LP cuando existe un solo lote origen, y no se presenta como humedad medida al llegar. Las aperturas históricas y los procesos sin vínculo no se suman al rendimiento. La planificación del Excel GKN se toma como referencia de diseño, no como registros transaccionales.</p>
+          <p><strong>Criterio de cálculo.</strong> {reporte.periodo.descripcion} La humedad es un promedio ponderado sobre la masa respaldada por análisis. Si la muestra inicial se tomó en producción, se atribuye únicamente al material consumido por ese LP cuando existe un solo lote origen, y no se presenta como humedad medida al llegar. Las aperturas históricas y las liberaciones sin vínculo no se suman al porcentaje de recuperación. La planificación del Excel GKN se toma como referencia de diseño, no como registros transaccionales.</p>
         </footer>
       </>}
     </div>
