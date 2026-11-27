@@ -46,7 +46,6 @@ export type GraficasGrafito = {
 const PRENSAS: PrensaGrafito[] = ['Fagor', 'Forgemaster', 'Polymaster'];
 const ETAPAS: Array<{ id: EtapaGrafito; titulo: string; descripcion: string }> = [
   { id: 'SUCIO', titulo: 'Material sucio', descripcion: 'Existencia pendiente de proceso' },
-  { id: 'PROCESANDO', titulo: 'En producción', descripcion: 'Consumo asignado a lotes activos' },
   { id: 'LIBERADO', titulo: 'Material liberado', descripcion: 'Existencia con dictamen liberado' },
 ];
 const COLORES: Record<PrensaGrafito, string> = {
@@ -212,11 +211,11 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
         kg: 0, sinVueltaKg: 0, limite: 10, excedida: false,
       }),
   })), [graficas]);
-  const totalSinVuelta = Object.values(graficas.sinVueltaKg).reduce((a, b) => a + b, 0);
-  const totalSinPrensa = Object.values(graficas.sinPrensaKg).reduce((a, b) => a + b, 0);
-  const exceso = graficas.anillosVueltas.filter(a => a.excedida);
-  const estadoColores = ['#d6a150', '#3176bb', '#16916f'];
-  const desgloseEstado = graficas.estadoActualPorPrensa.map(dato => {
+  const totalSinVuelta = ETAPAS.reduce((total, etapa) => total + (graficas.sinVueltaKg[etapa.id] ?? 0), 0);
+  const totalSinPrensa = ETAPAS.reduce((total, etapa) => total + (graficas.sinPrensaKg[etapa.id] ?? 0), 0);
+  const exceso = graficas.anillosVueltas.filter(a => a.excedida && a.etapa !== 'PROCESANDO');
+  const estadoColores: Record<string, string> = { SUCIO: '#d6a150', LIBERADO: '#16916f' };
+  const desgloseEstado = graficas.estadoActualPorPrensa.filter(dato => dato.clave !== 'PROCESANDO').map(dato => {
     const esSucio = dato.clave === 'SUCIO';
     // Se conserva el volumen total de cada barra: base (45%) + agua (55%)
     // exclusivamente en material SUCIO. Otras etapas mantienen su valor íntegro.
@@ -229,7 +228,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
     const sinPrensa = descomponer(dato.sinIdentificar);
     return {
       ...dato,
-      eje: esSucio ? 'Sucio' : dato.clave === 'PROCESANDO' ? 'En proceso' : 'Liberado',
+      eje: esSucio ? 'Sucio' : 'Liberado',
       FagorBase: fagor.equivalenteSinAguaKg,
       FagorAgua: fagor.aguaKg,
       ForgemasterBase: forgemaster.equivalenteSinAguaKg,
@@ -262,7 +261,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
           <ChartColumn size={18} className="text-[#176f5b]"/> Estado actual por prensa
         </h3>
         <p className="mt-1 text-xs leading-5 text-slate-500">
-          Sucio en inventario, consumido en lotes activos y liberado disponible, separados por tipo de prensa.
+          Material sucio y liberado disponible en inventario, separados por tipo de prensa.
         </p>
         <div className="mt-5 h-[305px] min-w-0">
           <ResponsiveContainer width="100%" height="100%">
@@ -329,10 +328,10 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
           Azul claro: 55 % de agua estimada únicamente en las barras de material sucio.
           La altura total continúa representando los kilogramos sucios registrados.
         </p>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-          {graficas.estadoActual.map((dato, i) => <div key={dato.clave}
+        <div className="mt-2 grid grid-cols-2 gap-2 text-center">
+          {graficas.estadoActual.filter(dato => dato.clave !== 'PROCESANDO').map(dato => <div key={dato.clave}
             className="min-w-0 rounded-xl bg-[#f7faf7] px-2 py-3">
-            <div className="text-[11px] font-semibold leading-4" style={{ color: estadoColores[i] }}>
+            <div className="text-[11px] font-semibold leading-4" style={{ color: estadoColores[dato.clave] }}>
               {dato.etiqueta}
             </div>
             <div className="mt-1 text-sm font-bold tabular-nums">{n(dato.kg, 2)} kg</div>
@@ -425,7 +424,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
           Límite excedido
         </div>
       </div>
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
         {porEtapa.map(etapa => <article key={etapa.id} className="flex min-w-0 flex-col rounded-2xl border border-[#e6eee8] bg-[#fcfefc] p-4 sm:p-5">
           <div className="text-sm font-bold text-[#173e35]">{etapa.titulo}</div>
           <p className="mt-1 min-h-[30px] text-xs leading-5 text-slate-500">{etapa.descripcion}</p>
@@ -463,7 +462,7 @@ export default function PortalGraficasGrafito({ graficas }: { graficas: Graficas
     </div>
     <div className="flex items-start gap-2 rounded-xl border border-[#dfe9e1] bg-white p-4 text-xs leading-6 text-slate-600">
       <Info size={17} className="mt-0.5 shrink-0 text-[#176f5b]"/>
-      <p>{graficas.alcance.estadoActual} {graficas.alcance.acumulados} {graficas.alcance.nota}
+      <p>Existencias actuales de material sucio y liberado. {graficas.alcance.acumulados} {graficas.alcance.nota}
         La vuelta de producto liberado es la registrada en su propio lote; no se incrementa
         ni se infiere automáticamente de una carga mezclada.</p>
     </div>
