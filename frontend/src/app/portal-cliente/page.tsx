@@ -108,25 +108,29 @@ export default function PortalClientePage() {
     router.replace('/');
   };
   return <main className="min-h-screen bg-[#f6f9f6] text-[#18372f]">
-    <div className="bg-[#173e35] px-5 py-9 text-white md:px-10">
-      <div className="mx-auto max-w-7xl">
+    <div className="relative isolate overflow-hidden border-b border-[#dce9df] bg-[#f7faf5] px-5 py-9 text-[#18372f] md:px-10">
+      {/* Emblema oficial EYL, sin deformar ni recortar la imagen. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-no-repeat opacity-[0.16] sm:opacity-[0.22]"
+        style={{ backgroundImage: 'url("https://cdn.prod.website-files.com/677c2b7f39d2b03d922511f4/678164f5efeffc0a91067308_EYL_Icon_oficial.png")', backgroundPosition: 'right 7% center', backgroundSize: 'auto 92%' }}/>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#f7faf5] via-[#f7faf5]/95 to-[#f7faf5]/35"/>
+      <div className="relative z-10 mx-auto max-w-7xl">
         <div className="mb-10 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-emerald-200"><Leaf size={18}/> US Technologies · Close the Loop</div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#27634a]"><Leaf size={18}/> EYL · Ecología y Lubricantes</div>
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <span className="rounded-full border border-white/25 bg-white/10 px-3 py-2">{esProduccion ? 'Vista de Producción' : 'Portal privado del cliente'}</span>
-            {esProduccion && <Link className="underline underline-offset-4" href="/tanques">Volver a Producción</Link>}
-            <button onClick={salir} className="rounded-lg border border-white/25 px-3 py-2 hover:bg-white/10">Cerrar sesión</button>
+            <span className="rounded-full border border-[#b8d1c0] bg-white/80 px-3 py-2 text-[#24583f]">{esProduccion ? 'Vista de Producción' : 'Portal privado del cliente'}</span>
+            {esProduccion && <Link className="text-[#24583f] underline underline-offset-4" href="/tanques">Volver a Producción</Link>}
+            <button onClick={salir} className="rounded-lg border border-[#b8d1c0] bg-white/80 px-3 py-2 text-[#24583f] hover:bg-white">Cerrar sesión</button>
           </div>
         </div>
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.15em] text-emerald-200">Trazabilidad y regeneración de materiales</p>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.15em] text-[#27724c]">Trazabilidad y regeneración de materiales</p>
             <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">Economía circular, con evidencia.</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-emerald-50/80">Conoce cuánto material se recibe, cuánto se procesa y qué volumen de esa misma materia prima se libera.</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-[#416457]">Conoce cuánto material sucio se recibe y cuánto material se libera, con trazabilidad de origen.</p>
           </div>
-          <div className="flex items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4">
-            <ShieldCheck size={24} className="text-emerald-200" />
-            <div><p className="text-[11px] uppercase tracking-wider text-emerald-100">Cliente</p><p className="text-sm font-semibold">{reporte?.cliente.nombre || 'Seleccionar cliente'}</p></div>
+          <div className="flex items-center gap-3 rounded-2xl border border-[#cbded0] bg-white/85 p-4 shadow-sm">
+            <ShieldCheck size={24} className="text-[#27724c]" />
+            <div><p className="text-[11px] uppercase tracking-wider text-[#527564]">Cliente</p><p className="text-sm font-semibold">{reporte?.cliente.nombre || 'Seleccionar cliente'}</p></div>
           </div>
         </div>
       </div>
